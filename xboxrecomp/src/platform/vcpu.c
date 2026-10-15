@@ -529,7 +529,10 @@ __asm__(
     "    popq %rcx\n"
     "    popq %rax\n"
     "    popfq\n"
-    "    ret\n");
+    "    ret\n"
+    ".globl vcpu_win_trampoline_end\n"
+    "vcpu_win_trampoline_end:\n");
+extern char vcpu_win_trampoline_end[];
 
 void vcpu_win_preempt_point(void)
 {
@@ -562,12 +565,25 @@ static int redirect(vcpu_thread *t)
     CONTEXT c;
     MEMORY_BASIC_INFORMATION mbi;
 
-    if (t->redirected || t->in_vcpu || *t->depth != 0)
+    if (t->in_vcpu || *t->depth != 0)
         return 0;
     memset(&c, 0, sizeof c);
     c.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
     if (!GetThreadContext(t->host, &c) || !in_image(c.Rip))
         return 0;
+    if (t->redirected) {
+        /* A redirect that is still pending has the thread inside the trampoline,
+         * before it calls vcpu_win_preempt_point (which clears the flag). If the
+         * thread is anywhere else the redirect was lost (a SetThreadContext made
+         * while the thread is dispatching an exception, as every NV2A register
+         * access is, is the likely way) and the flag would otherwise stay set for
+         * good: the thread could then never be preempted, and holds the virtual
+         * CPU against every other thread. The title's file server never runs and
+         * the title reports a damaged disc after its 10 s read timeout. */
+        if (c.Rip >= (DWORD64)vcpu_win_trampoline && c.Rip < (DWORD64)vcpu_win_trampoline_end)
+            return 0;
+        t->redirected = 0;
+    }
     if (!VirtualQuery((LPCVOID)(c.Rsp - 8), &mbi, sizeof mbi) || mbi.State != MEM_COMMIT ||
         (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
         return 0;
@@ -586,10 +602,17 @@ int vcpu_win_unredirect(void *exception_pointers)
     EXCEPTION_POINTERS *ep = exception_pointers;
     CONTEXT *c = ep->ContextRecord;
     DWORD64 at = (DWORD64)ep->ExceptionRecord->ExceptionAddress;
+    DWORD64 ret;
 
-    if (c->Rip != (DWORD64)vcpu_win_trampoline || at == c->Rip || *(DWORD64 *)c->Rsp != at)
+    if (c->Rip != (DWORD64)vcpu_win_trampoline)
         return 0;
-    c->Rip = at;
+    /* redirect() left the interrupted Rip on the stack. The fault is the guest
+     * instruction's, but the redirect can land while it is being dispatched, so
+     * the record may name the trampoline as both Rip and ExceptionAddress. */
+    ret = *(DWORD64 *)c->Rsp;
+    if (!in_image(ret) || (at != ret && at != c->Rip))
+        return 0;
+    c->Rip = ret;
     c->Rsp += 8;
     if (t_self)
         t_self->redirected = 0;
