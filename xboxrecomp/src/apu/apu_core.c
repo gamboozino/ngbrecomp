@@ -718,15 +718,25 @@ static void *mcpx_apu_frame_thread(void *arg)
          * them, 1-5 ms holes all through Ninja Gaiden Black's gameplay. On
          * the console the voice processor never stops for it; wait the trap
          * out (letting the title in to finish) rather than drop the frame.
-         * Not forever: a front end left halted still gets silent frames. */
-        for (int spins = 0; spins < 200 && !d->pause_requested &&
-                            !qatomic_read(&d->exiting); spins++) {
+         * Not forever: a front end left halted still gets silent frames.
+         * The limit is time, not turns: a turn is a 50 us sleep here but a
+         * Sleep(0) on Windows, which returns at once unless an equal-priority
+         * thread is ready, so 200 of them gave up after microseconds -- most
+         * traps outlasted that and played silence all through the fights.
+         * The longest trap seen lasts about 1.3 ms. */
+        int64_t trap_deadline_us = 0;
+        while (!d->pause_requested && !qatomic_read(&d->exiting)) {
             uint32_t fe = qatomic_read(&d->regs[NV_PAPU_FECTL]);
             if (GET_MASK(qatomic_read(&d->regs[NV_PAPU_SECTL]),
                          NV_PAPU_SECTL_XCNTMODE) == NV_PAPU_SECTL_XCNTMODE_OFF ||
                 !(fe & (NV_PAPU_FECTL_FEMETHMODE_TRAPPED |
                         NV_PAPU_FECTL_FEMETHMODE_HALTED)) ||
                 g_test_tone.active)
+                break;
+            int64_t now_us = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+            if (!trap_deadline_us)
+                trap_deadline_us = now_us + 10000;
+            else if (now_us >= trap_deadline_us)
                 break;
             mcpx_apu_dsp_ack_poll(d);
             if (d->set_irq) {
