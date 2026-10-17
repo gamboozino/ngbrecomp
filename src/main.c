@@ -994,8 +994,10 @@ int main(int argc, char **argv)
         save_dir_path(log, sizeof log - 16);
         ngb_mkdir(log);
         strcat(log, "/log.txt");
-        freopen(log, "w", stdout);
-        freopen(log, "a", stderr);
+        if (freopen(log, "w", stdout)) {
+            dup2(fileno(stdout), STDERR_FILENO);
+            setvbuf(stdout, NULL, _IOLBF, 0);
+        }
     }
 #endif
 #if defined(_WIN32)
