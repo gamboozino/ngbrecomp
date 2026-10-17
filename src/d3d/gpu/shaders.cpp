@@ -879,9 +879,21 @@ std::string PixelHlsl(const PixelKey& k) {
             if (f[0] <= 1) break;
             const TexInfo& t = k.tex[i];
             // a stage reading a texture with none bound is off, as the console's D3D sets up its combiners:
-            // the game's fades are drawn TEXTURE x TFACTOR without a texture, and show their vertex colour
-            auto reads_tex = [&](int j) { return (f[j] & 0xF) == 2; };
-            if (!t.kind && (reads_tex(1) || reads_tex(2) || reads_tex(3) || reads_tex(5) || reads_tex(6) || reads_tex(7)))
+            // the game's fades are drawn TEXTURE x TFACTOR without a texture, and show their vertex colour.
+            // Only the arguments its operations read count: a leftover TEXTURE in one SELECTARG2 ignores
+            // turned the stage, and the alpha it does compute, on and off as attacks changed that slot --
+            // windows and candles flickering (#48, found by HammerD72). Ops: 2 arg1, 3 arg2, 23-24 arg0
+            // too, 14 and 16 the texture's alpha, the rest arg1 and arg2.
+            auto reads_tex = [&](int base) {
+                uint32_t op = f[base];
+                auto is_tex = [&](int j) { return (f[base + j] & 0xF) == 2; };
+                if (op <= 1) return false;
+                if (op == 2) return is_tex(1);
+                if (op == 3) return is_tex(2);
+                if (op == 14 || op == 16) return true;
+                return is_tex(1) || is_tex(2) || ((op == 23 || op == 24) && is_tex(3));
+            };
+            if (!t.kind && (reads_tex(0) || reads_tex(4)))
                 break;
             std::string norm = (t.rect ? F(" / texsize[%d].xy", i) : "") + F(" + texsize[%d].zw", i);
             std::string uv = (k.proj >> i) & 1 ? F("(tc%d.xy / tc%d.w)%s", i, i, norm.c_str()) : F("tc%d.xy%s", i, norm.c_str());

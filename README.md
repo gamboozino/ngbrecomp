@@ -119,8 +119,9 @@ Other keys: **F10** frame-rate counter, **F11** or **Alt+Enter** fullscreen.
   automatically.
 - **Steam Deck:** do the first start (installing the game) in Desktop Mode. In Game Mode the window
   to choose your disc image cannot open, and the game closes (#11).
-- The **Ninja Gaiden arcade cabinet** in Han's bar has been reported to crash on 0.9.5 (#18); 0.9.6
-  and later may fix it.
+- The **Ninja Gaiden arcade cabinet** in Han's bar does not work: the game closes when you play it
+  (#18). The NES games are a separate program on the disc (`NinjaTrilogy.xbe`) that the Xbox switches
+  to, and only Ninja Gaiden Black itself is recompiled. Save before trying it.
 - At **21:9**, objects at the far left and right of the screen can appear a moment late (the game
   decides what to draw for a narrower view).
 - The Windows build has been tested under Proton and in a Windows 11 virtual machine; reports from

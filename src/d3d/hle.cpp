@@ -536,6 +536,8 @@ void After(int fn, Call c) {
     }
 }
 
+extern "C" [[noreturn]] void ngb_renderer_fatal(const char* detail);  // src/ingame_menu.c
+
 bool g_started;
 
 void Start() {
@@ -552,6 +554,7 @@ void Start() {
             return;
         }
         std::fprintf(stderr, "[D3D] renderer init failed\n");
+        if (!g_mirror) ngb_renderer_fatal("The renderer could not start on this GPU (details above in the log).");
     }
     std::fprintf(stderr, "[D3D] renderer on (%s)\n", g_mirror ? "mirroring the NV2A emulation" : "drawing to the window");
 }

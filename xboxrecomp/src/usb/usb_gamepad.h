@@ -55,5 +55,9 @@ extern volatile uint8_t usb_gamepad_inject;
 extern volatile uint8_t usb_gamepad_inject_analog;
 /* Nonzero: the game sees no pad input (a host menu is open). */
 extern volatile int usb_gamepad_block;
+/* Nonzero: Back+Start is the host's (it opens a host menu), so the game gets
+ * no Start while Back is held. Off, the game sees the pair, as titles that
+ * soft-reset on it expect. */
+extern volatile int usb_gamepad_back_start_host;
 
 #endif /* XBOX_USB_GAMEPAD_H */

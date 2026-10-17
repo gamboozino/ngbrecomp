@@ -120,8 +120,22 @@ static int has_xbe(const char *dir)
 static int mkdirs(const char *path)
 {
     char tmp[4096];
+    char *q = tmp + 1;
     snprintf(tmp, sizeof tmp, "%s", path);
-    for (char *q = tmp + 1; *q; q++) {
+    /* Not the drive (D:) or a share's server and name (//server/share): they are not folders to make,
+     * and on Windows making "D:" fails with an error that is not "it exists" -- an install to another
+     * drive then failed, said as "the disc image could not be read" (#14, #6) */
+    if (tmp[0] && tmp[1] == ':')
+        q = tmp + 2;
+    else if ((tmp[0] == '/' || tmp[0] == '\\') && (tmp[1] == '/' || tmp[1] == '\\')) {
+        int seps = 0;
+        for (q = tmp + 2; *q && seps < 2; q++)
+            if (*q == '/' || *q == '\\')
+                seps++;
+        if (!*q)
+            return 0;
+    }
+    for (; *q; q++) {
         if (*q != '/' && *q != '\\')
             continue;
         *q = 0;
@@ -363,8 +377,14 @@ static int extract_iso(const char *iso, const char *dest)
             im.count_only = 1;
             rc = extract_dir(&im, root, rsize, dest);
             im.count_only = 0;
-            if (rc == 0)
-                rc = mkdirs(dest) == 0 ? extract_dir(&im, root, rsize, dest) : -1;
+            if (rc == 0) {
+                if (mkdirs(dest) != 0) {
+                    fail("Cannot create the folder %s: %s", dest, strerror(errno));
+                    rc = -1;
+                } else {
+                    rc = extract_dir(&im, root, rsize, dest);
+                }
+            }
             if (rc != 0 && !s_err[0])
                 fail("The disc image could not be read.");
             if (rc == 0)

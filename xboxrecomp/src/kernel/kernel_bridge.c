@@ -2637,6 +2637,23 @@ static DWORD WINAPI kernel_timer_thread(LPVOID unused)
             while (g_recomp_capture_busy)
                 WaitForSingleObject(g_irq_event, 5);
         }
+        /* Not while a guest thread holds DISPATCH_LEVEL or above: raising IRQL is how the title keeps
+         * ISRs and DPCs out of a structure it is editing -- XAPI's controller requests, among others --
+         * and this thread preempts it through the virtual CPU regardless. Run in the middle of such an
+         * edit, the USB DPC lost a request's completion now and then, and the game, waiting on it, never
+         * sent rumble again (#15). Held off a millisecond at a time, at most 80 ms: real hardware is never
+         * masked that long, and a raise never lowered must not stop every device. */
+        {
+            static int held;
+            extern int xbox_IrqlBlocksInterrupts(void);
+            if (xbox_IrqlBlocksInterrupts() && held < 80) {
+                held++;
+                WaitForSingleObject(g_irq_event, 1);
+                SetEvent(g_irq_event);   /* the line that woke us is still up: come back */
+                continue;
+            }
+            held = 0;
+        }
         kernel_service_interrupts();
         kernel_vblank_tick();  /* the GPU's frame clock */
         kernel_drain_dpcs();   /* deferred work, before due timers */

@@ -569,6 +569,7 @@ static void inject_analog(int pad, uint8_t *out)
             out[4 + i] = 0xFF;
 }
 volatile int usb_gamepad_block;
+volatile int usb_gamepad_back_start_host;
 
 int usb_gamepad_report(int pad, uint8_t *out, int max)
 {
@@ -638,7 +639,7 @@ int usb_gamepad_report(int pad, uint8_t *out, int max)
         return 20;
     }
     /* Back held: Start is the host's (Back+Start opens its menu). */
-    if (g->wButtons & XBOX_GAMEPAD_BACK)
+    if (usb_gamepad_back_start_host && (g->wButtons & XBOX_GAMEPAD_BACK))
         state.Gamepad.wButtons &= ~XBOX_GAMEPAD_START;
     out[2] = (uint8_t)((g->wButtons & 0xFF) | synth);
     out[3] = (uint8_t)((g->wButtons >> 8) & 0xFF);

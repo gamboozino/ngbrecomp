@@ -257,8 +257,10 @@ static uint32_t s_tab_prev, s_tab_rbit;
 static int f1_menu(void)
 {
     static int on = -1;
-    if (on < 0)
+    if (on < 0) {
         on = getenv("NGB_F1_MENU") != NULL;
+        usb_gamepad_back_start_host = on;   /* else Start+Back is the game's soft reset (#38) */
+    }
     return on;
 }
 static uint64_t s_tab_rat;
@@ -485,7 +487,25 @@ static void quiet_signals(void)
 }
 #endif
 
+/* Return to Main Menu: the game's own soft reset, Start+Back held (a second does it, 300 ms does
+ * not), then Start at the title as after a restart. The same process, so on Windows the window
+ * keeps the focus, which a new process could not take (#38). Starting the program again is left
+ * for when no title comes. */
+static volatile uint64_t s_soft_reset_at;   /* asked for at; 0 none */
+static void to_menu_arm(void);
+static void restart_program(void);
+
 void ngb_restart_to_menu(void)
+{
+    s_tab_focus = 0;                        /* the pad back to the game, as Return to Game does */
+    s_wait_release = false;
+    usb_gamepad_block = 0;
+    to_menu_arm();
+    fprintf(stderr, "[MENU] Return to Main Menu: Start+Back\n");
+    __atomic_store_n(&s_soft_reset_at, mono_ms(), __ATOMIC_RELEASE);
+}
+
+static void restart_program(void)
 {
 #if !defined(_WIN32)
     char self[4096];
@@ -539,25 +559,60 @@ void ngb_title_seen(void)
     s_title_at = mono_ms();
 }
 
+/* Holds Start+Back for the reset; the title not up 8 s on, the program starts again. */
+static void soft_reset_tick(void)
+{
+    const uint8_t combo = XBOX_GAMEPAD_START | XBOX_GAMEPAD_BACK;
+    static int held;
+    uint64_t at = __atomic_load_n(&s_soft_reset_at, __ATOMIC_ACQUIRE), now = mono_ms();
+    if (!at)
+        return;
+    if (now - at < 1500) {
+        __atomic_or_fetch(&usb_gamepad_inject, combo, __ATOMIC_RELEASE);
+        held = 1;
+        return;
+    }
+    if (held) {
+        __atomic_and_fetch(&usb_gamepad_inject, (uint8_t)~combo, __ATOMIC_RELEASE);
+        held = 0;
+    }
+    if (s_title_at > at) {
+        s_soft_reset_at = 0;
+    } else if (now - at > 8000) {
+        s_soft_reset_at = 0;
+        fprintf(stderr, "[MENU] Return to Main Menu: no title after Start+Back\n");
+        restart_program();
+    }
+}
+
+static int s_to_menu = -1;
+static uint64_t s_to_menu_start, s_to_menu_next;
+
+static void to_menu_arm(void)
+{
+    s_main_menu_seen = 0;
+    s_to_menu_start = s_to_menu_next = mono_ms();
+    s_to_menu = 1;
+}
+
 static void to_menu_tick(void)
 {
-    static int on = -1;
-    static uint64_t start, next;
-    if (on < 0) {
-        on = getenv("NGB_TO_MAIN_MENU") != NULL;
-        start = mono_ms();
-        next = start;
+    if (s_to_menu < 0) {
+        s_to_menu = 0;
+        if (getenv("NGB_TO_MAIN_MENU"))
+            to_menu_arm();
         unsetenv("NGB_TO_MAIN_MENU");
     }
-    if (!on || s_main_menu_seen)
+    soft_reset_tick();
+    if (!s_to_menu || s_main_menu_seen)
         return;
     uint64_t now = mono_ms();
-    if (now - start > 60000) {
-        on = 0;
+    if (now - s_to_menu_start > 60000) {
+        s_to_menu = 0;
         return;
     }
-    if (now >= next && now - s_title_at < 200) {
-        next = now + 3000;
+    if (now >= s_to_menu_next && now - s_title_at < 200) {
+        s_to_menu_next = now + 3000;
         pulse_push(XBOX_GAMEPAD_START);
         fprintf(stderr, "[MENU] Return to Main Menu: Start at the title\n");
     }
@@ -1631,4 +1686,21 @@ bool nv2a_overlay_frame(uint32_t *px, int w, int h, const uint32_t *backdrop)
     (void)s_glyph_off_ready;
     draw(backdrop);
     return s_open;
+}
+
+/* The renderer cannot run on this system (src/d3d): said in a message box, then the program ends. xemu's
+ * GPU model drawing instead (NGB_RENDERER=xemu) is for debugging only -- as a silent fallback it ran the
+ * game far slower than the player had any way to know why (#47). */
+_Noreturn void ngb_renderer_fatal(const char *detail)
+{
+    char msg[1024];
+    snprintf(msg, sizeof msg,
+             "Ninja Gaiden Black needs a GPU and driver with Vulkan 1.3 (dynamic rendering and push "
+             "descriptors), and this system does not offer it:\n\n%s\n\n"
+             "Please update your graphics driver. GPUs from before about 2016 (for example Nvidia's "
+             "GTX 600 and 700 series) are not supported.", detail);
+    fprintf(stderr, "[D3D] %s\n", msg);
+    fflush(stderr);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Ninja Gaiden Black", msg, NULL);
+    exit(1);
 }
