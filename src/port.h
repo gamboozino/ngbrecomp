@@ -1,5 +1,5 @@
 /*
- * port.h -- the few host calls that differ between Linux and Windows, for the hand-written code.
+ * port.h -- the few host calls that differ between hosts, for the hand-written code.
  *
  * ngb_mkdir: make a directory (0 on success). ngb_exe_path: the running program's path, with '/'
  * separators (its length, or -1). ngb_home: the user's home ($HOME; on Windows %USERPROFILE%, else $HOME).
@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -64,6 +65,63 @@ static inline int unsetenv(const char *name) { return _putenv_s(name, ""); }
 
 #endif
 
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <mach-o/dyld.h>
+#include <sys/stat.h>
+#include <unistd.h>
+static inline int ngb_mkdir(const char *path) { return mkdir(path, 0755); }
+static inline long ngb_exe_path(char *out, size_t n)
+{
+    uint32_t size = (uint32_t)n;
+    return _NSGetExecutablePath(out, &size) == 0 ? (long)strlen(out) : -1;
+}
+static inline const char *ngb_home(void) { return getenv("HOME"); }
+
+static inline void ngb_macos_dir(char *out, size_t n, const char *name, int make)
+{
+    const char *home = ngb_home();
+    snprintf(out, n, "%s/Library/Application Support/NinjaGaidenBlack", home ? home : ".");
+    if (make)
+        ngb_mkdir(out);
+    size_t len = strlen(out);
+    snprintf(out + len, n - len, "/%s", name);
+    if (make)
+        ngb_mkdir(out);
+}
+
+static inline int ngb_mem_read(const void *addr, void *dst, size_t len)
+{
+    mach_vm_size_t done = 0;
+    return mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)addr, len,
+                                  (mach_vm_address_t)dst, &done) == KERN_SUCCESS
+        && done == len;
+}
+static inline int ngb_mem_write(void *addr, const void *src, size_t len)
+{
+    mach_vm_address_t region = (mach_vm_address_t)addr;
+    mach_vm_size_t span = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    if (mach_vm_region(mach_task_self(), &region, &span, VM_REGION_BASIC_INFO_64,
+                       (vm_region_info_t)&info, &count, &object) != KERN_SUCCESS)
+        return 0;
+    if (object)
+        mach_port_deallocate(mach_task_self(), object);
+    if ((mach_vm_address_t)addr < region || (mach_vm_address_t)addr + len > region + span)
+        return 0;
+    if (!(info.protection & VM_PROT_WRITE) &&
+        mach_vm_protect(mach_task_self(), (mach_vm_address_t)addr, len, FALSE,
+                        info.protection | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
+        return 0;
+    int ok = mach_vm_write(mach_task_self(), (mach_vm_address_t)addr, (vm_offset_t)src,
+                           (mach_msg_type_number_t)len) == KERN_SUCCESS;
+    if (!(info.protection & VM_PROT_WRITE))
+        mach_vm_protect(mach_task_self(), (mach_vm_address_t)addr, len, FALSE, info.protection);
+    return ok;
+}
 #else /* Linux */
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -101,8 +159,6 @@ static inline int ngb_mem_read(const void *addr, void *dst, size_t len)
 }
 #endif
 
-#include <stdio.h>
-
 /* The settings' folder, made if make: $XDG_CONFIG_HOME or ~/.config, on Windows %APPDATA%, then
  * NinjaGaidenBlack. */
 static inline void ngb_config_dir(char *out, size_t n, int make)
@@ -126,11 +182,15 @@ static inline void ngb_config_dir(char *out, size_t n, int make)
     if (xdg && *xdg) {
         snprintf(out, n, "%s/NinjaGaidenBlack", xdg);
     } else {
+#ifdef __APPLE__
+        ngb_macos_dir(out, n, "config", make);
+#else
         const char *home = ngb_home();
         snprintf(out, n, "%s/.config", home ? home : ".");
         if (make)
             ngb_mkdir(out);
         snprintf(out, n, "%s/.config/NinjaGaidenBlack", home ? home : ".");
+#endif
     }
     if (make)
         ngb_mkdir(out);

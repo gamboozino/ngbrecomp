@@ -920,6 +920,15 @@ int ngb_portable_base(char *dir, size_t n)
     if (!(slash = strrchr(dir, '/')))
         return 0;
     *slash = 0;
+#ifdef __APPLE__
+    const char *bundle = strstr(dir, ".app/Contents/MacOS");
+    if (bundle && !bundle[strlen(".app/Contents/MacOS")]) {
+        dir[bundle - dir + 4] = 0;
+        if (!(slash = strrchr(dir, '/')))
+            return 0;
+        *slash = 0;
+    }
+#endif
     return 1;
 }
 

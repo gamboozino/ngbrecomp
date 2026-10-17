@@ -548,6 +548,12 @@ bool VulkanBackend::CreateInstance() {
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ci.pApplicationInfo = &app;
+#ifdef __APPLE__
+    const char *extensions[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
+    ci.enabledExtensionCount = 1;
+    ci.ppEnabledExtensionNames = extensions;
+    ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     VKCHECK(vkCreateInstance(&ci, nullptr, &inst_));
     // the instance functions: shared with the NV2A renderer's when it has loaded them (loader
     // trampolines, good for either instance), else ours
@@ -592,12 +598,16 @@ bool VulkanBackend::CreateDevice() {
     f2.features.samplerAnisotropy = VK_TRUE;
     f2.features.fillModeNonSolid = VK_TRUE;
     f2.features.textureCompressionBC = VK_TRUE;
-    const char* exts[] = {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
+    const char* exts[] = {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+#ifdef __APPLE__
+                          "VK_KHR_portability_subset",
+#endif
+    };
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     dci.pNext = &f2;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    dci.enabledExtensionCount = 1;
+    dci.enabledExtensionCount = sizeof(exts) / sizeof(exts[0]);
     dci.ppEnabledExtensionNames = exts;
     VKCHECK(vkCreateDevice(phys_, &dci, nullptr, &dev_));
     volkLoadDeviceTable(&d_, dev_);

@@ -48,7 +48,7 @@ public:
         icon->setPixmap(QPixmap(":/ngb.png").scaled(72, 72, Qt::KeepAspectRatio,
                                                     Qt::SmoothTransformation));
         auto *title = new QLabel("<b style='font-size:15pt'>Ninja Gaiden Black</b><br>"
-                                 "Static recompilation for Linux");
+                                 "Static recompilation");
         auto *head = new QHBoxLayout;
         head->addWidget(icon);
         head->addSpacing(8);

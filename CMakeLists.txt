@@ -3,11 +3,14 @@ cmake_minimum_required(VERSION 3.20)
 # ============================================================================
 # Ninja Gaiden Black - static recompilation (xboxrecomp)
 #
-# Native Linux (x86-64) and Windows builds. The generated code comes from the
+# Native Linux (x86-64), Windows and macOS (arm64) builds. The generated code comes from the
 # xboxrecomp pipeline (see README.md); it is not checked in.
 # ============================================================================
 
 project(ninja_gaiden_black C CXX)
+if(APPLE AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+    message(FATAL_ERROR "The macOS port currently supports Apple Silicon only")
+endif()
 if(WIN32)
     enable_language(RC)   # the program's icon (packaging/windows/ngb.rc)
 endif()   # CXX: the GPU renderer links VMA
@@ -144,6 +147,9 @@ endif()
 # ── The Direct3D renderer (docs/renderer.md, src/d3d/NOTICE) ────
 
 if(NGB_NV2A_VK)
+    if(APPLE)
+        find_package(glslang CONFIG REQUIRED)
+    endif()
     set(XRTP ${XBOXRECOMP_DIR}/third_party)
     add_library(ngb_d3d OBJECT
         src/d3d/hle.cpp
@@ -158,6 +164,9 @@ if(NGB_NV2A_VK)
         ${XRTP}/Vulkan-Headers/include ${XRTP}/volk ${XRTP}/VulkanMemoryAllocator/include)
     target_compile_definitions(ngb_d3d PRIVATE VK_NO_PROTOTYPES
         VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
+    if(APPLE)
+        target_link_libraries(ngb_d3d PRIVATE glslang::glslang glslang::glslang-default-resource-limits)
+    endif()
     target_compile_features(ngb_d3d PRIVATE cxx_std_20)
     target_compile_options(ngb_d3d PRIVATE -O2 -fno-strict-aliasing)
 endif()

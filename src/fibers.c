@@ -32,6 +32,9 @@
 #include <windows.h>   /* the host contexts are Windows fibers */
 #else
 #include <sys/mman.h>
+#ifndef MAP_STACK
+#define MAP_STACK 0
+#endif
 #endif
 
 #include "recomp/gen/recomp_types.h"
@@ -54,7 +57,27 @@ typedef struct HostFiber {
 static HostFiber s_fibers[MAX_FIBERS];
 static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 
-#ifndef _WIN32
+#if defined(__APPLE__) && defined(__aarch64__)
+/* AAPCS64: x19..x30, d8..d15, floating-point control and status. */
+__asm__(
+    ".text\n.p2align 2\n.globl _ngb_ctx_switch\n_ngb_ctx_switch:\n"
+    "sub sp, sp, #176\n"
+    "stp x19, x20, [sp, #0]\nstp x21, x22, [sp, #16]\n"
+    "stp x23, x24, [sp, #32]\nstp x25, x26, [sp, #48]\n"
+    "stp x27, x28, [sp, #64]\nstp x29, x30, [sp, #80]\n"
+    "stp d8, d9, [sp, #96]\nstp d10, d11, [sp, #112]\n"
+    "stp d12, d13, [sp, #128]\nstp d14, d15, [sp, #144]\n"
+    "mrs x9, fpcr\nmrs x10, fpsr\nstp x9, x10, [sp, #160]\n"
+    "mov x9, sp\nstr x9, [x0]\nmov sp, x1\n"
+    "ldp x19, x20, [sp, #0]\nldp x21, x22, [sp, #16]\n"
+    "ldp x23, x24, [sp, #32]\nldp x25, x26, [sp, #48]\n"
+    "ldp x27, x28, [sp, #64]\nldp x29, x30, [sp, #80]\n"
+    "ldp d8, d9, [sp, #96]\nldp d10, d11, [sp, #112]\n"
+    "ldp d12, d13, [sp, #128]\nldp d14, d15, [sp, #144]\n"
+    "ldp x9, x10, [sp, #160]\nmsr fpcr, x9\nmsr fpsr, x10\n"
+    "add sp, sp, #176\nret\n");
+void ngb_ctx_switch(void **save, void *load);
+#elif !defined(_WIN32)
 /* x86-64 SysV: save the callee-saved registers and the stack pointer, load
  * the other context's. A context that has never run starts in
  * fiber_host_entry via the return address planted below its stack top. */
@@ -169,6 +192,11 @@ static void fiber_prepare(HostFiber *f)
         fprintf(stderr, "[FIBER] no host stack for fiber 0x%08X\n", f->guest);
         abort();
     }
+#ifdef __APPLE__
+    sp = (uint64_t *)((char *)f->stack + HOST_FIBER_STACK - 176);
+    memset(sp, 0, 176);
+    sp[11] = (uint64_t)(uintptr_t)fiber_host_entry;
+#else
     sp = (uint64_t *)((char *)f->stack + HOST_FIBER_STACK);
     *--sp = 0;                                  /* alignment / fake return */
     *--sp = (uint64_t)(uintptr_t)fiber_host_entry;  /* ngb_ctx_switch's ret */
@@ -177,6 +205,7 @@ static void fiber_prepare(HostFiber *f)
     *--sp = 0;                                  /* mxcsr + x87 cw slot */
     ((uint32_t *)sp)[0] = 0x1F80;               /* default MXCSR */
     ((uint16_t *)sp)[2] = 0x037F;               /* default x87 control */
+#endif
     f->host_sp = sp;
 }
 

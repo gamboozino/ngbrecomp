@@ -38,7 +38,7 @@
 #include "platform/vcpu.h"
 #endif
 #include <stdio.h>
-#if !defined(_WIN32)
+#ifdef __linux__
 #include <sys/prctl.h>
 #endif
 #include <stdlib.h>
@@ -277,6 +277,10 @@ static void watch_arm(void)
     char *end;
     if (!e || !*e)
         return;
+#if defined(__APPLE__) && defined(__aarch64__)
+    fprintf(stderr, "NGB_WATCH_WRITE requires x86 single-step support\n");
+    return;
+#endif
     s_watch_va = (uint32_t)strtoul(e, &end, 0);
     s_watch_len = *end == ':' ? (uint32_t)strtoul(end + 1, NULL, 0) : 4;
     s_watch_page = s_watch_va & ~0xFFFu;
@@ -394,6 +398,12 @@ static void sample_on_signal(int sig, siginfo_t *si, void *uc)
     int n;
 
     (void)uc;
+#ifdef __APPLE__
+    if (!pthread_equal(pthread_self(), s_guest_thread)) {
+        pthread_kill(s_guest_thread, sig);
+        return;
+    }
+#else
     if (si->si_code == SI_USER) {
         /* One at a time, so the backtraces do not interleave. */
         static sem_t done;
@@ -462,6 +472,7 @@ static void sample_on_signal(int sig, siginfo_t *si, void *uc)
         }
         return;
     }
+#endif
     n = backtrace(frames, 48);
     fprintf(stderr, "[SAMPLE] %s thread %lx prio %d%s: esp=%08X eax=%08X ecx=%08X "
                     "edx=%08X ebx=%08X esi=%08X edi=%08X\n",
@@ -480,7 +491,11 @@ static void sample_on_signal(int sig, siginfo_t *si, void *uc)
 
 #if !defined(_WIN32)
 #include <sys/time.h>
+#ifdef __APPLE__
+#include <sys/ucontext.h>
+#else
 #include <ucontext.h>
+#endif
 /* NGB_PROFILE=1: sample the instruction pointer of whichever thread is using
  * CPU every millisecond of process CPU time, and print the hottest functions
  * (every lifted guest function is a named symbol) when the process ends. */
@@ -494,7 +509,11 @@ static void prof_signal(int sig, siginfo_t *si, void *uc_)
     unsigned long i = __atomic_fetch_add(&s_prof_n, 1, __ATOMIC_RELAXED);
     (void)sig; (void)si;
     if (i < PROF_SLOTS)
+#if defined(__APPLE__) && defined(__aarch64__)
+        s_prof_pc[i] = uc->uc_mcontext->__ss.__pc;
+#else
         s_prof_pc[i] = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+#endif
 }
 
 typedef struct { const char *name; unsigned long n; } ProfEntry;
@@ -584,7 +603,11 @@ static void save_dir_path(char *out, size_t n)
     if (xdg && *xdg)
         snprintf(out, n, "%s/NinjaGaidenBlack", xdg);
     else
+#ifdef __APPLE__
+        ngb_macos_dir(out, n, "saves", 1);
+#else
         snprintf(out, n, "%s/.local/share/NinjaGaidenBlack", home && *home ? home : ".");
+#endif
 #endif
 }
 
@@ -965,6 +988,16 @@ static void portable_init(void)
 int main(int argc, char **argv)
 {
     portable_init();   /* before anything picks a folder (the log's, first) */
+#ifdef __APPLE__
+    if (!getenv("NGB_TEST_HIDDEN") && !isatty(STDOUT_FILENO)) {
+        char log[4200];
+        save_dir_path(log, sizeof log - 16);
+        ngb_mkdir(log);
+        strcat(log, "/log.txt");
+        freopen(log, "w", stdout);
+        freopen(log, "a", stderr);
+    }
+#endif
 #if defined(_WIN32)
     /* Sleeps and waits to the millisecond, not the 15.6 ms default tick: the
      * virtual CPU's time slices, the kernel's timers and the frame pacing
@@ -995,8 +1028,10 @@ int main(int argc, char **argv)
 #else
     /* NGB_PTRACE_ANY=1: let any process of this user attach a debugger
      * (Yama's ptrace_scope 1 allows only ancestors), for stack dumps. */
+#ifdef __linux__
     if (getenv("NGB_PTRACE_ANY"))
         prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
+#endif
 #endif
     /* --settings: show the settings screen before the game (the settings
      * are in the game's own menus; there is no screen otherwise). */
@@ -1100,9 +1135,14 @@ int main(int argc, char **argv)
 #endif
             if (xdg && *xdg)
                 snprintf(dir, sizeof dir, "%s/NinjaGaidenBlack/shaders", xdg);
-            else if (home && *home)
+            else if (home && *home) {
+#ifdef __APPLE__
+                ngb_macos_dir(dir, sizeof dir - 32, "cache", 1);
+                strcat(dir, "/NinjaGaidenBlack/shaders");
+#else
                 snprintf(dir, sizeof dir, "%s/.cache/NinjaGaidenBlack/shaders", home);
-            else
+#endif
+            } else
                 dir[0] = 0;
             if (dir[0])
                 setenv("NV2A_SHADER_CACHE", dir, 1);
