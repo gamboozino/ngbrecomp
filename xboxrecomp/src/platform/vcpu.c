@@ -45,7 +45,11 @@ void compat_park_if_pending(void);
  * depend on it. */
 #define VCPU_STARVE_MS   (vcpu_starve_ms())
 #if !defined(_WIN32)
-#define SIG_PREEMPT      (SIGRTMIN + 4)
+#ifdef __APPLE__
+#define SIG_PREEMPT SIGVTALRM
+#else
+#define SIG_PREEMPT (SIGRTMIN + 4)
+#endif
 #endif
 
 struct vcpu_thread {
@@ -177,6 +181,14 @@ static void dispatch(void)
 
 static void request_preempt(vcpu_thread *h)
 {
+#ifdef __APPLE__
+    /* A prior signal may have landed in libc and deferred. Do not leave a
+     * guest spin loop holding the CPU forever with preempt already set. */
+    if (h && h->preempt && !pthread_equal(h->thread, pthread_self())) {
+        pthread_kill(h->thread, SIG_PREEMPT);
+        return;
+    }
+#endif
 #if defined(_WIN32)
     /* Asked again while a preemption is pending but the thread was never
      * sent through the trampoline: try again. A redirect fails while the
@@ -253,12 +265,29 @@ static void yield_now(vcpu_thread *t)
 }
 
 #if !defined(_WIN32)
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#include <sys/ucontext.h>
+static uintptr_t s_text_lo, s_text_hi;
+static void preempt_signal(int sig, siginfo_t *si, void *opaque)
+#else
 static void preempt_signal(int sig)
+#endif
 {
     vcpu_thread *t = t_self;
     int saved = errno;
 
     (void)sig;
+#ifdef __APPLE__
+    (void)si;
+    uintptr_t pc = ((ucontext_t *)opaque)->uc_mcontext->__ss.__pc;
+    /* Darwin libc uses locks even in getenv. Yielding while it holds one
+     * can strand the next guest thread in that same lock. Retry next quantum
+     * when the interrupted PC is back in the executable. */
+    if (pc < s_text_lo || pc >= s_text_hi)
+        return;
+#endif
     if (t && !t->in_vcpu && compat_host_depth() == 0) {
         yield_now(t);
         /* A suspension that arrived while this thread waited for the CPU
@@ -299,8 +328,17 @@ static void vcpu_init_once(void)
     struct sigaction sa;
 
     memset(&sa, 0, sizeof(sa));
+#ifdef __APPLE__
+    unsigned long text_size = 0;
+    const uint8_t *text = getsegmentdata((const struct mach_header_64 *)_dyld_get_image_header(0), "__TEXT", &text_size);
+    s_text_lo = (uintptr_t)text;
+    s_text_hi = s_text_lo + text_size;
+    sa.sa_sigaction = preempt_signal;
+    sa.sa_flags = SA_RESTART | SA_SIGINFO;
+#else
     sa.sa_handler = preempt_signal;
     sa.sa_flags = SA_RESTART;
+#endif
     sigemptyset(&sa.sa_mask);
     sigaction(SIG_PREEMPT, &sa, NULL);
 #else

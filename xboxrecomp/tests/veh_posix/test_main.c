@@ -80,6 +80,7 @@ int main(void)
     reg[1] = 7;                                  /* C7: imm write */
     CHECK(s_writes == 2 && s_last_write == 7 && s_last_write_off == 0x104);
 
+#if defined(__x86_64__)
     /* Step a real store through the unprotected page, then re-trap it. */
     s_step_armed = 1;
     reg[2] = 0xAB;
@@ -110,6 +111,7 @@ int main(void)
         CHECK(x == (0xFFFF0F00u & 0xC0DE0100u));
     }
 
+#endif
     printf("veh_posix_test: OK (%d reads, %d writes, %d steps)\n",
            s_reads, s_writes, s_steps);
     return 0;

@@ -27,6 +27,9 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#ifndef CLOCK_MONOTONIC_COARSE
+#define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC
+#endif
 #ifdef _WIN32
 #include <windows.h>
 /* The page protections as Windows has them (no write-only, as POSIX has none either). */
@@ -39,9 +42,6 @@ static void mprotect(void *addr, size_t len, int prot)
     VirtualProtect(addr, len, prot == PROT_NONE ? PAGE_NOACCESS : (prot & PROT_WRITE) ? PAGE_READWRITE : PAGE_READONLY,
                    &old);
 }
-#ifndef CLOCK_MONOTONIC_COARSE
-#define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC
-#endif
 #else
 #include <sys/mman.h>
 #endif
@@ -103,7 +103,11 @@ static inline void dirty_lock(void)
 {
     while (__atomic_exchange_n(&s_lock, 1, __ATOMIC_ACQUIRE))
         while (__atomic_load_n(&s_lock, __ATOMIC_RELAXED))
+#if defined(__aarch64__)
+            __asm__ volatile("yield");
+#else
             __builtin_ia32_pause();
+#endif
 }
 static inline void dirty_unlock(void)
 {
@@ -272,8 +276,14 @@ static void protect_changed(void *host, size_t len)
 
 void nv2a_dirty_init(void *base, size_t size, void *alias, size_t alias_size)
 {
+#ifdef __APPLE__
+    /* Guest 4 KB pages share 16 KB host pages. Keep conservative dirty answers
+     * until the protection tracker groups pages at the host granularity. */
+    s_enabled = 0;
+#else
     const char *e = getenv("NV2A_DIRTY_TRACK");
     s_enabled = !(e && *e == '0');
+#endif
     if (!s_enabled)
         return;
     s_base = base;

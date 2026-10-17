@@ -65,7 +65,7 @@ target_include_directories(xbox_nv2a_vk
             ${TP}/xxHash
             ${TP}/stb)
 target_compile_definitions(xbox_nv2a_vk PRIVATE
-    VK_NO_PROTOTYPES $<$<NOT:$<PLATFORM_ID:Windows>>:VK_USE_PLATFORM_XLIB_KHR VK_USE_PLATFORM_WAYLAND_KHR>
+    VK_NO_PROTOTYPES $<$<PLATFORM_ID:Linux>:VK_USE_PLATFORM_XLIB_KHR VK_USE_PLATFORM_WAYLAND_KHR>
     VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=0
     XXH_INLINE_ALL _GNU_SOURCE)
 target_compile_options(xbox_nv2a_vk PRIVATE

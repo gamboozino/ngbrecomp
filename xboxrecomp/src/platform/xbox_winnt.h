@@ -31,10 +31,10 @@
 #define XBOX_THREAD_LOCAL __thread
 #endif
 
-/* Vectored exception handlers with an x86-64 CONTEXT: native on Windows,
- * emulated over sigaction on Linux x86-64 (win32_compat.c). Code that traps
+/* Vectored exception handlers: native on Windows, emulated over sigaction
+ * on Linux x86-64 and macOS arm64 (win32_compat.c). Code that traps
  * device registers by faulting on them needs this, not Win32 as such. */
-#if defined(_WIN32) || (defined(__linux__) && defined(__x86_64__))
+#if defined(_WIN32) || (defined(__linux__) && defined(__x86_64__)) || (defined(__APPLE__) && defined(__aarch64__))
 #define RECOMP_HAS_VEH 1
 #else
 #define RECOMP_HAS_VEH 0
@@ -168,6 +168,9 @@ typedef struct _CONTEXT {
     uint64_t R8, R9, R10, R11, R12, R13, R14, R15;
     uint64_t Rip;
     uint32_t EFlags;
+#if defined(__APPLE__) && defined(__aarch64__)
+    void *native_context;
+#endif
 } CONTEXT, *PCONTEXT;
 
 /* Xbox/UTF-16 wide char is 16-bit, unlike the 32-bit Linux wchar_t. */

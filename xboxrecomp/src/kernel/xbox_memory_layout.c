@@ -439,6 +439,19 @@ static void ac97_clear_reset_bits(void)
     }
 }
 
+#if defined(__APPLE__) && defined(__aarch64__)
+#include "../platform/mmio_decode.h"
+static uint64_t ac97_mac_rd(void *d, uint32_t off, int size)
+{
+    uint64_t v = 0;
+    memcpy(&v, (char *)d + off, size);
+    return v;
+}
+static void ac97_mac_wr(void *d, uint32_t off, uint64_t v, int size)
+{
+    memcpy((char *)d + off, &v, size);
+}
+#endif
 static LONG CALLBACK ac97_write_veh(PEXCEPTION_POINTERS ep)
 {
     DWORD code = ep->ExceptionRecord->ExceptionCode;
@@ -472,8 +485,17 @@ static LONG CALLBACK ac97_write_veh(PEXCEPTION_POINTERS ep)
             if (!VirtualProtect(g_ac97_page, AC97_TRAP_BYTES,
                                 PAGE_READWRITE, &old))
                 return EXCEPTION_CONTINUE_SEARCH;
+#if defined(__APPLE__) && defined(__aarch64__)
+            int ok = mmio_emulate(ep->ContextRecord, (uint32_t)(fault - (uintptr_t)g_ac97_page),
+                                  g_ac97_page, ac97_mac_rd, ac97_mac_wr);
+            ac97_clear_reset_bits();
+            VirtualProtect(g_ac97_page, AC97_TRAP_BYTES, PAGE_READONLY, &old);
+            if (!ok)
+                return EXCEPTION_CONTINUE_SEARCH;
+#else
             s_ac97_stepping = 1;
             ep->ContextRecord->EFlags |= 0x100u;   /* TF: step the write */
+#endif
             return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
@@ -1595,6 +1617,10 @@ void xbox_WatchInit(void)
     if (!spec || !*spec || g_memory_base == NULL || g_watch_page)
         return;
 
+#if defined(__APPLE__) && defined(__aarch64__)
+    fprintf(stderr, "RECOMP_WATCH requires x86 single-step support\n");
+    return;
+#endif
     for (q = spec; *q == '['; q++)
         g_watch_derefs++;
     g_watch_root = (uint32_t)strtoul(q, &endp, 0);
