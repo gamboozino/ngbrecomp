@@ -228,6 +228,11 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
         }
     }
 
+#ifdef __APPLE__
+    add_extension_if_available(available_extensions, enabled_extension_names,
+                               VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
+
     if (enabled_extension_names->len > 0) {
         fprintf(stderr, "Enabled instance extensions:\n");
         for (int i = 0; i < enabled_extension_names->len; i++) {
@@ -239,6 +244,9 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
     VkInstanceCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
+#ifdef __APPLE__
+        .flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+#endif
         .enabledExtensionCount = enabled_extension_names->len,
         .ppEnabledExtensionNames =
             &g_array_index(enabled_extension_names, const char *, 0),
@@ -517,6 +525,9 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
 
     add_optional_device_extension_names(pg, available_extensions,
                                         enabled_extension_names);
+#ifdef __APPLE__
+    add_extension_if_available(available_extensions, enabled_extension_names, "VK_KHR_portability_subset");
+#endif
 
     fprintf(stderr, "Enabled device extensions:\n");
     for (int i = 0; i < enabled_extension_names->len; i++) {
@@ -564,9 +575,15 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         // clang-format on
     };
 
+    bool require_draw_features = true;
+#ifdef __APPLE__
+    const char *renderer = getenv("NGB_RENDERER");
+    require_draw_features = !renderer || strcmp(renderer, "d3d")
+                         || getenv("NGB_D3D_KEEP_NV2A");
+#endif
     bool all_required_features_available = true;
     for (int i = 0; i < ARRAY_SIZE(desired_features); i++) {
-        if (desired_features[i].required &&
+        if (desired_features[i].required && require_draw_features &&
             desired_features[i].available != VK_TRUE) {
             fprintf(stderr,
                     "Error: Device does not support required feature %s\n",

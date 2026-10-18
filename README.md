@@ -47,16 +47,23 @@ Needs a 64-bit Linux with glibc 2.35 or newer and a GPU with Vulkan 1.3 drivers.
 
 Needs Windows 10 or 11 (64-bit) and a GPU with Vulkan 1.3 drivers.
 
+### macOS (experimental)
+
+Build the Apple Silicon app using the commands below, extract the resulting zip, and open
+`Ninja Gaiden Black.app`. Choose your own disc image or extracted game folder on first start.
+Current dependencies require macOS 26. Intel Macs and the xemu renderer are unsupported;
+packages are signed ad hoc, without Developer ID signing or notarization.
+
 ### Where things are kept
 
-| | Linux | Windows |
-|---|---|---|
-| Installed game, saves | `~/.local/share/NinjaGaidenBlack` | `%LOCALAPPDATA%\NinjaGaidenBlack` |
-| Settings (`settings.ini`, `controls.ini`) | `~/.config/NinjaGaidenBlack` | `%APPDATA%\NinjaGaidenBlack` |
-| Shader cache | `~/.cache/NinjaGaidenBlack` | `%LOCALAPPDATA%\NinjaGaidenBlack\shaders` |
-| Log | the terminal | `log.txt` beside the saves (or the console it was started from) |
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| Installed game, saves | `~/.local/share/NinjaGaidenBlack` | `%LOCALAPPDATA%\NinjaGaidenBlack` | `~/Library/Application Support/NinjaGaidenBlack/saves` |
+| Settings (`settings.ini`, `controls.ini`) | `~/.config/NinjaGaidenBlack` | `%APPDATA%\NinjaGaidenBlack` | `~/Library/Application Support/NinjaGaidenBlack/config` |
+| Shader cache | `~/.cache/NinjaGaidenBlack` | `%LOCALAPPDATA%\NinjaGaidenBlack\shaders` | `~/Library/Application Support/NinjaGaidenBlack/cache/NinjaGaidenBlack/shaders` |
+| Log | the terminal | `log.txt` beside the saves (or the console it was started from) | `log.txt` beside the saves |
 
-**Portable mode:** with a file named `portable.txt` next to `NinjaGaidenBlack.exe` (or the AppImage),
+**Portable mode:** with a file named `portable.txt` next to `NinjaGaidenBlack.exe` (or the AppImage or Mac app),
 all of these go into a `userdata` folder next to it instead. The first-run setup offers this as a
 checkbox. The folder must be writable, so not inside Program Files. Delete `portable.txt` to go back.
 
@@ -142,7 +149,20 @@ build/linux/NinjaGaidenBlack
 ```
 
 Packages: `packaging/appimage/build.sh` (in a Docker container, for an AppImage that runs on older
-systems) and `packaging/windows/build.sh` (cross-compiled from Linux with llvm-mingw).
+systems), `packaging/windows/build.sh` (cross-compiled from Linux with llvm-mingw), and
+`packaging/macos/build.sh` (native Apple Silicon). Packages contain no game data.
+
+On macOS, install the build dependencies below, then run the fetch and pipeline steps above
+and package the app:
+
+```sh
+brew install cmake ninja sdl2-compat sdl3 libepoxy glib glslang molten-vk vulkan-loader qt
+packaging/macos/build.sh
+```
+
+The zip is `build/macos-release/NinjaGaidenBlack-macos-arm64.zip`. Homebrew is needed only to
+build; runtime libraries, including MoltenVK, are bundled. `NGB_MAC_PREFIX` overrides the build
+dependency prefix (default: `brew --prefix`).
 
 How it works, and the details of every feature: [docs/TECHNICAL.md](docs/TECHNICAL.md) and
 [docs/renderer.md](docs/renderer.md). For contributors and coding agents: [AGENTS.md](AGENTS.md).

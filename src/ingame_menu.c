@@ -426,10 +426,15 @@ void ngb_set_argv(char **argv)
  * The AppImage runtime hands the program a descriptor that keeps its FUSE mount alive; closed, the mount
  * went with it and the new image died reading its own code (SIGBUS) on Return to Main Menu. */
 static unsigned char s_inherited[1024];
+#ifdef __APPLE__
+static const char s_fd_dir[] = "/dev/fd";
+#else
+static const char s_fd_dir[] = "/proc/self/fd";
+#endif
 
 static void note_inherited_fds(void)
 {
-    DIR *d = opendir("/proc/self/fd");
+    DIR *d = opendir(s_fd_dir);
     struct dirent *e;
 
     if (!d)
@@ -444,7 +449,7 @@ static void note_inherited_fds(void)
 
 static void close_on_exec_all(void)
 {
-    DIR *d = opendir("/proc/self/fd");
+    DIR *d = opendir(s_fd_dir);
     struct dirent *e;
 
     if (!d)
@@ -471,8 +476,13 @@ static void quiet_signals(void)
     memset(&ign, 0, sizeof ign);
     ign.sa_handler = SIG_IGN;
     pthread_sigmask(SIG_BLOCK, &all, NULL);
+#ifdef __APPLE__
+    sigaction(SIGVTALRM, &ign, NULL);
+    sigaction(SIGURG, &ign, NULL);
+#else
     for (int sig = SIGRTMIN; sig <= SIGRTMAX; sig++)
         sigaction(sig, &ign, NULL);
+#endif
     pthread_sigmask(SIG_SETMASK, &none, NULL);
 }
 #endif
@@ -499,7 +509,7 @@ static void restart_program(void)
 {
 #if !defined(_WIN32)
     char self[4096];
-    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    long n = ngb_exe_path(self, sizeof self);
     if (n > 0 && s_argv) {
         self[n] = 0;
         setenv("NGB_TO_MAIN_MENU", "1", 1);

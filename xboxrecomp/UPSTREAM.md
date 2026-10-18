@@ -24,3 +24,6 @@ What the changes add, in short:
 
 Its third-party sources are not stored here: `third_party/fetch.sh` fetches them at pinned
 revisions.
+
+The Apple Silicon macOS port imports `src/platform/mmio_decode_a64.h` from upstream
+commit `eb0aa1d` (v0.14).

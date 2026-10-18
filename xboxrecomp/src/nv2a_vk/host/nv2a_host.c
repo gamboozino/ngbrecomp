@@ -167,7 +167,15 @@ static void *timer_thread(void *unused)
                 pthread_cond_wait(&s_timer_cond, &s_timer_lock);
             } else {
                 struct timespec ts = { next / 1000000000LL, next % 1000000000LL };
+#ifdef __APPLE__
+                int64_t delta = next - qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+                if (delta < 0)
+                    delta = 0;
+                ts = (struct timespec){delta / 1000000000LL, delta % 1000000000LL};
+                pthread_cond_timedwait_relative_np(&s_timer_cond, &s_timer_lock, &ts);
+#else
                 pthread_cond_timedwait(&s_timer_cond, &s_timer_lock, &ts);
+#endif
             }
         }
     }
@@ -191,7 +199,9 @@ void timer_init_ns(QEMUTimer *t, QEMUClockType type, QEMUTimerCB *cb, void *opaq
         pthread_condattr_t ca;
         pthread_t th;
         pthread_condattr_init(&ca);
+#ifndef __APPLE__
         pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+#endif
         pthread_cond_init(&s_timer_cond, &ca);
         pthread_condattr_destroy(&ca);
         pthread_create(&th, NULL, timer_thread, NULL);
@@ -567,6 +577,16 @@ static void sleep_until(const struct timespec *t)
         if (ns <= 0)
             return;
         vcpu_nap_us((unsigned)((ns + 999) / 1000));
+    }
+#elif defined(__APPLE__)
+    for (;;) {
+        struct timespec now, delay;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        int64_t ns = (int64_t)(t->tv_sec - now.tv_sec) * 1000000000LL + t->tv_nsec - now.tv_nsec;
+        if (ns <= 0)
+            return;
+        delay = (struct timespec){ns / 1000000000LL, ns % 1000000000LL};
+        nanosleep(&delay, NULL);
     }
 #else
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, t, NULL);

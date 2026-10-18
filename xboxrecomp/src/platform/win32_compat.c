@@ -267,6 +267,32 @@ typedef enum { K_EVENT, K_SEM, K_MUTEX, K_THREAD, K_TIMER, K_HEAP,
 
 #define W32_MAX_APC 16
 
+/* Darwin has no unnamed semaphores; unlink named ones once opened. */
+#ifdef __APPLE__
+typedef sem_t *host_sem_t;
+static int host_sem_init(host_sem_t *s)
+{
+    static unsigned seq;
+    char name[32];
+    snprintf(name, sizeof name, "/xbox-%x-%x", (unsigned)getpid(),
+             __atomic_add_fetch(&seq, 1, __ATOMIC_RELAXED));
+    *s = sem_open(name, O_CREAT | O_EXCL, 0600, 0);
+    if (*s == SEM_FAILED)
+        return -1;
+    sem_unlink(name);
+    return 0;
+}
+static inline int host_sem_wait(host_sem_t *s) { return sem_wait(*s); }
+static inline int host_sem_post(host_sem_t *s) { return sem_post(*s); }
+static inline int host_sem_destroy(host_sem_t *s) { return sem_close(*s); }
+#else
+typedef sem_t host_sem_t;
+#define host_sem_init(s) sem_init(s, 0, 0)
+#define host_sem_wait sem_wait
+#define host_sem_post sem_post
+#define host_sem_destroy sem_destroy
+#endif
+
 typedef struct w32_object {
     w32_kind        kind;
     LONG            refcount;
@@ -296,8 +322,8 @@ typedef struct w32_object {
     int             started;      /* past the CREATE_SUSPENDED gate */
     volatile int    parked;       /* stopped in park_now() */
     volatile int    park_pending; /* suspended while in host code */
-    sem_t           park_sem;     /* resume wakes the parked thread */
-    sem_t           park_ack;     /* the thread saw the suspend request */
+    host_sem_t      park_sem;     /* resume wakes the parked thread */
+    host_sem_t      park_ack;     /* the thread saw the suspend request */
     void           *user;         /* the thread's vcpu record (kernel) */
     LPTHREAD_START_ROUTINE start;
     LPVOID          start_param;
@@ -408,6 +434,9 @@ static void obj_release(w32_object *o)
         free(o->file_path);
     } else if (o->kind == K_FILEMAP) {
         if (o->fd >= 0) close(o->fd);
+    } else if (o->kind == K_THREAD) {
+        host_sem_destroy(&o->park_sem);
+        host_sem_destroy(&o->park_ack);
     } else if (o->kind == K_WAITABLE_TIMER) {
         /* Waitable timers: no special cleanup needed */
     }
@@ -810,8 +839,10 @@ HANDLE CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stackSize,
 {
     (void)sa;
     w32_object *o = obj_alloc(K_THREAD);
-    sem_init(&o->park_sem, 0, 0);
-    sem_init(&o->park_ack, 0, 0);
+    if (host_sem_init(&o->park_sem) || host_sem_init(&o->park_ack)) {
+        fprintf(stderr, "Cannot create thread suspension semaphores\n");
+        abort();
+    }
     suspend_signal_install();
     o->start         = start;
     o->start_param   = param;
@@ -872,7 +903,11 @@ BOOL GetExitCodeThread(HANDLE h, LPDWORD exitCode)
  * on. Either way it acknowledges, so SuspendThread returns knowing the
  * target will run no more guest code. Parking waits on a semaphore: both it
  * and the acknowledgement are async-signal-safe, which a mutex is not. */
+#ifdef __APPLE__
+#define SIG_SUSPEND SIGURG
+#else
 #define SIG_SUSPEND (SIGRTMIN + 3)
+#endif
 
 static void park_now(w32_object *o)
 {
@@ -880,7 +915,7 @@ static void park_now(w32_object *o)
     __atomic_store_n(&o->parked, 1, __ATOMIC_SEQ_CST);
     vcpu_block_begin();
     while (__atomic_load_n(&o->suspend_count, __ATOMIC_SEQ_CST) > 0)
-        while (sem_wait(&o->park_sem) != 0 && errno == EINTR)
+        while (host_sem_wait(&o->park_sem) != 0 && errno == EINTR)
             ;
     __atomic_store_n(&o->parked, 0, __ATOMIC_SEQ_CST);
     vcpu_block_end();
@@ -896,9 +931,9 @@ static void suspend_signal(int sig)
         /* Inside host code or the scheduler: park at the next safe point. */
         if (t_host_depth > 0 || vcpu_busy()) {
             o->park_pending = 1;
-            sem_post(&o->park_ack);
+            host_sem_post(&o->park_ack);
         } else {
-            sem_post(&o->park_ack);
+            host_sem_post(&o->park_ack);
             park_now(o);
         }
     }
@@ -990,7 +1025,7 @@ DWORD ResumeThread(HANDLE h)
         pthread_cond_broadcast(&o->gate);
         o->park_pending = 0;
         if (__atomic_load_n(&o->parked, __ATOMIC_SEQ_CST))
-            sem_post(&o->park_sem);
+            host_sem_post(&o->park_sem);
     }
     pthread_mutex_unlock(&o->lock);
     return prev;
@@ -1017,7 +1052,7 @@ DWORD SuspendThread(HANDLE h)
         } else {
             suspend_signal_install();
             if (pthread_kill(o->thread, SIG_SUSPEND) == 0)
-                while (sem_wait(&o->park_ack) != 0 && errno == EINTR)
+                while (host_sem_wait(&o->park_ack) != 0 && errno == EINTR)
                     ;
         }
     }
@@ -1367,7 +1402,7 @@ static uintptr_t s_window_lo, s_window_hi;
 static int in_window(const void *addr, size_t len)
 {
     uintptr_t a = (uintptr_t)addr;
-    return s_window_hi && a >= s_window_lo && len <= s_window_hi - a;
+    return s_window_hi && a >= s_window_lo && a <= s_window_hi && len <= s_window_hi - a;
 }
 
 /* Put the placeholder back over [addr, addr+len): inaccessible, uncommitted,
@@ -1486,6 +1521,13 @@ BOOL VirtualFree(LPVOID address, SIZE_T size, DWORD freeType)
         size_t len = view_take(address);
         if (size == 0) size = len;
         if (size == 0) return FALSE;
+        if (s_window_hi && (uintptr_t)address == s_window_lo
+                && size == s_window_hi - s_window_lo) {
+            if (munmap(address, size) != 0)
+                return FALSE;
+            s_window_lo = s_window_hi = 0;
+            return TRUE;
+        }
         if (in_window(address, size))
             return window_restore(address, size);
         return munmap(address, size) == 0;
@@ -1498,6 +1540,11 @@ BOOL VirtualFree(LPVOID address, SIZE_T size, DWORD freeType)
 BOOL VirtualProtect(LPVOID address, SIZE_T size, DWORD newProtect, PDWORD oldProtect)
 {
     if (oldProtect) *oldProtect = PAGE_READWRITE;
+#ifdef __APPLE__
+    uintptr_t start = (uintptr_t)address & ~(uintptr_t)(vm_page_size - 1);
+    size = (((uintptr_t)address + size + vm_page_size - 1) & ~(uintptr_t)(vm_page_size - 1)) - start;
+    address = (void *)start;
+#endif
     if (mprotect(address, size, prot_from_page(newProtect)) != 0)
         return FALSE;
     if (win32_ProtectHook && (prot_from_page(newProtect) & PROT_WRITE))
@@ -1927,7 +1974,7 @@ static int anon_map_fd(const char *name)
     char shm_name[32];
     LONG seq = InterlockedIncrement(&map_counter);
     const char *base = name ? name : "xbox_map";
-    snprintf(shm_name, sizeof(shm_name), "/%s_%ld", base, seq);
+    snprintf(shm_name, sizeof(shm_name), "/%.12s_%d_%ld", base, (int)getpid(), (long)seq);
     int fd = shm_open(shm_name, O_CREAT | O_RDWR | O_EXCL, 0600);
     if (fd >= 0) shm_unlink(shm_name);
     return fd;
@@ -2248,8 +2295,12 @@ VOID RaiseException(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args)
     /* TODO: on Windows this does not return; SEH dispatch unimplemented. */
 }
 
-#if defined(__linux__) && defined(__x86_64__)
+#if RECOMP_HAS_VEH
+#ifdef __APPLE__
+#include <sys/ucontext.h>
+#else
 #include <ucontext.h>
+#endif
 
 /* Vectored exception handlers over sigaction.
  *
@@ -2266,9 +2317,16 @@ static const int s_veh_signals[] = { SIGSEGV, SIGBUS, SIGTRAP, SIGILL, SIGFPE };
 #define VEH_NSIG ((int)(sizeof(s_veh_signals) / sizeof(s_veh_signals[0])))
 static struct sigaction s_veh_prev[VEH_NSIG];
 
-static void veh_ctx_from(CONTEXT *c, const mcontext_t *m)
+static void veh_ctx_from(CONTEXT *c, const ucontext_t *uc)
 {
-    const greg_t *g = m->gregs;
+#if defined(__APPLE__) && defined(__aarch64__)
+    memset(c, 0, sizeof(*c));
+    c->Rip = uc->uc_mcontext->__ss.__pc;
+    c->Rsp = uc->uc_mcontext->__ss.__sp;
+    c->Rbp = uc->uc_mcontext->__ss.__fp;
+    c->native_context = (void *)uc;
+#else
+    const greg_t *g = uc->uc_mcontext.gregs;
     c->Rax = (uint64_t)g[REG_RAX]; c->Rcx = (uint64_t)g[REG_RCX];
     c->Rdx = (uint64_t)g[REG_RDX]; c->Rbx = (uint64_t)g[REG_RBX];
     c->Rsp = (uint64_t)g[REG_RSP]; c->Rbp = (uint64_t)g[REG_RBP];
@@ -2279,11 +2337,17 @@ static void veh_ctx_from(CONTEXT *c, const mcontext_t *m)
     c->R14 = (uint64_t)g[REG_R14]; c->R15 = (uint64_t)g[REG_R15];
     c->Rip = (uint64_t)g[REG_RIP];
     c->EFlags = (uint32_t)g[REG_EFL];
+#endif
 }
 
-static void veh_ctx_to(mcontext_t *m, const CONTEXT *c)
+static void veh_ctx_to(ucontext_t *uc, const CONTEXT *c)
 {
-    greg_t *g = m->gregs;
+#if defined(__APPLE__) && defined(__aarch64__)
+    /* The ARM64 decoder updates the native context directly. */
+    (void)uc;
+    (void)c;
+#else
+    greg_t *g = uc->uc_mcontext.gregs;
     g[REG_RAX] = (greg_t)c->Rax; g[REG_RCX] = (greg_t)c->Rcx;
     g[REG_RDX] = (greg_t)c->Rdx; g[REG_RBX] = (greg_t)c->Rbx;
     g[REG_RSP] = (greg_t)c->Rsp; g[REG_RBP] = (greg_t)c->Rbp;
@@ -2294,6 +2358,7 @@ static void veh_ctx_to(mcontext_t *m, const CONTEXT *c)
     g[REG_R14] = (greg_t)c->R14; g[REG_R15] = (greg_t)c->R15;
     g[REG_RIP] = (greg_t)c->Rip;
     g[REG_EFL] = (greg_t)c->EFlags;
+#endif
 }
 
 static DWORD veh_code(int sig, const siginfo_t *si)
@@ -2320,21 +2385,25 @@ static void veh_signal(int sig, siginfo_t *si, void *uc_)
     int saved_errno = errno;
     int i, n;
 
+    veh_ctx_from(&ctx, uc);
     memset(&rec, 0, sizeof(rec));
     rec.ExceptionCode = veh_code(sig, si);
     /* A step can also arrive without TRAP_TRACE -- gdb re-injects a passed
      * SIGTRAP as a plain one -- but the saved flags still have TF set, which
      * an int3 never does. */
-    if (sig == SIGTRAP && (uc->uc_mcontext.gregs[REG_EFL] & 0x100))
+    if (sig == SIGTRAP && (ctx.EFlags & 0x100))
         rec.ExceptionCode = EXCEPTION_SINGLE_STEP;
-    rec.ExceptionAddress = (PVOID)(uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+    rec.ExceptionAddress = (PVOID)(uintptr_t)ctx.Rip;
     if (sig == SIGSEGV || sig == SIGBUS) {
-        /* Page-fault error code bit 1 is set for a write. */
         rec.NumberParameters = 2;
+#if defined(__APPLE__) && defined(__aarch64__)
+        rec.ExceptionInformation[0] = (uc->uc_mcontext->__es.__esr >> 6) & 1;
+#else
+        /* Page-fault error code bit 1 is set for a write. */
         rec.ExceptionInformation[0] = (uc->uc_mcontext.gregs[REG_ERR] & 2) ? 1 : 0;
+#endif
         rec.ExceptionInformation[1] = (ULONG_PTR)si->si_addr;
     }
-    veh_ctx_from(&ctx, &uc->uc_mcontext);
 
     /* Handlers take runtime locks (the GPU model's, for one): a suspension
      * arriving now waits until the handler is done. */
@@ -2343,7 +2412,7 @@ static void veh_signal(int sig, siginfo_t *si, void *uc_)
     for (i = 0; i < n; i++) {
         PVECTORED_EXCEPTION_HANDLER h = __atomic_load_n(&s_veh[i], __ATOMIC_ACQUIRE);
         if (h && h(&ep) == EXCEPTION_CONTINUE_EXECUTION) {
-            veh_ctx_to(&uc->uc_mcontext, &ctx);
+            veh_ctx_to(uc, &ctx);
             compat_host_leave();
             errno = saved_errno;
             return;

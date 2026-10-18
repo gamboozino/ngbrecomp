@@ -1,0 +1,35 @@
+name: macOS runtime
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        run: brew install cmake ninja pkgconf sdl2-compat libepoxy glib glslang
+      - name: Fetch runtime dependencies
+        run: xboxrecomp/third_party/fetch.sh
+      - name: Build runtime
+        run: |
+          cmake -S xboxrecomp -B build/runtime -G Ninja \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)" -DCMAKE_BUILD_TYPE=Release \
+            -DXBOXRECOMP_NV2A_VK=ON
+          cmake --build build/runtime --parallel 3
+      - name: Build and run POSIX tests
+        run: |
+          for test in vcpu_posix veh_posix; do
+            cmake -S "xboxrecomp/tests/$test" -B "build/$test" -G Ninja \
+              -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Release
+            cmake --build "build/$test" --parallel 3
+            ctest --test-dir "build/$test" --output-on-failure --timeout 30
+          done

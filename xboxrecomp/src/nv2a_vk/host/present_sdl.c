@@ -35,6 +35,9 @@ static int s_vsync;                /* 0 off, 1 mailbox, 2 adaptive, 3 FIFO */
 static volatile bool s_resized;
 
 static VkInstance s_instance;
+#ifdef __APPLE__
+static int s_surface_pending;
+#endif
 static VkSurfaceKHR s_surface = VK_NULL_HANDLE;
 static VkSwapchainKHR s_swapchain = VK_NULL_HANDLE;
 static VkImage s_images[MAX_SWAP_IMAGES];
@@ -353,7 +356,7 @@ int nv2a_window_create(const char *title, int width, int height,
     /* Native Wayland when the session has it, X11 otherwise. SDL2 picks
      * X11 first, so on a Wayland desktop the game went through XWayland.
      * SDL_VIDEODRIVER still overrides. (Windows has its one driver.) */
-#if !defined(_WIN32)
+#if defined(__linux__)
     if (!getenv("SDL_VIDEODRIVER")) {
         /* Under gamescope (the Steam Deck's Game Mode) X11: its frame
          * counting -- the performance overlay's frame rate and frame times
@@ -370,6 +373,7 @@ int nv2a_window_create(const char *title, int width, int height,
     }
     s_window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED,
                                 SDL_WINDOWPOS_CENTERED, width, height,
+                                (getenv("NGB_TEST_HIDDEN") ? SDL_WINDOW_HIDDEN : 0) |
                                 SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
                                 SDL_WINDOW_ALLOW_HIGHDPI |
                                 (fullscreen == 1 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) |
@@ -440,6 +444,17 @@ __attribute__((weak)) void xbox_InputHotplugPoll(void) {}
 
 bool nv2a_window_pump(void)
 {
+#ifdef __APPLE__
+    /* SDL's Vulkan surface creates and attaches a Cocoa Metal view. AppKit
+     * changes must run on this thread, even though Vulkan runs on PFIFO. */
+    if (__atomic_load_n(&s_surface_pending, __ATOMIC_ACQUIRE)) {
+        if (!SDL_Vulkan_CreateSurface(s_window, s_instance, &s_surface)) {
+            fprintf(stderr, "nv2a: Vulkan surface: %s\n", SDL_GetError());
+            s_surface = VK_NULL_HANDLE;
+        }
+        __atomic_store_n(&s_surface_pending, 0, __ATOMIC_RELEASE);
+    }
+#endif
     xbox_InputHotplugPoll();   /* pads connected or gone in the last pump (xboxrecomp input) */
     nv2a_window_tick();
     SDL_Event ev;
@@ -570,10 +585,18 @@ const char *const *nv2a_host_vk_instance_extensions(uint32_t *count)
 void nv2a_host_vk_instance_created(VkInstance instance)
 {
     s_instance = instance;
+#ifdef __APPLE__
+    if (s_window) {
+        __atomic_store_n(&s_surface_pending, 1, __ATOMIC_RELEASE);
+        while (__atomic_load_n(&s_surface_pending, __ATOMIC_ACQUIRE))
+            SDL_Delay(1);
+    }
+#else
     if (s_window && !SDL_Vulkan_CreateSurface(s_window, instance, &s_surface)) {
         fprintf(stderr, "nv2a: Vulkan surface: %s\n", SDL_GetError());
         s_surface = VK_NULL_HANDLE;
     }
+#endif
 }
 
 bool nv2a_host_vk_can_present(VkPhysicalDevice dev, uint32_t queue_family)

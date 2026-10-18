@@ -40,6 +40,17 @@
 typedef uint64_t (*mmio_read_fn)(void *dev, uint32_t off, int size);
 typedef void     (*mmio_write_fn)(void *dev, uint32_t off, uint64_t val, int size);
 
+#if defined(__APPLE__) && defined(__aarch64__)
+#include "mmio_decode_a64.h"
+static inline int mmio_emulate(PCONTEXT ctx, uint32_t off, void *dev,
+                               mmio_read_fn rd, mmio_write_fn wr)
+{
+    ucontext_t *uc = ctx->native_context;
+    int ok = mmio_emulate_a64(uc, off, dev, rd, wr);
+    ctx->Rip = A64_CTX_PC(uc);
+    return ok;
+}
+#else
 static inline uint64_t *mmio_ctx_reg(PCONTEXT c, int reg)
 {
     switch (reg & 0xF) {
@@ -288,5 +299,6 @@ static inline int mmio_emulate(PCONTEXT ctx, uint32_t off, void *dev,
     }
 }
 
+#endif /* host architecture */
 #endif /* RECOMP_HAS_VEH */
 #endif /* MMIO_DECODE_H */
