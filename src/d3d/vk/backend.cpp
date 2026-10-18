@@ -346,6 +346,8 @@ private:
     // at scale_ times their size, small depth-only ones (shadow maps) at shadow_ times
     int scale_ = 1, shadow_ = 1, aniso_level_ = 0, msaa_ = 1;
     bool anisotropy_ = false;
+    bool wide_lines_ = false;   // lines wider than a pixel (the sparks of a hit are 2.7 to 3, #51)
+    float line_max_ = 1.0f;
     VkSampleCountFlags ms_counts_ = VK_SAMPLE_COUNT_1_BIT;   // the device's for colour and depth together
     void ReadQuality();
     float hud_cover_ = 0;      // this frame's 2D picture area, in screens
@@ -599,6 +601,11 @@ bool VulkanBackend::CreateDevice() {
     f2.features.samplerAnisotropy = VK_TRUE;
     f2.features.fillModeNonSolid = VK_TRUE;
     f2.features.textureCompressionBC = VK_TRUE;
+    {
+        VkPhysicalDeviceFeatures have;
+        vkGetPhysicalDeviceFeatures(phys_, &have);
+        f2.features.wideLines = have.wideLines;
+    }
     const char* exts[] = {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
 #ifdef __APPLE__
                           "VK_KHR_portability_subset",
@@ -660,6 +667,8 @@ bool VulkanBackend::FinishDevice() {
     VkPhysicalDeviceFeatures feat;
     vkGetPhysicalDeviceFeatures(phys_, &feat);   // both devices enable it when it is there
     anisotropy_ = feat.samplerAnisotropy == VK_TRUE;
+    wide_lines_ = feat.wideLines == VK_TRUE;
+    line_max_ = pr.limits.lineWidthRange[1];
     ms_counts_ = pr.limits.framebufferColorSampleCounts & pr.limits.framebufferDepthSampleCounts &
                  pr.limits.framebufferStencilSampleCounts;
     ReadQuality();
@@ -1864,6 +1873,9 @@ VkPipeline VulkanBackend::Pipeline(const PipeKey& k) {
     return pipe;
 }
 
+// Lines, or triangles drawn as their edges: the pipelines with a line width.
+static bool Lines(const PipeKey& k) { return k.topo == 1 || k.fill == 0x1B01; }
+
 VkPipeline VulkanBackend::MakePipeline(const PipeKey& k, VkShaderModule vs, VkShaderModule ps) {
     VkPipeline pipe = VK_NULL_HANDLE;
     if (vs && ps) {
@@ -1931,10 +1943,11 @@ VkPipeline VulkanBackend::MakePipeline(const PipeKey& k, VkShaderModule vs, VkSh
         VkPipelineColorBlendStateCreateInfo cbs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
         cbs.attachmentCount = k.has_rt ? 1 : 0;
         cbs.pAttachments = &cb;
+        // the line width only on the line pipelines: the others, nearly all, stay as the caches have them
         VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_BLEND_CONSTANTS,
-                                VK_DYNAMIC_STATE_STENCIL_REFERENCE};
+                                VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_LINE_WIDTH};
         VkPipelineDynamicStateCreateInfo dy{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-        dy.dynamicStateCount = 4;
+        dy.dynamicStateCount = Lines(k) ? 5 : 4;
         dy.pDynamicStates = dyn;
         VkFormat cf = kColorFormat;
         VkPipelineRenderingCreateInfo pr{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -2538,6 +2551,8 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     Color(SimpleState(s, kMBlendColor), bf);
     d_.vkCmdSetBlendConstants(cmd_, bf);
     d_.vkCmdSetStencilReference(cmd_, VK_STENCIL_FACE_FRONT_AND_BACK, SimpleState(s, kMStencilRef) & 0xFF);
+    if (Lines(k))   // D3DRS_LINEWIDTH, in the game's pixels: at the target's scale
+        d_.vkCmdSetLineWidth(cmd_, wide_lines_ ? std::clamp(Bits(s.rs[kRsLineWidth]) * sx, 1.0f, line_max_) : 1.0f);
 
     VkBuffer bufs[16];
     for (uint32_t b = 0; b < a.buffer_count; b++) bufs[b] = ring_;
@@ -2572,7 +2587,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         std::fprintf(trace_, "%u %u prim %u n %u pre %d prog %d ps %08X blend %u %X %X %X wm %X z %u%u%X st %u "
                      "rt %08X %ux%u tex0 %08X @%08X %X %ux%u%s tex1 %08X %X tss0 %u %u %u %u|%u %u %u tss1 %u %u %u|%u "
                      "tf %08X modes %08X vs %08X ext %.2f fog %u mode %u col %08X %g..%g d0 %08X signed %u%u%u%u uv %s "
-                     "shaders %016llx %016llx light %X spec %g %g %g pow %g csign %X %X %X %X\n",
+                     "shaders %016llx %016llx light %X spec %g %g %g pow %g csign %X %X %X %X lw %08X\n",
                      presents_, st_.drawn, prim, count, a.pretransformed, prog, s.ps ? s.ps->handle : 0, k.blend, k.src,
                      k.dst, k.op, k.wmask, k.zen, k.zwrite, k.zfunc, k.sten, s.rt.data, rt ? rt->gw : 0, rt ? rt->gh : 0,
                      s.textures[0], h0 ? t0d.data : 0, h0 ? t0d.format : 0, h0 ? t0d.width : 0, h0 ? t0d.height : 0,
@@ -2610,7 +2625,8 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                      }().c_str(), (unsigned long long)k.vs, (unsigned long long)k.ps,   // NGB_D3D_SHADERDUMP's names
                      prog ? 0u : MakeFixedKey(s).light, s.material[8], s.material[9], s.material[10], s.material[16],
                      s.tss[0][kTssColorSign] >> 28, s.tss[1][kTssColorSign] >> 28, s.tss[2][kTssColorSign] >> 28,
-                     s.tss[3][kTssColorSign] >> 28);   // D3DTSS_COLORSIGN: A R G B signed, bits 0-3
+                     s.tss[3][kTssColorSign] >> 28,   // D3DTSS_COLORSIGN: A R G B signed, bits 0-3
+                     s.rs[kRsLineWidth]);
     }
     if (int(presents_) == g_step_frame)
         std::fprintf(stderr, "[STEP] %u prim %u count %u pre %d prog %d ps %08X blend %u %X %X op %X wmask %X zen %u "
