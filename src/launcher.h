@@ -32,6 +32,7 @@ typedef struct NgbSettings {
     int smooth_glow;        /* the glow's continuous filtering (src/d3d/vk/glow_filter.h, #64) */
     int detail_under_load;  /* the game's own detail lowering when the GPU looks busy (src/d3d/d3d.c, #50, #114) */
     int render_thread;      /* the renderer on a thread of its own (src/d3d/gpu/threaded.cpp), experimental */
+    int spark_thickness;        /* the impact sparks' width (src/d3d/vk/spark_aspect.h): 0 1/3, 1 1/2, 2 2/3, 3 the game's own */
     /* Hard, Very Hard and Master Ninja offered without clearing the one before */
 } NgbSettings;
 

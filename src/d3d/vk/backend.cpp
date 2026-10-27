@@ -2519,7 +2519,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         SparkEndpoints(s,prim,count,asm_,spark_ends)) {
         // Match the original hardware line-width clamp at this actual target scale.
         float scale=float(rt->img.w)/float(rt->gw);
-        float width=wide_lines_?std::clamp(Bits(s.rs[kRsLineWidth])*scale,1.0f,line_max_)/scale:1.0f/scale;
+        float width=SparkThickness()*(wide_lines_?std::clamp(Bits(s.rs[kRsLineWidth])*scale,1.0f,line_max_)/scale:1.0f/scale);
         spark_quad=ExpandSpark(s,spark_ends,float(SparkAspect()/(16.0/9.0)),width,spark_vertices,spark_assembled);
     }
     Assembled& a=spark_quad?spark_assembled:asm_;
@@ -3388,8 +3388,12 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     d_.vkCmdSetStencilReference(cmd_, VK_STENCIL_FACE_FRONT_AND_BACK, SimpleState(s, kMStencilRef) & 0xFF);
     if (k.has_ds & kDsDynamicBias)
         d_.vkCmdSetDepthBias(cmd_, float(k.zbias + pull_steps), 0.0f, k.zslope + pull_slope);
-    if (Lines(k))   // D3DRS_LINEWIDTH, in the game's pixels: at the target's scale
-        d_.vkCmdSetLineWidth(cmd_, wide_lines_ ? std::clamp(Bits(s.rs[kRsLineWidth]) * sx, 1.0f, line_max_) : 1.0f);
+    if (Lines(k)) {  // D3DRS_LINEWIDTH, in the game's pixels: at the target's scale
+        float line_width = wide_lines_ ? std::clamp(Bits(s.rs[kRsLineWidth]) * sx, 1.0f, line_max_) : 1.0f;
+        if (Bits(s.rs[kRsLineWidth]) > 1.0f)   // a wide line: the impact sparks
+            line_width = std::max(1.0f, line_width * SparkThickness());
+        d_.vkCmdSetLineWidth(cmd_, line_width);
+    }
 
     VkBuffer bufs[16];
     for (uint32_t b = 0; b < a.buffer_count; b++) bufs[b] = ring_;

@@ -13,6 +13,18 @@ inline bool SparkFixEnabled() {
     static const bool enabled=[] {const char* e=std::getenv("NGB_SPARK_ASPECT_FIX");return !(e && !std::strcmp(e,"0"));}();
     return enabled;
 }
+// Spark Thickness (Graphics): a multiplier on the weapon impact-spark stroke width
+// (the wide lines the game draws at 2.7 to 3 pixels). 0 = 1/3, 1 = 1/2, 2 = 2/3,
+// 3 = the game's own (1x). The width scales by this at every aspect and render
+// scale, so the sparks can be made thinner.
+inline float SparkThickness() {
+    switch (ngb_pc_setting(31)) {
+    case 0: return 1.0f/3.0f;
+    case 1: return 1.0f/2.0f;
+    case 2: return 2.0f/3.0f;
+    default: return 1.0f;
+    }
+}
 struct SparkEndpoint { float p[4],color[4]; };
 inline bool ReadSparkVertices(const Assembled& a,SparkEndpoint (&out)[2]) {
     if (a.topology!=Topology::Lines || a.pretransformed || a.regs!=9 || a.index_count || a.draw_count!=2) return false;

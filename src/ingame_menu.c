@@ -138,6 +138,7 @@ int ngb_pc_setting(int which)
     case 24: return s_running.show_hud;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
+    case 31: return s_running.spark_thickness;
     case 25: return s_running.audio_output;
     default: return s_running.show_fps;
     }
@@ -174,6 +175,7 @@ void ngb_pc_set_setting(int which, int value)
     case 24: s_running.show_hud = !!value; break;
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
+    case 31: s_running.spark_thickness = value < 0 ? 0 : value > 3 ? 3 : value; break;
     case 25:   /* the mixer's at the next start; the arcade's at its next */
         s_running.audio_output = value < 0 ? 0 : value > 2 ? 2 : value;
         ngb_audio_set_output(s_running.audio_output);
