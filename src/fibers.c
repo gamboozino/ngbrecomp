@@ -22,6 +22,11 @@
  * kernel stack: +0 lpParameter, +4 stack base, +8 stack limit, +C saved esp.
  * The current fiber is at +8 of XAPI's per-thread data, found through the TLS
  * index at 0x45E84C and fs:[4].
+ *
+ * A fiber's host side (its slot and stack) goes when the game deletes the fiber
+ * (DeleteFiber, sub_0032A280, kept in src/fiber_delete.c): the game makes and
+ * deletes fibers at new records all through play, and the slots, never given
+ * back, filled the table after hours and ended the game (#153).
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -51,6 +56,7 @@ typedef struct HostFiber {
     void *host_sp;                /* saved host stack pointer (Windows: the fiber) */
     void *stack;                  /* host stack, NULL for a thread's own */
     int started;
+    int running;                  /* on some host thread now */
     uint32_t ebx, esi, edi, seh_ebp, esp, fs0;
 } HostFiber;
 
@@ -119,13 +125,34 @@ void ngb_ctx_switch(void **save_sp, void *load_sp);
 #endif
 
 static __thread HostFiber *t_running;   /* the fiber this host thread runs */
+static __thread HostFiber *t_left;      /* the one it just switched away from: not running once off its stack */
+
+/* On the new fiber's stack: the fiber left is off its own now (DeleteFiber may free it). */
+static void fiber_left_done(void)
+{
+    if (t_left)
+        __atomic_store_n(&t_left->running, 0, __ATOMIC_RELEASE);
+    t_left = NULL;
+}
+
+/* NGB_FIBER_SLOTS=n: testing, a table of n slots (at most MAX_FIBERS), so freeing is put to work in a short run */
+static int fiber_slots(void)
+{
+    static int n;
+    if (!n) {
+        const char *e = getenv("NGB_FIBER_SLOTS");
+        n = e && atoi(e) > 2 && atoi(e) < MAX_FIBERS ? atoi(e) : MAX_FIBERS;
+    }
+    return n;
+}
 
 static HostFiber *fiber_lookup(uint32_t guest, int create)
 {
     HostFiber *f = NULL, *free_slot = NULL;
+    int slots = fiber_slots();
 
     pthread_mutex_lock(&s_lock);
-    for (int i = 0; i < MAX_FIBERS; i++) {
+    for (int i = 0; i < slots; i++) {
         if (s_fibers[i].guest == guest) { f = &s_fibers[i]; break; }
         if (!s_fibers[i].guest && !free_slot) free_slot = &s_fibers[i];
     }
@@ -143,6 +170,7 @@ static void fiber_host_entry(void)
 {
     HostFiber *f = t_running;
 
+    fiber_left_done();
     g_esp = f->guest - 8;               /* [esp] fake return, [esp+4] start */
     g_ebx = g_esi = g_edi = 0;
     g_seh_ebp = 0;
@@ -178,6 +206,12 @@ static void fiber_reset(HostFiber *f)
     DeleteFiber(f->host_sp);
     f->stack = f->host_sp = NULL;
     fiber_prepare(f);
+}
+
+static void fiber_release(HostFiber *f)
+{
+    if (f->stack)   /* (a thread's own context has none: not ours to delete) */
+        DeleteFiber(f->host_sp);
 }
 
 static void ngb_ctx_switch(void **save_sp, void *load_sp)
@@ -224,6 +258,12 @@ static void fiber_reset(HostFiber *f)
     f->stack = NULL;
     munmap(stack, HOST_FIBER_STACK);
     fiber_prepare(f);
+}
+
+static void fiber_release(HostFiber *f)
+{
+    if (f->stack)
+        munmap(f->stack, HOST_FIBER_STACK);
 }
 #endif
 
@@ -288,6 +328,8 @@ void sub_0032A293(void)
     cur->started = 1;
     MEM32(current + 0xC) = fiber_stamp(cur);
     MEM32(tdata + 8) = target;
+    __atomic_store_n(&next->running, 1, __ATOMIC_RELEASE);
+    t_left = cur;
 
     if (next->started) {
         g_ebx = next->ebx; g_esi = next->esi; g_edi = next->edi;
@@ -302,4 +344,21 @@ void sub_0032A293(void)
     /* Back on this fiber: whoever switched here already restored our guest
      * registers (the branch above, run by them). */
     t_running = cur;
+    fiber_left_done();
+}
+
+/* The game deleting a fiber (DeleteFiber's record, before its stack goes): its slot and host stack, unless it
+ * is running (XAPI never deletes the running fiber; the slot is left to be found again then). */
+void ngb_fiber_deleted(uint32_t guest)
+{
+    pthread_mutex_lock(&s_lock);
+    for (int i = 0; i < MAX_FIBERS; i++) {
+        HostFiber *f = &s_fibers[i];
+        if (f->guest == guest && f != t_running && !__atomic_load_n(&f->running, __ATOMIC_ACQUIRE)) {
+            fiber_release(f);
+            memset(f, 0, sizeof *f);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_lock);
 }
