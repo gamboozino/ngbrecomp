@@ -112,7 +112,7 @@ from Linux x86-64:
   their extensions (`instance.c`; `NV2A_VK_NO13=1` forces that path on the desktop, for testing). On an
   Adreno whose own driver lacks them, Turnip (Mesa's Vulkan driver for Adreno, built from Mesa's
   release by `packaging/android/build.sh`) is loaded for the app by libadrenotools (`src/android_gpu.c`,
-  through `nv2a_vk_custom_loader`; Graphics > GPU Driver, Auto by default; `NGB_GPU_DRIVER=system|turnip`);
+  through `nv2a_vk_custom_loader`; no setting, `NGB_GPU_DRIVER=system|turnip` forces one for testing);
   the window's surface is then made through that loader (`present_sdl.c`).
 - **Defaults:** fullscreen, the Multithreaded Renderer on (60 fps against 42-58 without on a Pixel 9a).
   The arcade programs and Return to Main Menu's restart are not there yet (no programs to start beside
@@ -203,6 +203,18 @@ and cleared by the script's own commands in sub_001DD300). The function is taken
 the watched test passed while the option is on; a cutscene its script never makes skippable still is not, and
 the watched bytes are not written, so saves do not change. The same option lets Start end a movie
 (`src/movie_skip.c`). Off unless chosen (0.9.43 alone had it on).
+
+Responsive Menus (Gameplay; `src/responsive.c`, #116), presses the game ignores for a while taken at once. The
+title reads no button until its frame count (0x45A7F4, while 0x45A7F8 is 1) passes 0x43B688 + 0x43B694 (40
+frames of fade-in, then 60 with PRESS START up); once the prompt is drawn the count is set to the mark. A
+cutscene's script often waits before making it skippable (the chapter 1 waterfall 180 frames: a wait of frames
+counted down in 0x8D3A52 while 0x8D3A50 is 2), and the skip jumps the script to its end mark without running
+what lies between, so the skip is not let through early: a new Start press, when the script reaches its
+skippable command (3 0) a few commands on with no jump between, ends the waits before it and is kept for the skip. The event's state
+is reset as sub_001DBEE0 starts each event. The pause menu's message box (sub_00212500, taken: "equipped" and
+the like, 0x8DB848 the message, 0x8DB84C its 60 frames) returns busy while up and its callers set bit 0x1000 of
+0xDA41E8, which keeps the menu from closing; with the option it returns 0. Equipping also leaves the list in a
+state (bit 1 of 0xDA41E8) that takes the next Start to leave the list; while the message is up the bit is cleared.
 
 Cheats, for getting past a hard spot (`src/cheats.c`, applied each frame; for the session
 only, never saved, so a new start has them off): Infinite Health (Ryu's health refilled each

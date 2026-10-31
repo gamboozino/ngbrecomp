@@ -5,9 +5,9 @@
  * drivers stop at Vulkan 1.1 without the dynamic rendering, synchronization2 and push descriptors the renderer
  * needs (#87); Turnip has them.
  *
- * The setting (Graphics > GPU Driver, settings.ini gpu_driver; NGB_GPU_DRIVER=system|turnip over it): System; Turnip;
- * or Auto, Turnip only on an Adreno whose own driver lacks those -- found by a look at the system's driver first, an
- * instance made and let go. Turnip finding no GPU it knows (an Adreno too new or too old for it) falls back to the
+ * Turnip only on an Adreno whose own driver lacks those -- found by a look at the system's driver first, an
+ * instance made and let go (NGB_GPU_DRIVER=system|turnip forces one, for testing). There is no setting: a choice of
+ * the system's driver on such a phone kept the game from starting, the menu to change it back with included (#151). Turnip finding no GPU it knows (an Adreno too new or too old for it) falls back to the
  * system's. The GPU emulation asks here before it starts Vulkan (xboxrecomp's instance.c, nv2a_vk_custom_loader).
  */
 #include <dlfcn.h>
@@ -21,7 +21,6 @@
 
 #include <adrenotools/driver.h>
 
-int ngb_pc_setting(int which);   /* src/ingame_menu.c: 35 GPU Driver */
 
 #define TURNIP_LIB "libvulkan_freedreno.so"
 
@@ -105,7 +104,7 @@ static int usable_device(PFN_vkGetInstanceProcAddr gipa, int *qualcomm, int *mad
 
 PFN_vkGetInstanceProcAddr nv2a_vk_custom_loader(void)
 {
-    int mode = ngb_pc_setting(35);   /* 0 Auto, 1 System, 2 Turnip */
+    int mode = 0;   /* 0 Auto, 1 System, 2 Turnip */
     const char *env = getenv("NGB_GPU_DRIVER");
     if (env && !strcmp(env, "system"))
         mode = 1;

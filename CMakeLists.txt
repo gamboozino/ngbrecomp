@@ -132,6 +132,7 @@ add_library(ngb_gen OBJECT ${RECOMP_GEN_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/intercept.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ut_charge.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cutscene_skip.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/responsive.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/playtime.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/quick_select.c

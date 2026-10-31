@@ -93,16 +93,17 @@ static void poke_tick(void)
     }
 }
 
-#define N_CHEATS 7
+#define N_CHEATS 9
 /* infinite health, infinite ninpo, infinite essence, golden scarabs, infinite items, infinite projectiles,
- * all weapons */
+ * all weapons, all armlets, all technique scrolls */
 static int s_cheat[N_CHEATS];
 
 int ngb_cheat(int which) { return which >= 0 && which < N_CHEATS ? s_cheat[which] : 0; }
 void ngb_cheat_set(int which, int on)
 {
     static const char *const name[N_CHEATS] = { "infinite health", "infinite ninpo", "infinite essence", "golden scarabs",
-                                                "infinite items", "infinite projectiles", "all weapons" };
+                                                "infinite items", "infinite projectiles", "all weapons",
+                                                "all armlets", "all technique scrolls" };
     if (which < 0 || which >= N_CHEATS)
         return;
     s_cheat[which] = !!on;
@@ -434,8 +435,15 @@ static void scarab_tick(void)
  * The slots the cheat writes carry its mark (s_mark, new for each record) in their fourth byte, which
  * the game leaves alone and keeps in a save. A record is only ever applied to slots with its mark: a
  * bag with none of them (another save loaded) ends it, and an item whose slot lost it (the story's
- * own changes, not through sub_00154300) is left to the game. */
-static const struct { uint16_t item; uint8_t count, stack; uint16_t also[2]; } s_weapons[] = {
+ * own changes, not through sub_00154300) is left to the game.
+ *
+ * All Armlets and All Technique Scrolls are the same for the armlets and bands (class 4 in their records) and
+ * the technique scrolls (category 11: the moves look for the scroll in the bag, by its effect, sub_00154BE0 and
+ * the like); each list goes by its own cheat (group: 6 + it). The game gives them through sub_00154300 like any
+ * pickup (its script's give, sub_002D4590, checks nothing held first), so one found with the cheat on is the
+ * player's and stays. A worn armlet taken back is taken off too (+4 of the player's block, 0xFFFF none). The
+ * Intercept scroll (0x13C) is left out: Black never gives it. */
+static const struct { uint16_t item; uint8_t count, stack; uint16_t also[2]; uint8_t group; } s_weapons[] = {
     { 0x001, 3 },                           /* Dragon Sword */
     { 0x0C9, 1 },                           /* True Dragon Sword */
     { 0x026, 1 },                           /* Nunchaku */
@@ -459,6 +467,23 @@ static const struct { uint16_t item; uint8_t count, stack; uint16_t also[2]; } s
     { 0x0E3, 0, 1 },                        /* explosive arrows */
     { 0x029, 1 },                           /* the bow with APFSDS cores */
     { 0x02A, 0, 1 },                        /* APFSDS cores */
+    { 0x050, 1, 0, { 0 }, 1 },              /* the Armlet of Tranquility */
+    { 0x052, 1, 0, { 0 }, 1 },              /* the Armlet of Fortune */
+    { 0x054, 1, 0, { 0 }, 1 },              /* the Armlet of the Sun */
+    { 0x0EB, 1, 0, { 0 }, 1 },              /* the Armlet of the Moon */
+    { 0x055, 1, 0, { 0 }, 1 },              /* the Armlet of Benediction */
+    { 0x166, 1, 0, { 0 }, 1 },              /* the Armlet of Celerity */
+    { 0x167, 1, 0, { 0 }, 1 },              /* the Armlet of Potency */
+    { 0x174, 1, 0, { 0 }, 1 },              /* the Band of Life */
+    { 0x178, 1, 0, { 0 }, 1 },              /* the Band of Spirit */
+    { 0x175, 1, 0, { 0 }, 1 },              /* the Band of Power */
+    { 0x176, 1, 0, { 0 }, 1 },              /* the Band of Protection */
+    { 0x177, 1, 0, { 0 }, 1 },              /* the Band of Wealth */
+    { 0x179, 1, 0, { 0 }, 1 },              /* the Band of Light */
+    { 0x17A, 1, 0, { 0 }, 1 },              /* the Band of Strength */
+    { 0x0CF, 1, 0, { 0 }, 2 },              /* Technique Scroll: Izuna Drop */
+    { 0x0D0, 1, 0, { 0 }, 2 },              /* Technique Scroll: Counter Attacks */
+    { 0x0D1, 1, 0, { 0 }, 2 },              /* Technique Scroll: Guillotine Throw */
 };
 #define N_WEAPONS (sizeof s_weapons / sizeof s_weapons[0])
 
@@ -548,11 +573,11 @@ static void weapons_seen(uint16_t item, int change)
     }
 }
 
-/* the cheat's items, each back to what the player had (one in Ryu's hands left for later) */
+/* the cheat's items whose cheat is off, each back to what the player had (one in Ryu's hands left for later) */
 static void weapons_restore(void)
 {
     for (size_t i = 0; i < N_WEAPONS; i++) {
-        if (!s_had[i].seen)
+        if (!s_had[i].seen || s_cheat[6 + s_weapons[i].group])
             continue;
         uint32_t slot = family_slot(i);
         if (s_had[i].wrote && slot) {
@@ -560,6 +585,9 @@ static void weapons_restore(void)
                 continue;                              /* in his hands: when he holds another (a level is
                                                           changed in his hands, as Muramasa does) */
             if (!s_had[i].count) {
+                uint32_t worn = 0x58A570 + MEM8(0x4B7640) * 0x210u + 4;
+                if (s_weapons[i].group == 1 && MEM16(worn) == MEM16(slot))
+                    MEM16(worn) = 0xFFFF;              /* the armlet he wears: taken off */
                 weapons_log("taken back", MEM16(slot), MEM8(slot + 2));
                 MEM8(slot + 2) = 0;
                 MEM8(slot + 3) = 0;
@@ -601,10 +629,9 @@ static void weapons_tick(void)
     }
     if (MEM8(0xDB9AD5))                                /* under the pause menu: its lists stay true */
         return;
-    if (!s_cheat[6]) {
-        weapons_restore();
+    weapons_restore();
+    if (!s_cheat[6] && !s_cheat[7] && !s_cheat[8])
         return;
-    }
     if (!seen) {                                       /* a new record, a new mark */
         static unsigned n;
         s_mark = (uint8_t)(0x80 | ((unsigned)time(NULL) + 37u * ++n) % 0x7F);
@@ -612,6 +639,8 @@ static void weapons_tick(void)
     for (size_t i = 0; i < N_WEAPONS; i++) {
         uint16_t item = s_weapons[i].item;
         uint32_t slot = family_slot(i);
+        if (!s_cheat[6 + s_weapons[i].group])
+            continue;
         if (!s_had[i].seen) {
             if (slot && equipped(MEM16(slot)) && MEM16(slot) != item)
                 continue;                              /* a lower one in his hands: when he holds another */
@@ -777,6 +806,7 @@ void ngb_frame_tick(void)
     pos_tick();
     { extern void ngb_intercept_frame(void); ngb_intercept_frame(); }   /* src/intercept.c: Ryu's Intercept moves */
     { extern void ngb_ut_charge_frame(void); ngb_ut_charge_frame(); }   /* src/ut_charge.c: Essence-Only Charging */
+    { extern void ngb_responsive_frame(void); ngb_responsive_frame(); }   /* src/responsive.c: Responsive Menus */
     { extern void ngb_fps_tick(void); ngb_fps_tick(); }   /* src/fps_text.c: the frame counter's lettering */
 #ifdef __ANDROID__
     { extern void ngb_android_frame(void); ngb_android_frame(); }   /* src/android_main.c: the clocks' hint */
@@ -930,3 +960,4 @@ void sub_001DB520(void)
     }
     game_flag();
 }
+

@@ -8,12 +8,16 @@
  * commands in sub_001DD300; 0xDB9888 non-zero besides). The body is the lifted one, kept here (listed in
  * src/manual_functions.json so the pipeline does not generate it), with the last of those tests passed while
  * the option is on. The watched bytes are left alone, so the saves are the same with it on or off. Movies are
- * src/movie_skip.c's.
+ * src/movie_skip.c's. Responsive Menus (src/responsive.c) may count a Start pressed before the script allowed
+ * the skip as pressed once it does.
  */
 #define RECOMP_GENERATED_CODE
 #include "recomp_funcs.h"
 
 int ngb_pc_setting(int which);   /* src/ingame_menu.c: 34 Skip Any Cutscene */
+void ngb_responsive_event_start(void);   /* src/responsive.c */
+void ngb_responsive_paused(void);
+int ngb_responsive_cutscene(void);
 
 /**
  * sub_001DBEE0
@@ -30,6 +34,7 @@ void sub_001DBEE0(void)
     uint32_t _fa = 0, _fb = 0;
     int32_t _fas = 0, _fbs = 0;
     (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+    int kept = 0;
 
 loc_001DBEE0: ;
     PUSH32(esp, ebp);
@@ -85,6 +90,7 @@ loc_001DBF25: ;
     PUSH32(esp, 0x001DBF35u); RECOMP_ABI_CALL(0x001DC120u, sub_001DC120); /* call 0x001DC120 */
 
 loc_001DBF35: ;
+    ngb_responsive_event_start();   /* (src/responsive.c: a new event, nothing kept from the last) */
     SET_LO8(ebx, MEM8(0xDB9AD5));
     esi = 0; /* xor self */
     _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
@@ -158,6 +164,7 @@ loc_001DBFB6: ;
     if (CMP_NE(_fa, _fb)) goto loc_001DBFF7; /* jne: not equal / not zero */
 
 loc_001DBFBC: ;
+    ngb_responsive_paused();   /* (src/responsive.c: the pause menu's Start is not a press for the event) */
     eax = MEM32(0xD21E4C);
     eax = eax << 5;
     _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* shift result */
@@ -228,6 +235,7 @@ loc_001DC028: ;
     PUSH32(esp, 0x001DC02Du); RECOMP_ABI_CALL(0x001DCD60u, sub_001DCD60); /* call 0x001DCD60 */
 
 loc_001DC02D: ;
+    kept = ngb_responsive_cutscene();   /* Responsive Menus: a press kept from before it was skippable */
     esi = eax;
     SET_LO8(eax, MEM8(0xDB9888));
     _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(0) & 0xFFu;
@@ -241,7 +249,7 @@ loc_001DC038: ;
       _fa = (uint32_t)_r & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); _fb = (_r != (int64_t)(int32_t)_r); } /* imul */
     _fa = (uint32_t)(MEM8(ecx + 0xD219A8)) & 0xFFu; _fb = (uint32_t)(0x10) & 0xFFu;
     _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* test MEM8(ecx + 0xD219A8), 0x10 (8-bit) */
-    if (TEST_Z(_fa, _fb)) goto loc_001DC0AB; /* je: equal / zero */
+    if (TEST_Z(_fa, _fb) && !kept) goto loc_001DC0AB; /* je: equal / zero */
 
 loc_001DC04B: ;
     edx = ZX16(MEM16(0xDB9C6E));
