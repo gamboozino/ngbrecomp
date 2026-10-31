@@ -146,7 +146,8 @@ of the pause menu. Changes apply at once and are saved.
   Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
   ignores it for a while (#116)
-- **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs.
+- **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
+  hit kill (any hit that hurts an enemy or a boss kills it).
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
   mission), Arcade Ninja Gaiden and Movie Theater without earning them (saved); All Weapons (every melee and
   projectile weapon at its highest level), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,

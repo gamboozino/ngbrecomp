@@ -80,7 +80,7 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_GLOW, S_QUICKFREEZE, S_QUICKSCALE, S_INFITEMS, S_INFAMMO, S_POSAUDIO, S_HUD, S_AUDIOOUT,
        S_MISSIONS, S_ARCADE, S_MOVIES, S_LOADDETAIL, S_RTHREAD, S_INTERCEPT, S_ALLWEAP,
        S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
-       S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
+       S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
        S_COUNT };
 
 static const char *const s_label[S_COUNT] = {
@@ -93,7 +93,7 @@ static const char *const s_label[S_COUNT] = {
     "Audio Output", "Missions", "Arcade Ninja Gaiden", "Movie Theater", "Lower Detail Under Load",
     "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
     "Responsive Menus", "All Armlets", "All Scrolls",
-    "Unlocks",
+    "One Hit Kill", "Unlocks",
 };
 static const char *const s_help[S_COUNT] = {
     "Draws the game at a multiple of the console's resolution.",
@@ -135,6 +135,7 @@ static const char *const s_help[S_COUNT] = {
     "Start at the title, in a cutscene's opening wait and after equipping in the pause menu works at once.",
     "Every armlet and band. Turned off, they are taken back.",
     "The Izuna Drop, Counter Attack and Guillotine Throw scrolls. Turned off, they are taken back.",
+    "Any hit that hurts an enemy or a boss kills it. For this session only.",
     "Difficulties, costumes and the main menu's extras (saved); weapons, armlets and scrolls (this session).",
 };
 
@@ -151,7 +152,7 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_SKIP, -1 },
     { S_POSAUDIO, S_AUDIOOUT, -1 },
     { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, -1 },
-    { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_UNLOCKS, -1 },
+    { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
     { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },
 };

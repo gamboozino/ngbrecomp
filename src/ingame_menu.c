@@ -87,7 +87,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
  * MOVIE THEATER unlocked (src/cheats.c, saved), 29 Lower Detail Under Load (src/d3d/d3d.c), 30 the render thread
- * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets and 38 all technique scrolls (cheats). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
+ * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
  * cheats' not. */
 int ngb_cheat(int which);
 void ngb_cheat_set(int which, int on);
@@ -105,7 +105,7 @@ int ngb_pc_setting(int which)
         return ngb_cheat(3);
     if (which == 21 || which == 22)                    /* infinite items, infinite projectiles */
         return ngb_cheat(which - 17);
-    if (which == 32 || which == 37 || which == 38)     /* all weapons, armlets, technique scrolls */
+    if (which == 32 || which == 37 || which == 38 || which == 39)   /* all weapons, armlets, scrolls, one hit kill */
         return ngb_cheat(which == 32 ? 6 : which - 30);
     if (which == 14 || which == 16 || which == 17) {
         ngb_pc_setting(0);
@@ -152,7 +152,7 @@ int ngb_pc_setting(int which)
 void ngb_pc_set_setting(int which, int value)
 {
     if ((which >= 11 && which <= 13) || which == 15 || which == 21 || which == 22 || which == 32 || which == 37 ||
-        which == 38) {
+        which == 38 || which == 39) {
         ngb_cheat_set(which == 32 ? 6 : which >= 37 ? which - 30 : which == 15 ? 3 : which >= 21 ? which - 17 :
                       which - 11, value);
         return;
