@@ -2,8 +2,8 @@
 <!-- Ninja Gaiden Black (static recompilation) for Android: SDL's activity running libmain.so (packaging/android/build.sh) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.gamboozino.ngbrecomp"
-    android:versionCode="948"
-    android:versionName="0.9.48">
+    android:versionCode="949"
+    android:versionName="0.9.49">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
