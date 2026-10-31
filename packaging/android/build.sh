@@ -82,7 +82,7 @@ if [ "$(cat "$prefix/adrenotools.stamp" 2>/dev/null)" != "$adrenotools" ] || [ !
 fi
 # Turnip: Mesa's Vulkan driver for Adreno, built from Mesa's release (a build folder of its own for each version;
 # a run that stopped partway picks up where it was)
-tb=$deps/build-turnip-$mesa
+tb=$deps/build-turnip-$mesa-2   # (-2: with the two extensions below)
 turnip=$tb/src/freedreno/vulkan/libvulkan_freedreno.so
 if [ ! -f "$turnip" ]; then
     if [ ! -f "$deps/src/mesa-$mesa/meson.build" ]; then   # (unpacked whole, then put in place)
@@ -93,6 +93,12 @@ if [ ! -f "$turnip" ]; then
         mv "$deps/src/mesa-$mesa.part/mesa-$mesa" "$deps/src/mesa-$mesa"
         rm -rf "${deps:?}/src/mesa-$mesa.part" "$deps/mesa-$mesa.tar.xz"
     fi
+    # Mesa offers a KHR extension on Android only from the API level that took it in: dynamic rendering from 33,
+    # synchronization2 from 31. Built for $api, Turnip left both out, and on a phone whose system Vulkan loader is
+    # older than 1.3 the renderer had no other way to them (#155). Offered from $api here.
+    sed -i -e "s/\"VK_KHR_dynamic_rendering\": 33,/\"VK_KHR_dynamic_rendering\": $api,/" \
+        -e "s/\"VK_KHR_synchronization2\": 31,/\"VK_KHR_synchronization2\": $api,/" \
+        "$deps/src/mesa-$mesa/src/vulkan/util/vk_extensions.py"
     [ -x "$deps/venv/bin/meson" ] || { python3 -m venv "$deps/venv" &&
         "$deps/venv/bin/pip" install -q meson==1.12.1 Mako==1.4.3 PyYAML==6.0.3 packaging==26.3; }
     bin=$(echo "$ndk"/toolchains/llvm/prebuilt/*/bin)
