@@ -18,6 +18,7 @@
 #include "win32_compat.h"
 #include "vcpu.h"
 
+#include <dlfcn.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdlib.h>
@@ -2501,6 +2502,72 @@ static DWORD veh_code(int sig, const siginfo_t *si)
     return 0;
 }
 
+/* NGB_FAULT_COUNT=1 (debugging): the faults the handlers take, by the Xbox address and the code's address, the
+ * most frequent printed every 5 s by compat_fault_report (the game's frame end): which register accesses cost a
+ * signal each. A small open table, counted with atomics (any thread may fault). */
+#define FAULT_SLOTS 1024
+static struct { uint64_t key; uint32_t n; } s_faults[FAULT_SLOTS];
+static int s_fault_count = -1;
+static void fault_count(uint32_t xva, uintptr_t pc)
+{
+    if (s_fault_count < 0)
+        s_fault_count = getenv("NGB_FAULT_COUNT") != NULL;
+    if (!s_fault_count)
+        return;
+    uint64_t key = ((uint64_t)xva << 32) ^ (uint64_t)(pc & 0xFFFFFFFFu) ^ ((uint64_t)(pc >> 32) << 40);
+    if (!key)
+        key = 1;
+    for (uint32_t i = 0, h = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 54); i < FAULT_SLOTS; i++, h = (h + 1) % FAULT_SLOTS) {
+        uint64_t k = __atomic_load_n(&s_faults[h].key, __ATOMIC_RELAXED), zero = 0;
+        if (k == key || (!k && __atomic_compare_exchange_n(&s_faults[h].key, &zero, key, 0, __ATOMIC_RELAXED,
+                                                            __ATOMIC_RELAXED)) || zero == key) {
+            __atomic_fetch_add(&s_faults[h].n, 1, __ATOMIC_RELAXED);
+            return;
+        }
+    }
+}
+static struct { uint32_t xva; uintptr_t pc; } s_fault_names[FAULT_SLOTS];   /* (the key's parts, for the report) */
+
+void compat_fault_report(void)
+{
+    static struct timespec last;
+    struct timespec now;
+    if (s_fault_count <= 0)
+        return;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (last.tv_sec && now.tv_sec - last.tv_sec < 5)
+        return;
+    double secs = last.tv_sec ? (now.tv_sec - last.tv_sec) + (now.tv_nsec - last.tv_nsec) / 1e9 : 0;
+    last = now;
+    uint32_t total = 0, top[12] = {0};
+    int at[12];
+    for (int j = 0; j < 12; j++)
+        at[j] = -1;
+    for (int i = 0; i < FAULT_SLOTS; i++) {
+        uint32_t n = __atomic_exchange_n(&s_faults[i].n, 0, __ATOMIC_RELAXED);
+        total += n;
+        for (int j = 0; j < 12; j++)
+            if (n > top[j]) {
+                memmove(top + j + 1, top + j, (11 - j) * sizeof top[0]);
+                memmove(at + j + 1, at + j, (11 - j) * sizeof at[0]);
+                top[j] = n;
+                at[j] = i;
+                break;
+            }
+    }
+    if (!secs)
+        return;
+    fprintf(stderr, "[FAULTS] %.0f a second over %.1f s; the most:\n", total / secs, secs);
+    for (int j = 0; j < 12 && at[j] >= 0; j++) {
+        Dl_info di;
+        uintptr_t pc = s_fault_names[at[j]].pc;
+        int named = dladdr((void *)pc, &di);
+        fprintf(stderr, "[FAULTS]   %8.0f/s  xbox %08X  code %s+0x%lx (%s)\n", top[j] / secs,
+                s_fault_names[at[j]].xva, named && di.dli_fname ? strrchr(di.dli_fname, '/') ? strrchr(di.dli_fname, '/') + 1 : di.dli_fname : "?",
+                (unsigned long)(named ? pc - (uintptr_t)di.dli_fbase : pc), named && di.dli_sname ? di.dli_sname : "?");
+    }
+}
+
 static void veh_signal(int sig, siginfo_t *si, void *uc_)
 {
     ucontext_t *uc = (ucontext_t *)uc_;
@@ -2530,6 +2597,23 @@ static void veh_signal(int sig, siginfo_t *si, void *uc_)
         rec.ExceptionInformation[0] = (uc->uc_mcontext.gregs[REG_ERR] & 2) ? 1 : 0;
 #endif
         rec.ExceptionInformation[1] = (ULONG_PTR)si->si_addr;
+        if (s_fault_count) {
+            /* (weak: the platform's own tests link without the kernel that holds it) */
+            extern ptrdiff_t g_xbox_mem_offset __attribute__((weak));
+            uint32_t xva = (uint32_t)((uintptr_t)si->si_addr - (&g_xbox_mem_offset ? (uintptr_t)g_xbox_mem_offset : 0));
+            fault_count(xva, (uintptr_t)ctx.Rip);
+            if (s_fault_count > 0) {   /* (names for the report: the key's slot, last writer wins) */
+                uint64_t key = ((uint64_t)xva << 32) ^ (uint64_t)((uintptr_t)ctx.Rip & 0xFFFFFFFFu) ^
+                               ((uint64_t)((uintptr_t)ctx.Rip >> 32) << 40);
+                for (uint32_t i = 0, h = (uint32_t)((key ? key : 1) * 0x9E3779B97F4A7C15ull >> 54); i < FAULT_SLOTS;
+                     i++, h = (h + 1) % FAULT_SLOTS)
+                    if (s_faults[h].key == (key ? key : 1)) {
+                        s_fault_names[h].xva = xva;
+                        s_fault_names[h].pc = (uintptr_t)ctx.Rip;
+                        break;
+                    }
+            }
+        }
     }
 
     /* Handlers take runtime locks (the GPU model's, for one): a suspension

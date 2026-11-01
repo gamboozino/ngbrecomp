@@ -1272,6 +1272,9 @@ void ngb_frame_tick(void)
     cheat_tick();
     memdump_tick();
     poke_tick();
+#ifndef _WIN32
+    { extern void compat_fault_report(void); compat_fault_report(); }   /* NGB_FAULT_COUNT: faults by place */
+#endif
 }
 
 /* ---- every difficulty from the start ----

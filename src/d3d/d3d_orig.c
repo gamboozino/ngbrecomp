@@ -2,6 +2,7 @@
  * src/d3d/d3d_hooks.c calls them when the hook does not take the call. */
 #define RECOMP_GENERATED_CODE
 #include "recomp_funcs.h"
+#include "gpu_regs.h"
 
 /**
  * sub_003C5260
@@ -11021,7 +11022,7 @@ loc_003CACEC: ;
     eax = MEM32(edx + 0x1C20);
     esi = esi & 0xFFFFFFF;
     _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */
-    MEM32(eax + 0x40) = esi;
+    GW32(eax + 0x40, esi);   /* the GPU's PUT, without a fault (src/d3d/gpu_regs.h) */
     eax = MEM32(0x3D5F10);
     _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
     _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0 (32-bit) */

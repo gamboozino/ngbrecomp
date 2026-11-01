@@ -134,6 +134,7 @@ add_library(ngb_gen OBJECT ${RECOMP_GEN_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cutscene_skip.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/responsive.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fiber_delete.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/d3d/gpu_regs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/playtime.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/quick_select.c
@@ -158,6 +159,7 @@ target_include_directories(ngb_gen PRIVATE
 )
 target_link_libraries(ngb_gen PRIVATE platform)
 if(NGB_NV2A_VK)
+    target_compile_definitions(ngb_gen PRIVATE NGB_NV2A_VK)   # (src/d3d/gpu_regs.h: the GPU model is there)
     find_package(SDL2 REQUIRED)   # SDL's key codes (src/pause_tab.c's key prompts)
     target_include_directories(ngb_gen PRIVATE $<TARGET_PROPERTY:SDL2::SDL2,INTERFACE_INCLUDE_DIRECTORIES>)
 endif()

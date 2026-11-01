@@ -106,6 +106,13 @@ static void wr(void *dev, uint32_t off, uint64_t val, int size)
     nv2a_vk_mmio_write(off, val, (unsigned)size);
 }
 
+/* The registers read and written without a fault: what a guest access to the aperture comes to (rd's polling
+ * included), for code that knows it may be touching them (src/d3d/gpu_regs.h). Each fault is a trip through the
+ * kernel -- some 20 us on a phone, thousands a second from D3D's kickoff and the GPU's interrupt handler. */
+int nv2a_reg_live(void) { return s_aperture != 0; }   /* (the model started: NGB_RENDERER=none never starts it) */
+uint32_t nv2a_reg_read32(uint32_t off) { return (uint32_t)rd(NULL, off, 4); }
+void nv2a_reg_write32(uint32_t off, uint32_t val) { wr(NULL, off, val, 4); }
+
 static LONG CALLBACK nv2a_veh(PEXCEPTION_POINTERS ep)
 {
     uintptr_t a;
