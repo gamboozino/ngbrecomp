@@ -7,10 +7,15 @@
  * there (KEY=value lines) sets more, as the environment does on the desktop (NV2A_FPS_LOG=1, NGB_CHEATS=...),
  * and a settings.ini put there replaces the game's settings at the next start (then it is taken away).
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE   /* cpu_set_t, sched_setaffinity */
+#endif
+#include <android/api-level.h>
 #include <android/log.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,10 +35,14 @@ static int s_log_pipe[2];
  * held up. Android's performance hints (13 and later) let the app say how long each frame took against the
  * 16.7 ms it should take, and the system raises the clocks of the threads named. Each frame the game ends
  * (ngb_frame_tick) reports the time since the last; the threads are the process's, renamed every few seconds
- * as they come and go. NGB_PERF_HINT=0 leaves it out (comparing). */
+ * as they come and go. Some phones refuse a session of them all (37 to 50 threads; the MediaTek and Xiaomi phones of
+ * #155 #159, whose frame rate then sagged whenever the screen was not touched -- a touch raises the clocks for a
+ * moment): then the eight busiest, by the CPU time each has used, picked again as they are renamed. NGB_PERF_HINT=0
+ * leaves it out (comparing). */
 typedef struct APerformanceHintManager APerformanceHintManager;
 typedef struct APerformanceHintSession APerformanceHintSession;
 static APerformanceHintSession *s_hint;
+static int s_hint_few;   /* the session holds the busiest threads only */
 static int (*s_hint_report)(APerformanceHintSession *, int64_t);
 static int (*s_hint_threads)(APerformanceHintSession *, const pid_t *, size_t);
 
@@ -48,6 +57,108 @@ static size_t own_threads(pid_t *tids, size_t max)
     if (d)
         closedir(d);
     return n;
+}
+
+/* The k busiest of the process's threads into tids, by the CPU time each has used since the last call
+ * (/proc/self/task/N/stat's utime + stime, after the name's closing parenthesis): by their totals, a thread busy only
+ * at the start -- the shader prewarm's 10 to 25 s -- would stay "busiest" long after */
+static size_t busiest_threads(pid_t *tids, size_t k)
+{
+    static pid_t seen[256];
+    static unsigned long long seen_used[256];
+    static size_t seen_n;
+    pid_t all[256];
+    unsigned long long used[256], now[256];
+    size_t n = own_threads(all, 256);
+    for (size_t i = 0; i < n; i++) {
+        char path[64], buf[512];
+        snprintf(path, sizeof path, "/proc/self/task/%d/stat", (int)all[i]);
+        used[i] = now[i] = 0;
+        FILE *f = fopen(path, "r");
+        if (!f)
+            continue;
+        size_t got = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[got] = 0;
+        const char *p = strrchr(buf, ')');
+        unsigned long long ut = 0, st = 0;
+        /* (after the name: state, then fields 4..13, utime 14, stime 15) */
+        if (p && sscanf(p + 2, "%*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %llu %llu", &ut, &st) == 2)
+            now[i] = ut + st;
+        used[i] = now[i];
+        for (size_t j = 0; j < seen_n; j++)
+            if (seen[j] == all[i]) {
+                used[i] = now[i] >= seen_used[j] ? now[i] - seen_used[j] : 0;
+                break;
+            }
+    }
+    for (size_t i = 0; i < n; i++) {
+        seen[i] = all[i];
+        seen_used[i] = now[i];
+    }
+    seen_n = n;
+    size_t m = 0;
+    for (; m < k && m < n; m++) {   /* (a few picks from a few dozen: a selection, not a sort) */
+        size_t best = m;
+        for (size_t i = m + 1; i < n; i++)
+            if (used[i] > used[best])
+                best = i;
+        pid_t tt = all[m]; all[m] = all[best]; all[best] = tt;
+        unsigned long long tu = used[m]; used[m] = used[best]; used[best] = tu;
+        tids[m] = all[m];
+    }
+    return m;
+}
+
+/* Without hints (#155 #159: the phone has none, or refuses every session): the busiest threads kept on the fast cores,
+ * those of at least half the fastest one's capacity (/sys/devices/system/cpu/cpuN/cpu_capacity). The scheduler
+ * otherwise lets them drift over the slow cores, none busy for long, and their clocks stay low. Every other thread
+ * is set back to all the cores each time: one busy no longer, and one started by a pinned thread (which inherits its
+ * mask), are let go, and a mask the system narrowed while the app was in the background is put right. NGB_PIN=0
+ * leaves it out; with NGB_PERF_HINT=0 (comparing) it takes NGB_PIN=1. */
+static void pin_busiest(void)
+{
+    static cpu_set_t fast, every;
+    static int tried, have;
+    if (!tried) {
+        tried = 1;
+        int cap[64] = {0}, best = 0, n = 0;
+        for (int c = 0; c < 64; c++) {
+            char path[96];
+            snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpu_capacity", c);
+            FILE *f = fopen(path, "r");
+            if (!f)
+                continue;   /* (cores numbered with a gap: the ones past it counted too) */
+            if (fscanf(f, "%d", &cap[c]) != 1)
+                cap[c] = 0;
+            fclose(f);
+            if (cap[c] > best)
+                best = cap[c];
+            n = c + 1;
+        }
+        CPU_ZERO(&fast);
+        CPU_ZERO(&every);
+        for (int c = 0; c < n; c++)
+            CPU_SET(c, &every);
+        for (int c = 0; c < n; c++)
+            if (best > 0 && cap[c] * 2 >= best) {
+                CPU_SET(c, &fast);
+                have++;
+            }
+        fprintf(stderr, "[ANDROID] busiest threads on %d fast core%s of %d\n", have, have == 1 ? "" : "s", n);
+        if (have == n)
+            have = 0;   /* (all alike: nothing to gain) */
+    }
+    if (!have)
+        return;
+    pid_t tids[8], all[256];
+    size_t k = busiest_threads(tids, 4), n = own_threads(all, 256);
+    for (size_t i = 0; i < n; i++) {
+        int busy = 0;
+        for (size_t j = 0; j < k; j++)
+            busy |= all[i] == tids[j];
+        sched_setaffinity(all[i], sizeof fast, busy ? &fast : &every);
+    }
 }
 
 static int64_t now_ns(void)
@@ -71,18 +182,36 @@ void ngb_android_frame(void)
             lib ? dlsym(lib, "APerformanceHint_createSession") : NULL;
         s_hint_report = lib ? dlsym(lib, "APerformanceHint_reportActualWorkDuration") : NULL;
         s_hint_threads = lib ? dlsym(lib, "APerformanceHint_setThreads") : NULL;
+        int64_t (*rate)(APerformanceHintManager *) = lib ? dlsym(lib, "APerformanceHint_getPreferredUpdateRateNanos") : NULL;
         APerformanceHintManager *m = get && !(off && *off == '0') ? get() : NULL;
         pid_t tids[256];
         size_t n = own_threads(tids, 256);
         s_hint = m && create && s_hint_report ? create(m, (const int32_t *)tids, n, 16666667) : NULL;
-        fprintf(stderr, "[ANDROID] performance hints: %s (%zu threads)\n", s_hint ? "on" : "not available", n);
+        if (!s_hint && m && create && s_hint_report) {
+            n = busiest_threads(tids, 8);
+            s_hint = create(m, (const int32_t *)tids, n, 16666667);
+            s_hint_few = s_hint != NULL;
+        }
+        if (s_hint)
+            fprintf(stderr, "[ANDROID] performance hints: on (%zu %sthreads)\n", n, s_hint_few ? "busiest " : "");
+        else
+            fprintf(stderr, "[ANDROID] performance hints: not available (%s; Android API %d)\n",
+                    off && *off == '0' ? "NGB_PERF_HINT=0" : !get ? "no such call" : !m ? "no manager"
+                    : rate && rate(m) < 0 ? "not supported by this phone" : "a session refused",
+                    android_get_device_api_level());
         renamed = t;
     }
     if (s_hint && last)
         s_hint_report(s_hint, t - last);
+    if (!s_hint && t - renamed > 5000000000LL) {
+        const char *pin = getenv("NGB_PIN"), *hint = getenv("NGB_PERF_HINT");
+        if (pin ? *pin != '0' : !(hint && *hint == '0'))
+            pin_busiest();
+        renamed = t;
+    }
     if (s_hint && s_hint_threads && t - renamed > 5000000000LL) {   /* (setThreads: Android 14) */
         pid_t tids[256];
-        size_t n = own_threads(tids, 256);
+        size_t n = s_hint_few ? busiest_threads(tids, 8) : own_threads(tids, 256);
         s_hint_threads(s_hint, tids, n);
         renamed = t;
     }

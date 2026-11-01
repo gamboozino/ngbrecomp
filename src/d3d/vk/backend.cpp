@@ -9,6 +9,9 @@
 // NGB_D3D_DUMP=dir writes each presented frame (and NGB_D3D_DUMP_FROM=n, NGB_D3D_DUMP_COUNT=n
 // choose which) as dir/frame_NNNNN.ppm.
 #include "port.h"
+#ifdef __ANDROID__
+#include <sys/resource.h>
+#endif
 #include <volk.h>
 #include <vk_mem_alloc.h>
 
@@ -4479,6 +4482,10 @@ void VulkanBackend::Compiler() {
 }
 
 void VulkanBackend::Prewarm() {
+#ifdef __ANDROID__
+    // Below the game's threads: on a phone it runs for 10 to 25 s after a start, on the cores the game needs (#155)
+    setpriority(PRIO_PROCESS, 0, 10);   // (Linux: this thread alone)
+#endif
     struct Rec { char kind; uint64_t key; std::vector<uint8_t> data; };
     std::vector<Rec> recs;
     auto parse = [&](const std::vector<uint8_t>& b) {
