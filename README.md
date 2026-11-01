@@ -15,6 +15,22 @@ resolutions, widescreen and ultrawide, keyboard and mouse, rebindable controls a
 sound, movies, text): on first start it asks for your disc image and installs the game from it. It is made for the **retail USA
 release** (NTSC-U, title ID `5443000D`) and checks for it.
 
+## Screenshots
+
+![Ultrawide 21:9: Ryu in front of Han's Bar](https://github.com/user-attachments/assets/e9fb1579-2320-4ff9-8fc0-0ea2a724316b)
+<p align="center"><sub>21:9 at 6x render resolution</sub></p>
+
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/6dc8bc0d-c5c7-418d-9432-184055bbe3e1" alt="Chapter 1"></td>
+    <td><img src="https://github.com/user-attachments/assets/c4944721-b04b-4061-a42f-dbff16fbd29b" alt="A fight, the HUD hidden"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>16:9 at 6x render resolution</sub></td>
+    <td align="center"><sub>HUD hidden</sub></td>
+  </tr>
+</table>
+
 ## Features
 
 - Native Linux (AppImage) and Windows (x64) builds; Steam Deck friendly
@@ -128,6 +144,13 @@ checkbox. The folder must be writable, so not inside Program Files. Delete `port
 
 Everything is in the game's own menus: **RECOMP SETTINGS** on the main menu, and the **Settings** tab
 of the pause menu. Changes apply at once and are saved.
+
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/69f8a3fa-1aa2-42b0-b35a-c7531ff931d7" alt="RECOMP SETTINGS: Graphics"></td>
+    <td><img src="https://github.com/user-attachments/assets/dc1825e8-dbb7-4d00-a62b-990af3bfac53" alt="RECOMP SETTINGS: Gameplay"></td>
+  </tr>
+</table>
 
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
   anisotropic), anti-aliasing (MSAA), shadow resolution, Smoother Glow (a softer, fainter glow on
