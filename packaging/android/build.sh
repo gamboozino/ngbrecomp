@@ -170,6 +170,7 @@ for lib in libhook_impl libmain_hook; do   # (libadrenotools' hooks: the two the
     cp "$prefix/lib/$lib.so" "$apk/root/lib/$abi/"
 done
 "$ndkbin/llvm-strip" -o "$apk/root/lib/$abi/libvulkan_freedreno.so" "$turnip"
+cp "$repo/packaging/d3d-seed.bin" "$apk/root/lib/$abi/libd3dseed.so"   # (the shader seed: src/android_main.c, seed_path)
 python3 - "$apk/base.apk" "$apk/root" <<'PY'
 import os, sys, zipfile
 with zipfile.ZipFile(sys.argv[1], 'a', zipfile.ZIP_DEFLATED) as z:

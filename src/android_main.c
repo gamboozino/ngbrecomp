@@ -153,6 +153,24 @@ static void set_dir(const char *var, const char *base, const char *sub)
     setenv(var, path, 0);
 }
 
+/* The renderer's shader seed (share/NinjaGaidenBlack/d3d-seed.bin on the desktop, src/d3d/vk/backend.cpp): in the
+ * APK as libd3dseed.so, a name Android unpacks to the native libraries' folder with the rest (the APK had none
+ * before, and a phone made every shader as it was first drawn: thousands of draws left out in the attract demo) */
+static void seed_path(void)
+{
+    Dl_info info;
+    char path[1024];
+    if (getenv("NGB_D3D_SEED") || !dladdr((void *)seed_path, &info) || !info.dli_fname)
+        return;
+    snprintf(path, sizeof path, "%s", info.dli_fname);
+    char *slash = strrchr(path, '/');
+    if (!slash)
+        return;
+    snprintf(slash + 1, sizeof path - (size_t)(slash + 1 - path), "libd3dseed.so");
+    if (access(path, R_OK) == 0)
+        setenv("NGB_D3D_SEED", path, 0);
+}
+
 int SDL_main(int argc, char **argv)
 {
     (void)argc;
@@ -168,6 +186,7 @@ int SDL_main(int argc, char **argv)
         set_dir("XDG_DATA_HOME", base, "data");
         take_settings(base);
     }
+    seed_path();
     char log_path[1024];
     snprintf(log_path, sizeof log_path, "%s/log.txt", base ? base : ".");
     FILE *log = fopen(log_path, "w");

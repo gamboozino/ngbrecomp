@@ -312,9 +312,12 @@ F11 or Alt+Enter toggles fullscreen and
 F10 the FPS counter (frames per second, average and worst frame time over the last half
 second). Compiled shaders are kept in `~/.cache/NinjaGaidenBlack/shaders` (the new renderer's in its
 `d3d` folder: how each shader is made, its SPIR-V and the pipelines), and all of them are made
-again in the background at the next start, before the game needs them; a seed shipped with the
-AppImage (`packaging/d3d-seed.bin`, recorded over the first chapters; the game's vertex programs in
-it are only places in the player's own `default.xbe`) does the same on the very first start. So
+again in the background at the next start, before the game needs them; a seed shipped with every
+package (`packaging/d3d-seed.bin`, recorded over chapters 1 to 13, the Missions and the attract demo; the
+game's vertex programs in it are only places in the player's own `default.xbe`; on Android it is
+`libd3dseed.so` in the APK) does the same on the very first start. It goes stale when the renderer
+changes how a shader's key is made: `tools/check_shader_seed.py` compares it with a test run's cache, and
+`NGB_D3D_SEED_RECORD` records a new one (docs/renderer.md). So
 an effect does not stutter the frame it first appears. The AppImage also carries the pipelines
 recorded while testing (`packaging/shader-seed`), built in the background at startup;
 the game's vertex programs are not in it, only where each is in `default.xbe`, and they are
@@ -426,8 +429,8 @@ emulation still runs the GPU's command stream (the game's fences and vertical bl
 it) but draws nothing; the renderer draws on the same Vulkan device and the same window, so the
 settings and the FPS counter work as before. Render resolution, texture filtering
 and shadow resolution apply to it. It needs Vulkan 1.3's dynamic rendering and synchronization2
-(or those as extensions of an older driver) and push descriptors; without them the game says what is missing
-and ends (#47).
+(or those as extensions of an older driver); without them the game says what is missing and ends (#47).
+Push descriptors are used where the driver has them, else a descriptor set per draw (#159).
 
 `NGB_RENDERER=xemu` draws with xemu's NV2A renderer instead, as before (on Steam:
 `NGB_RENDERER=xemu %command%`). `NGB_RENDERER=mirror` keeps xemu drawing and showing the game
