@@ -69,6 +69,9 @@ constexpr int kEarLength = 64;  // past the longest delay and the taps: 31 + 31
 constexpr uint32_t kDsErrInvalidCall = 0x88780032u, kEFail = 0x80004005u;
 
 std::atomic<int> g_positional{2};
+// "Mixed" (Positional Audio 3): the filters' share of each ear, the rest "Clear"'s level -- the filters' cues for
+// where a sound is (behind, to the side) with less of their dullness (#126). NGB_POS_MIX=0..1 sets it, for tuning.
+float g_pos_mix = 0.5f;
 bool g_surround = false;
 int g_output_choice = 0;  // Audio Output: 0 auto, 1 stereo, 2 5.1 (dsound_hle_set_output)  // the output is 5.1: FL FR C LFE BL BR, SDL's order and the mix bins'  // Positional Audio: 0 off, 1 console (the HRTF filters), 2 clear (their levels)
 int g_log = -1;
@@ -89,10 +92,12 @@ float Db(int32_t hundredths) { return hundredths <= -10000 ? 0.0f : std::pow(10.
 struct Ear {
     float tap[kHrtfTaps] = {};
     float delay = 0;
+    int peak = 0;   // the strongest tap: where "Mixed"'s level lines up with the filter
 };
 struct EarPair {
     Ear e[2];  // left, right
     float pan[2] = {1, 1};  // "Clear": each ear's level from its filter's strength, at constant power
+    float norm = 1;         // "Mixed": the filters brought to that same power, so neither half outweighs the other
 };
 
 struct Voice {
@@ -425,6 +430,8 @@ EarPair Ears(float azimuth, float elevation) {
         Ear& ear = p.e[k == 0 ? far : 1 - far];
         for (int i = 0; i < kHrtfTaps; i++) ear.tap[i] = (t[i] & 0x80 ? -float(t[i] & 0x7F) : float(t[i])) / 128.0f;
         ear.delay = t[31];
+        for (int i = 1; i < kHrtfTaps; i++)
+            if (std::fabs(ear.tap[i]) > std::fabs(ear.tap[ear.peak])) ear.peak = i;
     }
     // "Clear": the filters' strengths as the ears' levels, a few dB apart, the pair scaled to constant power
     // (0 dB). 0.9.40 gave each ear its filter's RMS gain instead, +2 to +5 dB by direction, most where the
@@ -434,6 +441,7 @@ EarPair Ears(float azimuth, float elevation) {
     for (int c = 0; c < 2; c++)
         for (int i = 0; i < kHrtfTaps; i++) e[c] += p.e[c].tap[i] * p.e[c].tap[i];
     for (int c = 0; c < 2; c++) p.pan[c] = e[0] + e[1] > 0 ? std::sqrt(2 * e[c] / (e[0] + e[1])) : 1.0f;
+    p.norm = e[0] + e[1] > 0 ? std::sqrt(2 / (e[0] + e[1])) : 1.0f;
     return p;
 }
 
@@ -589,13 +597,15 @@ void ReadFrame(Voice& v, const Cursor& at, float x[2]) {
     }
 }
 
-// a mono 3D voice through one ear's filter (or its "Clear" level), from its recent samples
-float EarOut(const Voice& v, const Ear& e, float pan, int mode) {
+// a mono 3D voice through one ear's filter (or its "Clear" level, or both: "Mixed"), from its recent samples
+float EarOut(const Voice& v, const Ear& e, float pan, float norm, int mode) {
     auto at = [&](int back) { return v.ear[(v.ear_pos - 1 - back) % kEarLength]; };
     if (mode == 2) return pan * at(0);
     float acc = 0;
     int d = int(e.delay);
     for (int k = 0; k < kHrtfTaps; k++) acc += e.tap[k] * at(d + k);
+    if (mode == 3)   // (the level delayed to the filter's strongest tap: out of line, the two would comb)
+        return g_pos_mix * norm * acc + (1 - g_pos_mix) * pan * std::copysign(1.0f, e.tap[e.peak]) * at(d + e.peak);
     return acc;
 }
 
@@ -633,7 +643,8 @@ void MixVoice(Voice& v, float* out, float* send, uint32_t frames, int mode) {
             v.ear_pos++;
             float t = float(i + 1) / frames, ear[2];
             for (int c = 0; c < 2; c++)
-                ear[c] = EarOut(v, then.e[c], then.pan[c], mode) * (1 - t) + EarOut(v, now.e[c], now.pan[c], mode) * t;
+                ear[c] = EarOut(v, then.e[c], then.pan[c], then.norm, mode) * (1 - t) +
+                         EarOut(v, now.e[c], now.pan[c], now.norm, mode) * t;
             for (uint32_t k = 0; k < kLanes; k++) {
                 v.gain[0][k] += dg[0][k];
                 bool left = k == kBinFrontLeft || k == kBinBackLeft || k == kBinCrosstalkFrontLeft ||
@@ -947,7 +958,15 @@ void LogFirst(int fn, const uint32_t* a) {
 
 }  // namespace
 
-extern "C" void dsound_hle_set_positional(int mode) { g_positional = std::clamp(mode, 0, 2); }
+extern "C" void dsound_hle_set_positional(int mode) {
+    static const bool once = [] {   // (read once: the audio thread reads g_pos_mix while the menus set the mode)
+        float m = std::getenv("NGB_POS_MIX") ? float(std::atof(std::getenv("NGB_POS_MIX"))) : g_pos_mix;
+        g_pos_mix = m >= 0 ? std::min(m, 1.0f) : 0.0f;   // (a NaN to 0, not into every voice)
+        return true;
+    }();
+    (void)once;
+    g_positional = std::clamp(mode, 0, 3);
+}
 // before the title's DirectSoundCreate: Audio Output (0 auto, 1 stereo, 2 5.1)
 extern "C" void dsound_hle_set_output(int choice) { g_output_choice = std::clamp(choice, 0, 2); }
 // the program's HRTF tables (DirectSoundUseFullHRTF's), for Positional Audio

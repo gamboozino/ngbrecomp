@@ -60,7 +60,8 @@ int dsound_hook(int fn)
 void mcpx_apu_set_hrtf(int mode);              /* xboxrecomp/src/apu */
 void dsound_hle_set_positional(int mode);      /* src/audio/dsound_hle.cpp */
 
-/* Positional Audio (0 off, 1 the HRTF filters, 2 panning; #30, #86), for whichever engine plays. */
+/* Positional Audio (0 off, 1 the HRTF filters, 2 panning, 3 the two mixed; #30, #86, #126), for whichever engine plays
+ * (the old one has no mix: 3 is its filters) */
 void ngb_audio_set_positional(int mode)
 {
     mcpx_apu_set_hrtf(mode);

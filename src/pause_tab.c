@@ -119,7 +119,7 @@ static const char *const s_help[S_COUNT] = {
     "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size.",
     "Healing items, the Talisman of Rebirth and the jewels (Demon Seal, Life of the Gods, Spirit of the Devils...)\nare not used up. For this session only.",
     "Shuriken, smoke bombs, arrows and spears are not used up. For this session only.",
-    "Sounds placed left and right. Clear: by level only. Console: as the Xbox on speakers, duller.",
+    "Sounds placed left and right. Clear: by level only. Console: as the Xbox, duller. Mixed: between the two.",
     "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen.",
     "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game.",
     "MISSIONS in the main menu without earning it.",
@@ -221,7 +221,7 @@ static void value_text(int row, char *out, size_t n)
     }
     case S_ASPECT:  snprintf(out, n, "%s", v == 4 ? "32:9" : v == 3 ? "21:9" : v == 2 ? "16:10" : v ? "16:9" : "4:3"); break;
     case S_QUICKSCALE: if (v) snprintf(out, n, "%d%%", v); else snprintf(out, n, "Off"); break;
-    case S_POSAUDIO: snprintf(out, n, "%s", v == 2 ? "Clear" : v ? "Console" : "Off"); break;
+    case S_POSAUDIO: snprintf(out, n, "%s", v == 3 ? "Mixed" : v == 2 ? "Clear" : v ? "Console" : "Off"); break;
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
     case S_INTERCEPT: snprintf(out, n, "%s", v == 2 ? "Hurricane" : v ? "Black" : "Off"); break;
     case S_UNLOCKS: snprintf(out, n, "%s", ""); break;
@@ -278,6 +278,8 @@ static void change(int row, int step)
         ngb_pc_set_setting(row, ngb_quick_scale_step(v, step));
         break;
     case S_POSAUDIO:
+        ngb_pc_set_setting(row, ngb_positional_step(v, step));
+        break;
     case S_AUDIOOUT:
     case S_INTERCEPT:
         ngb_pc_set_setting(row, (v + (step > 0 ? 1 : 2)) % 3);

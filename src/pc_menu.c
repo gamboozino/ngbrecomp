@@ -114,6 +114,7 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define D_POSAUDIO 0x201CA
 #define T_POSCONSOLE 0x201CD          /* Positional Audio's values: Console, Clear */
 #define T_POSPAN   0x201CE
+#define T_POSMIX   0x201FB            /* Positional Audio's Mixed (#126) */
 #define T_HUD      0x201CB            /* the HUD on or off (src/hud.c, #80) */
 #define D_HUD      0x201CC
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
@@ -221,6 +222,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_POSAUDIO, "Positional Audio" },
     { T_POSCONSOLE, "Console" },
     { T_POSPAN, "Clear" },
+    { T_POSMIX, "Mixed" },
     { T_HUD, "HUD" },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
@@ -228,7 +230,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_AUTO, "Auto" },
     { T_STEREO, "Stereo" },
     { T_SURROUND, "5.1" },
-    { D_POSAUDIO, "Sounds placed left and right. Clear: by level only. Console: as the Xbox on speakers, duller." },
+    { D_POSAUDIO, "Sounds placed left and right. Clear: by level only. Console: as the Xbox, duller. Mixed: between the two." },
     { T_QUICKSCALE, "Quick Menu" },
     { D_QUICKSCALE, "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size." },
     { D_GAMEPLAY, "Optional changes to how the game plays, each off unless chosen: the Quick Menu." },
@@ -807,7 +809,8 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
 {
     switch (row_kind(row)) {
     case ROW_QUICKFREEZE: return ngb_pc_setting(19) ? T_ON : T_OFF;
-    case ROW_POSAUDIO: return ngb_pc_setting(23) == 2 ? T_POSPAN : ngb_pc_setting(23) ? T_POSCONSOLE : T_OFF;
+    case ROW_POSAUDIO: return ngb_pc_setting(23) == 3 ? T_POSMIX : ngb_pc_setting(23) == 2 ? T_POSPAN
+                            : ngb_pc_setting(23) ? T_POSCONSOLE : T_OFF;
     case ROW_HUD:     return ngb_pc_setting(24) ? T_ON : T_OFF;
     case ROW_AUDIOOUT: return ngb_pc_setting(25) == 2 ? T_SURROUND : ngb_pc_setting(25) ? T_STEREO : T_AUTO;
     case ROW_QUICKSCALE: {
@@ -876,7 +879,7 @@ static int pc_value_change(int row, int delta)
         return 1;
     switch (kind) {
     case ROW_QUICKFREEZE: ngb_pc_set_setting(19, !ngb_pc_setting(19)); break;
-    case ROW_POSAUDIO: ngb_pc_set_setting(23, (ngb_pc_setting(23) + (step > 0 ? 1 : 2)) % 3); break;
+    case ROW_POSAUDIO: ngb_pc_set_setting(23, ngb_positional_step(ngb_pc_setting(23), step)); break;
     case ROW_HUD: ngb_pc_set_setting(24, !ngb_pc_setting(24)); break;
     case ROW_AUDIOOUT: ngb_pc_set_setting(25, (ngb_pc_setting(25) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_QUICKSCALE: ngb_pc_set_setting(20, ngb_quick_scale_step(ngb_pc_setting(20), step)); break;

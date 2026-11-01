@@ -97,6 +97,17 @@ void ngb_set_all_difficulties(int on);   /* src/cheats.c */
 void ngb_set_all_costumes(int on);
 void ngb_set_unlock(int which, int on);
 
+/* Positional Audio's next value in the menus' order -- Off, Clear, Mixed, Console -- not the values' (0 off, 1 console,
+ * 2 clear, 3 mixed: the saved numbers kept) */
+int ngb_positional_step(int v, int step)
+{
+    static const int order[4] = { 0, 2, 3, 1 };
+    int i = 0;
+    while (i < 4 && order[i] != v)
+        i++;
+    return order[((i < 4 ? i : 0) + (step > 0 ? 1 : 3)) % 4];
+}
+
 int ngb_pc_setting(int which)
 {
     if (which >= 11 && which <= 13)
@@ -178,7 +189,7 @@ void ngb_pc_set_setting(int which, int value)
     case 8: s_running.skip_intro = value; break;        /* both at the next start */
     case 9: s_running.show_launcher = value; break;
     case 18: s_running.smooth_glow = !!value; break;
-    case 23: s_running.positional_audio = value < 0 ? 0 : value > 2 ? 2 : value; ngb_audio_set_positional(s_running.positional_audio); break;
+    case 23: s_running.positional_audio = value < 0 ? 0 : value > 3 ? 3 : value; ngb_audio_set_positional(s_running.positional_audio); break;
     case 24: s_running.show_hud = !!value; break;
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */

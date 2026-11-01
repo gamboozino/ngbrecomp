@@ -26,7 +26,7 @@ typedef struct NgbSettings {
     int all_costumes;       /* every costume at New Game's Costume Selection */
     int unlock[3];          /* the main menu's MISSIONS, ARCADE NINJA GAIDEN and MOVIE THEATER (src/cheats.c) */
     int movie_43;           /* the game's Movie Display Ratio 4:3 (kept here: src/pc_menu.c) */
-    int positional_audio;   /* 3D sounds placed left and right (#30): 0 off, 1 the HRTF filters, 2 panning only (#86) */
+    int positional_audio;   /* 3D sounds placed left and right (#30): 0 off, 1 the HRTF filters, 2 panning only (#86), 3 both mixed (#126) */
     int show_hud;           /* the in-play HUD (src/hud.c, #80) */
     int audio_output;       /* 0 auto (5.1 on a 5.1 or 7.1 device), 1 stereo, 2 5.1 (src/audio/dsound_hle.cpp) */
     int smooth_glow;        /* the glow's continuous filtering (src/d3d/vk/glow_filter.h, #64) */
@@ -60,6 +60,7 @@ int ngb_vsync_step(int v, int dir);
 /* The quick menu's size (Gameplay): 25, 50, 75 or 100 percent, or 0 (Off). */
 int ngb_quick_scale_value(int v);
 int ngb_quick_scale_step(int v, int dir);
+int ngb_positional_step(int v, int step);   /* src/ingame_menu.c: Positional Audio in the menus' order */
 
 /* The window sizes offered for an aspect ratio, smallest first; the index of
  * the settings' own (-1: none of them). */

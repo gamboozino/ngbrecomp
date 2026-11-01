@@ -201,7 +201,7 @@ void ngb_settings_load(NgbSettings *s)
         } else if (!strcmp(key, "show_hud")) {
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
-            s->positional_audio = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);   /* 0 off, 1 console, 2 clear */
+            s->positional_audio = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
         } else if (!strcmp(key, "smoother_glow")) {
             s->smooth_glow = atoi(val) != 0;
         } else if (!strcmp(key, "detail_under_load")) {
