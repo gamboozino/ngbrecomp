@@ -21,9 +21,11 @@ typedef struct nv2a_vk_shared {
     VkQueue queue;
     /* Vulkan 1.3's dynamic rendering and synchronization2 on (core, or their
      * extensions on an older driver: the core names' functions are then the
-     * extensions'), and VK_KHR_push_descriptor: what the Direct3D renderer
-     * needs. */
+     * extensions'): what the Direct3D renderer needs. */
     bool features13;
+    /* VK_KHR_push_descriptor on (without it, the renderer binds a descriptor
+     * set per draw: the Mali drivers of many MediaTek phones). */
+    bool push_descriptor;
     uint32_t api_version;   /* the version the device was made for (VMA's) */
 } nv2a_vk_shared;
 

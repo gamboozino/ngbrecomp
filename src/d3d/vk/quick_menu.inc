@@ -70,7 +70,7 @@ void VulkanBackend::QuickMenuBackground(Image& dst) {
         for (auto& x : w) { x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; x.descriptorCount = 1; }
         w[0].dstBinding = 2; w[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[0].pImageInfo = &im;
         w[1].dstBinding = 6; w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER; w[1].pImageInfo = &sm;
-        d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 2, w);
+        PushSet(2, w);
         d_.vkCmdDraw(cmd_, 3, 1, 0, 0);
         d_.vkCmdEndRendering(cmd_);
         return true;
@@ -156,7 +156,7 @@ void VulkanBackend::QuickMenu(Image& dst) {
     for (auto& x : w) { x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; x.descriptorCount = 1; }
     w[0].dstBinding = 2; w[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[0].pImageInfo = &im;
     w[1].dstBinding = 6; w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER; w[1].pImageInfo = &sm;
-    d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 2, w);
+    PushSet(2, w);
     d_.vkCmdDraw(cmd_, 3, 1, 0, 0);
     d_.vkCmdEndRendering(cmd_);
     Barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -230,7 +230,7 @@ void VulkanBackend::FpsCounter(Image& dst) {
     for (auto& x : w) { x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; x.descriptorCount = 1; }
     w[0].dstBinding = 2; w[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[0].pImageInfo = &im;
     w[1].dstBinding = 6; w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER; w[1].pImageInfo = &sm;
-    d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 2, w);
+    PushSet(2, w);
     d_.vkCmdDraw(cmd_, 3, 1, 0, 0);
     d_.vkCmdEndRendering(cmd_);
     Barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);

@@ -1761,15 +1761,15 @@ _Noreturn void ngb_renderer_fatal(const char *detail)
     char msg[1024];
 #ifdef __ANDROID__
     snprintf(msg, sizeof msg,
-             "Ninja Gaiden Black needs a phone GPU whose Vulkan driver has dynamic rendering, "
-             "synchronization2 and push descriptors (Vulkan 1.3, or those as extensions), and this phone's "
+             "Ninja Gaiden Black needs a phone GPU whose Vulkan driver has dynamic rendering and "
+             "synchronization2 (Vulkan 1.3, or those as extensions), and this phone's "
              "does not:\n\n%s\n\n"
              "A system update sometimes brings a newer driver. Please report your phone's model and chip on "
              "the project's GitHub page.", detail);
 #else
     snprintf(msg, sizeof msg,
              "Ninja Gaiden Black needs a GPU and driver with Vulkan 1.3's dynamic rendering and synchronization2 "
-             "(in Vulkan 1.3, or as extensions of an older one) and push descriptors, and this system does not "
+             "(in Vulkan 1.3, or as extensions of an older one), and this system does not "
              "offer them:\n\n%s\n\n"
              "Please update your graphics driver. GPUs from before about 2016 (for example Nvidia's "
              "GTX 600 and 700 series) are not supported.", detail);

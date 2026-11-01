@@ -2,8 +2,8 @@
  * Android: which Vulkan driver the game draws with. The phone's own, or Turnip -- Mesa's open driver for Qualcomm's
  * Adreno GPUs, built from Mesa's source and shipped in the APK (packaging/android/build.sh) -- loaded through
  * libadrenotools, which has the system's Vulkan loader load it for this app alone. Many Adreno 6xx phones' own
- * drivers stop at Vulkan 1.1 without the dynamic rendering, synchronization2 and push descriptors the renderer
- * needs (#87); Turnip has them.
+ * drivers stop at Vulkan 1.1 without the dynamic rendering and synchronization2 the renderer needs (#87); Turnip
+ * has them.
  *
  * Turnip only on an Adreno whose own driver lacks those -- found by a look at the system's driver first, an
  * instance made and let go (NGB_GPU_DRIVER=system|turnip forces one, for testing). There is no setting: a choice of
@@ -93,9 +93,12 @@ static int usable_device(PFN_vkGetInstanceProcAddr gipa, int *qualcomm, int *mad
             dyn = d.dynamicRendering;
             sync2 = s.synchronization2;
         }
-        ok = dyn && sync2 && push;
-        fprintf(stderr, "[GPU] %s: Vulkan %u.%u, %s\n", p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
-                VK_API_VERSION_MINOR(p.apiVersion), ok ? "has what the renderer needs" : "lacks what the renderer needs");
+        /* (push descriptors not needed -- the renderer binds a set per draw without them, #159 -- but on an Adreno
+         * still a reason to take Turnip, which has them) */
+        ok = dyn && sync2 && (push || p.vendorID != 0x5143);
+        fprintf(stderr, "[GPU] %s: Vulkan %u.%u, %s%s\n", p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
+                VK_API_VERSION_MINOR(p.apiVersion), ok ? "has what the renderer needs" : "lacks what the renderer needs",
+                ok && !push ? " (no push descriptors)" : "");
     }
     if (destroy)
         destroy(inst, NULL);

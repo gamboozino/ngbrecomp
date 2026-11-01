@@ -63,7 +63,7 @@ bool VulkanBackend::SoftenGlow(Image& source) {
         for (auto& w:writes) {w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;w.descriptorCount=1;}
         writes[0].dstBinding=2;writes[0].descriptorType=VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;writes[0].pImageInfo=&image;
         writes[1].dstBinding=6;writes[1].descriptorType=VK_DESCRIPTOR_TYPE_SAMPLER;writes[1].pImageInfo=&sampler;
-        d_.vkCmdPushDescriptorSetKHR(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,pipe_layout_,0,2,writes);
+        PushSet(2, writes);
         d_.vkCmdDraw(cmd_,3,1,0,0);d_.vkCmdEndRendering(cmd_);
         Barrier(output,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);input=&output;
     }
@@ -192,7 +192,7 @@ bool VulkanBackend::ContinuousGlowPass(Image& input,Image& output,uint32_t w,uin
     for (auto& w:writes) {w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;w.descriptorCount=1;}
     writes[0].dstBinding=0;writes[0].descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;writes[0].pBufferInfo=&constants;
     writes[1].dstBinding=2;writes[1].descriptorType=VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;writes[1].pImageInfo=&image;
-    d_.vkCmdPushDescriptorSetKHR(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,pipe_layout_,0,2,writes);
+    PushSet(2, writes);
     d_.vkCmdDraw(cmd_,3,1,0,0);d_.vkCmdEndRendering(cmd_);Barrier(output,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     return true;
 }

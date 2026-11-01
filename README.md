@@ -88,7 +88,7 @@ Expect problems on other phones, and please report them (below).
 Plays with the on-screen touch controls (an Xbox 360 pad), or with any controller the phone supports:
 the touch controls hide while one is connected. Needs Android 10 or newer (13 or newer for full speed:
 the game tells the system how long its frames take, which keeps the CPU clocks up), a GPU with Vulkan
-1.3, or an older Vulkan with its dynamic rendering, synchronization2 and push descriptors as extensions
+1.3, or an older Vulkan with its dynamic rendering and synchronization2 as extensions
 (on Adreno, Turnip has them).
 
 On Adreno GPUs (Snapdragon phones) whose own driver lacks what the game needs, it uses Turnip, Mesa's

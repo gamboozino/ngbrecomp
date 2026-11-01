@@ -503,6 +503,14 @@ private:
     VkFence fence_ = VK_NULL_HANDLE;
     VkCommandBuffer cmds_[2] = {};
     VkFence fences_[2] = {};
+    // Set 0 per draw: pushed (VK_KHR_push_descriptor), or on a driver without it (the Mali drivers of many MediaTek
+    // phones, #158 #159) written to a set from the frame slot's pools and bound -- the pools emptied with the slot's
+    // command buffer. NGB_D3D_NO_PUSH=1 takes the second way anywhere, for testing.
+    bool push_ = true;
+    std::vector<VkDescriptorPool> set_pools_[2];
+    size_t set_pool_at_[2] = {};
+    bool PushSet(uint32_t n, const VkWriteDescriptorSet* w);
+    void ResetSets(int slot);
     bool submitted_[2] = {};
     int slot_ = 0;
     void EndFrame();
@@ -736,6 +744,7 @@ bool VulkanBackend::AdoptDevice(const nv2a_vk_shared& sh) {
     api_version_ = sh.api_version ? sh.api_version : VK_API_VERSION_1_3;
     qfam_ = sh.queue_family;
     queue_ = sh.queue;
+    push_ = sh.push_descriptor;
     if (!volkGetLoadedInstance()) volkLoadInstanceOnly(inst_);
     volkLoadDeviceTable(&d_, dev_);
     // a driver short of 1.3 (Adreno 6xx's): the same functions from the extensions the NV2A renderer enabled
@@ -840,8 +849,8 @@ bool VulkanBackend::Init(uint32_t, uint32_t) {
             // drawing (unseen) for comparisons
             if (!std::getenv("NGB_D3D_KEEP_NV2A")) nv2a_vk_set_draws_off(true);
         } else {
-            ngb_renderer_fatal(st == 1 ? "The GPU's Vulkan driver has no dynamic rendering, synchronization2 or push "
-                                         "descriptors (Vulkan 1.3's, or as extensions)."
+            ngb_renderer_fatal(st == 1 ? "The GPU's Vulkan driver has no dynamic rendering or synchronization2 "
+                                         "(Vulkan 1.3's, or as extensions)."
                                        : "No Vulkan device could be used.");
         }
     }
@@ -883,7 +892,9 @@ bool VulkanBackend::Init(uint32_t, uint32_t) {
                               : i < 6 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLER;
     }
     VkDescriptorSetLayoutCreateInfo lci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    lci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    if (std::getenv("NGB_D3D_NO_PUSH")) push_ = false;
+    if (!push_) std::fprintf(stderr, "[D3D] no push descriptors: a descriptor set per draw\n");
+    lci.flags = push_ ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR : 0;
     lci.bindingCount = 10;
     lci.pBindings = b;
     VKCHECK(d_.vkCreateDescriptorSetLayout(dev_, &lci, nullptr, &set_layout_));
@@ -945,7 +956,58 @@ VulkanBackend::~VulkanBackend() {
         DestroyImage(quick_blur_);
         DestroyImage(quick_full_);
         if (glow_soft_sampler_) d_.vkDestroySampler(dev_,glow_soft_sampler_,nullptr);
+        for (auto& pools : set_pools_)
+            for (VkDescriptorPool p : pools) d_.vkDestroyDescriptorPool(dev_, p, nullptr);
     }
+}
+
+// False when no set could be had (memory exhausted): the caller's draw is left out, not made with nothing bound
+bool VulkanBackend::PushSet(uint32_t n, const VkWriteDescriptorSet* w) {
+    if (push_) {
+        d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, n, w);
+        return true;
+    }
+    constexpr uint32_t kSets = 1024;   // a pool's sets: a frame draws a few hundred; another pool past them
+    auto& pools = set_pools_[slot_];
+    size_t& at = set_pool_at_[slot_];
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    for (;; at++) {
+        bool fresh = at == pools.size();
+        if (fresh) {
+            VkDescriptorPoolSize sz[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * kSets},
+                                          {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4 * kSets},
+                                          {VK_DESCRIPTOR_TYPE_SAMPLER, 4 * kSets}};
+            VkDescriptorPoolCreateInfo ci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+            ci.maxSets = kSets;
+            ci.poolSizeCount = 3;
+            ci.pPoolSizes = sz;
+            VkDescriptorPool p = VK_NULL_HANDLE;
+            if (d_.vkCreateDescriptorPool(dev_, &ci, nullptr, &p) != VK_SUCCESS) return false;
+            pools.push_back(p);
+        }
+        VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool = pools[at];
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &set_layout_;
+        VkResult r = d_.vkAllocateDescriptorSets(dev_, &ai, &set);
+        if (r == VK_SUCCESS) break;
+        if (fresh) return false;   // (a new pool failed too; a full one may say out of memory: the spec allows it)
+    }
+    VkWriteDescriptorSet c[10];
+    n = std::min(n, 10u);
+    for (uint32_t i = 0; i < n; i++) {
+        c[i] = w[i];
+        c[i].dstSet = set;
+    }
+    d_.vkUpdateDescriptorSets(dev_, n, c, 0, nullptr);
+    d_.vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 1, &set, 0, nullptr);
+    return true;
+}
+
+// The slot's sets let go: its commands are done with them
+void VulkanBackend::ResetSets(int slot) {
+    for (VkDescriptorPool p : set_pools_[slot]) d_.vkResetDescriptorPool(dev_, p, 0);
+    set_pool_at_[slot] = 0;
 }
 
 void VulkanBackend::Begin() {
@@ -977,6 +1039,8 @@ void VulkanBackend::Submit() {
     submitted_[slot_] = false;
     VisResults(slot_);
     d_.vkResetCommandBuffer(cmd_, 0);
+    ResetSets(slot_);
+    if (!submitted_[slot_ ^ 1]) ResetSets(slot_ ^ 1);
     recording_ = false;
     ring_pos_ = 0;
     Begin();
@@ -1004,6 +1068,7 @@ void VulkanBackend::EndFrame() {
         VisResults(slot_);
     }
     d_.vkResetCommandBuffer(cmd_, 0);
+    ResetSets(slot_);
     ring_pos_ = 0;
     // what the finished frames last used
     for (size_t i = 0; i < graveyard_.size();) {
@@ -1401,7 +1466,7 @@ void VulkanBackend::FillMs(Target& t) {
     w[1].descriptorCount = 1;
     w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
     w[1].pImageInfo = &sm;
-    d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 2, w);
+    PushSet(2, w);
     d_.vkCmdDraw(cmd_, 3, 1, 0, 0);
     d_.vkCmdEndRendering(cmd_);
 }
@@ -1582,7 +1647,7 @@ void VulkanBackend::GammaCopy(Image& src, Image& dst, float bars, float bars_y) 
     w[3].dstBinding = 7; w[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER; w[3].pImageInfo = &sm;
     w[4].dstBinding = 4; w[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[4].pImageInfo = &im2;
     w[5].dstBinding = 8; w[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER; w[5].pImageInfo = &sm2;
-    d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 6, w);
+    PushSet(6, w);
     d_.vkCmdDraw(cmd_, 3, 1, 0, 0);
     d_.vkCmdEndRendering(cmd_);
 }
@@ -1674,7 +1739,7 @@ void VulkanBackend::EdgeSample(Image& src, float bars, float bars_y) {
     }
     w[0].dstBinding = 2; w[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[0].pImageInfo = &im0;
     w[1].dstBinding = 6; w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER; w[1].pImageInfo = &sm;
-    d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 2, w);
+    PushSet(2, w);
     d_.vkCmdDraw(cmd_, 3, 1, 0, 0);
     d_.vkCmdEndRendering(cmd_);
 }
@@ -3384,7 +3449,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             w[i].pImageInfo = &smp[i - 6];
         }
     }
-    d_.vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 10, w);
+    if (!PushSet(10, w)) return;
 
     // the viewport covers the target (the title's viewport is in the shader), upside down for
     // Direct3D's clip space; the scissor clips to the title's viewport and scissor

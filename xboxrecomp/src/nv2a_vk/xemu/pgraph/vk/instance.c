@@ -676,7 +676,8 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
             next_struct = &dynamic_rendering;
         }
     }
-    s_shared.features13 = have13 && s_push_descriptor_enabled;
+    s_shared.features13 = have13;
+    s_shared.push_descriptor = s_push_descriptor_enabled;
 
     VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_features;
     if (r->custom_border_color_extension_enabled) {
