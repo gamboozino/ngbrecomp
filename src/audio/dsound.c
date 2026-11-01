@@ -64,6 +64,8 @@ void dsound_hle_set_positional(int mode);      /* src/audio/dsound_hle.cpp */
  * (the old one has no mix: 3 is its filters) */
 void ngb_audio_set_positional(int mode)
 {
+    static const char *const name[] = { "Off", "Console", "Clear", "Mixed" };
+    fprintf(stderr, "[AUDIO] Positional Audio: %s\n", mode >= 0 && mode <= 3 ? name[mode] : "?");
     mcpx_apu_set_hrtf(mode);
     dsound_hle_set_positional(mode);
 }

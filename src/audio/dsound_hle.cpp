@@ -72,6 +72,32 @@ std::atomic<int> g_positional{2};
 // "Mixed" (Positional Audio 3): the filters' share of each ear, the rest "Clear"'s level -- the filters' cues for
 // where a sound is (behind, to the side) with less of their dullness (#126). NGB_POS_MIX=0..1 sets it, for tuning.
 float g_pos_mix = 0.5f;
+// "Mixed"'s level half by the sound's direction (EarPair::mixpan): the far ear 6 dB down for a sound straight to one
+// side. Clear's levels -- the filters' strengths, a few dB apart and least in the bass -- left the hooves and footsteps
+// around Ryu hard to place (#126). NGB_MIX_PAN_DB=n sets the dB (0: Clear's levels), NGB_MIX_PAN_FILE=<file> holding n
+// is read again each second (testing: strengths compared in one run).
+std::atomic<float> g_mix_pan_db{6.0f};
+static void MixPanTick(uint32_t frames) {
+    static uint32_t since = 48000;
+    static const char* file = std::getenv("NGB_MIX_PAN_FILE");
+    static bool env_read;
+    if (!env_read) {
+        env_read = true;
+        if (const char* e = std::getenv("NGB_MIX_PAN_DB")) g_mix_pan_db = float(std::atof(e));
+    }
+    static uint64_t played;
+    played += frames;
+    if (!file || (since += frames) < 48000) return;
+    since = 0;
+    if (FILE* f = std::fopen(file, "r")) {
+        float v;
+        if (std::fscanf(f, "%f", &v) == 1 && v != g_mix_pan_db.load()) {
+            g_mix_pan_db = v;
+            std::fprintf(stderr, "[MIXPAN] %.0f dB from sample %llu\n", v, (unsigned long long)played);
+        }
+        std::fclose(f);
+    }
+}
 bool g_surround = false;
 int g_output_choice = 0;  // Audio Output: 0 auto, 1 stereo, 2 5.1 (dsound_hle_set_output)  // the output is 5.1: FL FR C LFE BL BR, SDL's order and the mix bins'  // Positional Audio: 0 off, 1 console (the HRTF filters), 2 clear (their levels)
 int g_log = -1;
@@ -98,6 +124,7 @@ struct EarPair {
     Ear e[2];  // left, right
     float pan[2] = {1, 1};  // "Clear": each ear's level from its filter's strength, at constant power
     float norm = 1;         // "Mixed": the filters brought to that same power, so neither half outweighs the other
+    float mixpan[2] = {1, 1};   // "Mixed"'s levels: Clear's, or by the direction (NGB_MIX_PAN_DB, testing)
 };
 
 struct Voice {
@@ -442,6 +469,17 @@ EarPair Ears(float azimuth, float elevation) {
         for (int i = 0; i < kHrtfTaps; i++) e[c] += p.e[c].tap[i] * p.e[c].tap[i];
     for (int c = 0; c < 2; c++) p.pan[c] = e[0] + e[1] > 0 ? std::sqrt(2 * e[c] / (e[0] + e[1])) : 1.0f;
     p.norm = e[0] + e[1] > 0 ? std::sqrt(2 / (e[0] + e[1])) : 1.0f;
+    // "Mixed"'s levels by the direction (g_mix_pan_db): the far ear that many dB down for a sound straight to one side,
+    // less towards the front and back and above, the pair at constant power like Clear's
+    const float mix_db = g_mix_pan_db.load(std::memory_order_relaxed);
+    p.mixpan[0] = p.pan[0];
+    p.mixpan[1] = p.pan[1];
+    if (mix_db > 0) {
+        float side = std::fabs(std::sin(azimuth * 3.14159265f / 180.0f)) * std::cos(elevation * 3.14159265f / 180.0f);
+        float g = std::pow(10.0f, -mix_db * side / 20.0f), s = std::sqrt(2.0f / (1.0f + g * g));
+        p.mixpan[far] = g * s;
+        p.mixpan[1 - far] = s;
+    }
     return p;
 }
 
@@ -643,8 +681,8 @@ void MixVoice(Voice& v, float* out, float* send, uint32_t frames, int mode) {
             v.ear_pos++;
             float t = float(i + 1) / frames, ear[2];
             for (int c = 0; c < 2; c++)
-                ear[c] = EarOut(v, then.e[c], then.pan[c], then.norm, mode) * (1 - t) +
-                         EarOut(v, now.e[c], now.pan[c], now.norm, mode) * t;
+                ear[c] = EarOut(v, then.e[c], mode == 3 ? then.mixpan[c] : then.pan[c], then.norm, mode) * (1 - t) +
+                         EarOut(v, now.e[c], mode == 3 ? now.mixpan[c] : now.pan[c], now.norm, mode) * t;
             for (uint32_t k = 0; k < kLanes; k++) {
                 v.gain[0][k] += dg[0][k];
                 bool left = k == kBinFrontLeft || k == kBinBackLeft || k == kBinCrosstalkFrontLeft ||
@@ -680,6 +718,7 @@ void MixVoice(Voice& v, float* out, float* send, uint32_t frames, int mode) {
 // the centre and the back pair
 // into the front (and drops the sub)
 void Render(float* out, uint32_t frames) {
+    MixPanTick(frames);
     static std::vector<float> lanes, send;
     lanes.assign(size_t(frames) * kLanes, 0.0f);
     send.assign(frames, 0.0f);

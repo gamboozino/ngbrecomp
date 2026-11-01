@@ -882,7 +882,7 @@ static void *guest_main(void *unused)
         extern void ngb_audio_set_positional(int mode);
         extern void ngb_audio_set_output(int choice);
         extern void dsound_hle_set_hrtf_tables(uint32_t index, uint32_t filters);
-        ngb_audio_set_positional(ngb_pc_setting(23));   /* Positional Audio (#30, #86): Clear unless chosen otherwise */
+        ngb_audio_set_positional(ngb_pc_setting(23));   /* Positional Audio (#30, #86): Mixed unless chosen otherwise */
         ngb_audio_set_output(ngb_pc_setting(25));       /* Audio Output: auto unless chosen */
         dsound_hle_set_hrtf_tables(0x395430, 0x383E70); /* DirectSound's full HRTF tables in this build */
     }

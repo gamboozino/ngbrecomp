@@ -49,8 +49,8 @@ image's code, which the library decrypts as it loads it) ran for "Console" in 0.
 of phase, and xemu running the image on its DSP matches "Console" without it (#126). The sound chip is not emulated.
 Positional Audio places a mono 3D sound through the library's own HRTF tables (0x395430 the filter per
 direction, 0x383E70 the filters: 31 sign and magnitude taps per ear, the far ear's delay in its last
-byte): "Console" filters it as the chip does, "Clear" (the default; "Panning" before 0.9.40)
-takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
+byte): "Console" filters it as the chip does, "Clear" (the default from 0.9.40 to 0.9.51; "Panning" before 0.9.40)
+takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Mixed" (the default since 0.9.52) is half Console's filters (brought to Clear's power) and half a level pan by the direction, the far ear 6 dB down for a sound straight to one side (`NGB_MIX_PAN_DB`; Clear's levels a few dB apart left sounds hard to place, #126), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
 Stereo, 5.1, or Auto: 5.1 when the default output device has six channels or more. On 5.1 the program is
 told its speakers are surround (with Dolby Digital) and mixes for them, and the output is FL FR C LFE BL
 BR; on stereo the centre is folded into the front pair. `NGB_AUDIO_CHANNELS=2|6` overrides it,
