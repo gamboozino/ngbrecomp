@@ -17,8 +17,14 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 
 ## Screenshots
 
-![Ultrawide 21:9: Ryu in front of Han's Bar](https://github.com/user-attachments/assets/e9fb1579-2320-4ff9-8fc0-0ea2a724316b)
-<p align="center"><sub>21:9 at 6x render resolution</sub></p>
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/e9fb1579-2320-4ff9-8fc0-0ea2a724316b" alt="Ultrawide 21:9: Ryu in front of Han's Bar"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>21:9 at 6x render resolution</sub></td>
+  </tr>
+</table>
 
 <table>
   <tr>
