@@ -542,6 +542,18 @@ private:
     VkDeviceSize ring_pos_ = 0;
     VkDeviceSize ringAlign_ = 256;
     VkDeviceSize Upload(const void* data, VkDeviceSize bytes, VkDeviceSize align);
+    // A draw's constants (the vertex shader's 3 KB, DrawConstants) as the last draw had them are used again where
+    // they lie in the ring, not copied once more: on a phone the ring is uncached memory and these copies were
+    // most of the render thread's memcpy time. Only while the ring has not started over (ring_epoch_).
+    uint32_t ring_epoch_ = 0;
+    struct Reuse {
+        std::vector<uint8_t> bytes;
+        VkDeviceSize at = 0;
+        uint32_t epoch = ~0u;
+    };
+    Reuse vc_reuse_, dc_reuse_;
+    uint32_t reuse_hits_ = 0, reuse_misses_ = 0;   // (NGB_D3D_STATS)
+    VkDeviceSize UploadReused(Reuse& r, const void* data, VkDeviceSize bytes, VkDeviceSize align);
 
     // images
     bool CreateImage(Image& img, VkFormat fmt, uint32_t w, uint32_t h, uint32_t layers, uint32_t levels, bool depth,
@@ -1046,6 +1058,7 @@ void VulkanBackend::Submit() {
     if (!submitted_[slot_ ^ 1]) ResetSets(slot_ ^ 1);
     recording_ = false;
     ring_pos_ = 0;
+    ring_epoch_++;
     Begin();
 }
 
@@ -1073,6 +1086,7 @@ void VulkanBackend::EndFrame() {
     d_.vkResetCommandBuffer(cmd_, 0);
     ResetSets(slot_);
     ring_pos_ = 0;
+    ring_epoch_++;
     // what the finished frames last used
     for (size_t i = 0; i < graveyard_.size();) {
         if (graveyard_[i].frame + 2 <= frame_ + 1) {
@@ -1263,6 +1277,18 @@ VkDeviceSize VulkanBackend::Upload(const void* data, VkDeviceSize bytes, VkDevic
     if (data) std::memcpy(ring_cpu_ + base + at, data, bytes);
     ring_pos_ = at + bytes;
     return base + at;
+}
+
+VkDeviceSize VulkanBackend::UploadReused(Reuse& r, const void* data, VkDeviceSize bytes, VkDeviceSize align) {
+    if (r.epoch == ring_epoch_ && r.bytes.size() == bytes && !std::memcmp(r.bytes.data(), data, size_t(bytes))) {
+        reuse_hits_++;
+        return r.at;
+    }
+    reuse_misses_++;
+    r.at = Upload(data, bytes, align);
+    r.epoch = ring_epoch_;   // (after: the upload may have started the ring over)
+    r.bytes.assign(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + bytes);
+    return r.at;
 }
 
 bool VulkanBackend::CreateImage(Image& img, VkFormat fmt, uint32_t w, uint32_t h, uint32_t layers, uint32_t levels,
@@ -3358,9 +3384,9 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         v[190] = {Bits(s.rs[kRsPointSize]), Bits(s.rs[kRsPointSizeMin]), std::min(mx, point_max_ / c.surf[3]),
                   s.rs[kRsPointScaleEnable] ? 1.0f : 0.0f};
         v[191] = {Bits(s.rs[kRsPointScaleA]), Bits(s.rs[kRsPointScaleB]), Bits(s.rs[kRsPointScaleC]), vh};
-        vc = Upload(v.data(), sizeof(v), ringAlign_);
+        vc = UploadReused(vc_reuse_, v.data(), sizeof(v), ringAlign_);
     } else {
-        vc = Upload(s.vsc.data(), sizeof(s.vsc), ringAlign_);
+        vc = UploadReused(vc_reuse_, s.vsc.data(), sizeof(s.vsc), ringAlign_);
     }
     QuadSnap(s, a, count, quad, rt ? rt->samples : ds ? ds->samples : 1, c);
     bool id_opaque = !a.pretransformed && k.zen && k.zwrite && !k.blend && a.topology == Topology::Triangles &&
@@ -3413,7 +3439,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             legend.clear();
         }
     }
-    VkDeviceSize dc = Upload(&c, sizeof(c), ringAlign_);
+    VkDeviceSize dc = UploadReused(dc_reuse_, &c, sizeof(c), ringAlign_);
 
     // the vertices and indices
     VkDeviceSize voff[16];
@@ -3421,6 +3447,13 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     VkDeviceSize ioff = 0;
     uint32_t ibytes = a.index_count * (a.index16 ? 2 : 4);
     if (a.index_count) ioff = Upload(a.index_src, ibytes, 4);
+    // an upload since the constants (theirs included) started the ring over: what they lie in is written over,
+    // so again (the two from copies: UploadReused keeps its own)
+    if (vc_reuse_.epoch != ring_epoch_ || dc_reuse_.epoch != ring_epoch_) {
+        std::vector<uint8_t> vbytes = vc_reuse_.bytes;
+        vc = UploadReused(vc_reuse_, vbytes.data(), vbytes.size(), ringAlign_);
+        dc = UploadReused(dc_reuse_, &c, sizeof(c), ringAlign_);
+    }
 
     // record: the uploads above may have submitted, so everything is set after them
     BeginRendering(rt, ds);
@@ -4063,6 +4096,8 @@ void VulkanBackend::Present(const Surface& front) {
                      front.data);
         for (auto& [k, v] : rt_draws_) std::fprintf(stderr, " %08X:%u", k, v);
         std::fprintf(stderr, "\n");
+        std::fprintf(stderr, "[D3D] constants reused %u, copied %u\n", reuse_hits_, reuse_misses_);
+        reuse_hits_ = reuse_misses_ = 0;
     }
     st_ = {};
     rt_draws_.clear();
