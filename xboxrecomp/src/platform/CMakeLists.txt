@@ -45,4 +45,9 @@ else()
     # m: _clearfp/_controlfp sit on <fenv.h>.
     target_link_libraries(platform PUBLIC Threads::Threads m)
     target_compile_options(platform PRIVATE -Wall -Wextra -Wno-unused-parameter ${XBOXRECOMP_OPT_LEVEL})
+    if(APPLE)
+        # win32_compat.c's weak g_xbox_mem_offset (the kernel's): Apple's linker wants undefined weak
+        # symbols named, or the platform's own tests (no kernel) fail to link.
+        target_link_options(platform INTERFACE "LINKER:-U,_g_xbox_mem_offset")
+    endif()
 endif()
