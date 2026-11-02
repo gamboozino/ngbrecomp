@@ -27,6 +27,8 @@
 #include <SDL_vulkan.h>
 #ifdef __ANDROID__
 #include <SDL_syswm.h>   /* (the window's ANativeWindow: its Vulkan surface) */
+#include <SDL_system.h>
+#include <android/native_window_jni.h>
 #endif
 
 #define FRAMES_IN_FLIGHT 2
@@ -42,6 +44,10 @@ static VkInstance s_instance;
 static int s_surface_pending;
 #endif
 static VkSurfaceKHR s_surface = VK_NULL_HANDLE;
+static volatile bool s_surface_lost;   /* acquire or present said so: the window went away */
+#ifdef __ANDROID__
+static ANativeWindow *s_surface_window;   /* the window s_surface is for, held (android_surface_current) */
+#endif
 static VkSwapchainKHR s_swapchain = VK_NULL_HANDLE;
 static VkImage s_images[MAX_SWAP_IMAGES];
 static VkSemaphore s_render_done[MAX_SWAP_IMAGES];
@@ -919,6 +925,84 @@ void nv2a_quality_get(int *render_scale, int *anisotropy, int *shadow_scale, int
         *msaa = samples >= 8 ? 8 : samples >= 4 ? 4 : samples >= 2 ? 2 : 1;
 }
 
+#ifdef __ANDROID__
+/* SDL's window as Java has it now, held by us: SDL's own pointer is swapped and released on Java's thread
+ * (onNativeSurfaceDestroyed), unlocked for us. NULL while the app is in the background. */
+static ANativeWindow *android_window(void)
+{
+    JNIEnv *env = SDL_AndroidGetJNIEnv();
+    jobject act = SDL_AndroidGetActivity();
+    ANativeWindow *w = NULL;
+    if (!env || !act)
+        return NULL;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = (*env)->GetStaticMethodID(env, cls, "getNativeSurface", "()Landroid/view/Surface;");
+    jobject surface = m ? (*env)->CallStaticObjectMethod(env, cls, m) : NULL;
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        surface = NULL;
+    }
+    if (surface) {
+        w = ANativeWindow_fromSurface(env, surface);
+        (*env)->DeleteLocalRef(env, surface);
+    }
+    (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+    return w;
+}
+
+/* A surface for the window as it is now, in place of any old one. Through the loader the instance came from
+ * (volk's): SDL's own copy of the system's would not know an instance made through another (Turnip's,
+ * instance.c's nv2a_vk_custom_loader). */
+static bool android_surface_create(VkInstance instance)
+{
+    ANativeWindow *w = android_window();
+    if (!w || !vkCreateAndroidSurfaceKHR) {
+        if (w)
+            ANativeWindow_release(w);
+        return false;
+    }
+    if (s_surface)
+        vkDestroySurfaceKHR(instance, s_surface, NULL);
+    s_surface = VK_NULL_HANDLE;
+    if (s_surface_window)
+        ANativeWindow_release(s_surface_window);
+    s_surface_window = w;
+    s_surface_lost = false;
+    VkAndroidSurfaceCreateInfoKHR ci = {
+        .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
+        .window = w,
+    };
+    if (vkCreateAndroidSurfaceKHR(instance, &ci, NULL, &s_surface) != VK_SUCCESS) {
+        s_surface = VK_NULL_HANDLE;
+        return false;
+    }
+    return true;
+}
+
+static void destroy_swapchain(PGRAPHVkState *r);
+
+/* Android takes the window away while the app is in the background and hands a new one back on return
+ * (#162): the old surface then only fails, so the picture stays black. Checked before each present:
+ * false while there is no window to draw to. */
+static bool android_surface_current(PGRAPHVkState *r)
+{
+    SDL_SysWMinfo wm;
+    SDL_VERSION(&wm.version);
+    void *now = s_window && SDL_GetWindowWMInfo(s_window, &wm) ? (void *)wm.info.android.window : NULL;
+    if (!now)
+        return false;
+    if (now == (void *)s_surface_window && s_surface && !s_surface_lost)
+        return true;
+    if (s_swapchain)
+        destroy_swapchain(r);
+    if (!android_surface_create(s_instance))
+        return false;
+    fprintf(stderr, "nv2a: new window surface (the app is back in front)\n");
+    return true;
+}
+#endif
+
 /* ---- Hooks called by the renderer (PFIFO thread) ---- */
 
 const char *const *nv2a_host_vk_instance_extensions(uint32_t *count)
@@ -945,16 +1029,8 @@ void nv2a_host_vk_instance_created(VkInstance instance)
 #elif defined(__ANDROID__)
     /* Through the loader the instance came from (volk's): SDL's own copy of the system's would not know an
      * instance made through another (Turnip's, instance.c's nv2a_vk_custom_loader) */
-    SDL_SysWMinfo wm;
-    SDL_VERSION(&wm.version);
-    VkAndroidSurfaceCreateInfoKHR ci = { .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR };
-    if (s_window && SDL_GetWindowWMInfo(s_window, &wm))
-        ci.window = wm.info.android.window;
-    if (!ci.window || !vkCreateAndroidSurfaceKHR ||
-        vkCreateAndroidSurfaceKHR(instance, &ci, NULL, &s_surface) != VK_SUCCESS) {
+    if (!android_surface_create(instance))
         fprintf(stderr, "nv2a: Vulkan surface: none for the window\n");
-        s_surface = VK_NULL_HANDLE;
-    }
 #else
     if (s_window && !SDL_Vulkan_CreateSurface(s_window, instance, &s_surface)) {
         fprintf(stderr, "nv2a: Vulkan surface: %s\n", SDL_GetError());
@@ -1113,7 +1189,14 @@ static bool create_swapchain(PGRAPHVkState *r)
             .oldSwapchain = old,
         };
         if (vkCreateSwapchainKHR(r->device, &ci, NULL, &s_swapchain) != VK_SUCCESS) {
-            s_swapchain = VK_NULL_HANDLE;
+            /* the old one is retired all the same: let it go, and on Android try a new surface next
+             * (a window gone in the background can say only "out of date") */
+            s_swapchain = old;
+            if (old)
+                destroy_swapchain(r);
+#ifdef __ANDROID__
+            s_surface_lost = true;
+#endif
             return false;
         }
         {
@@ -1454,6 +1537,8 @@ static void present_pixels(PGRAPHVkState *r, VkBuffer buf, int w, int h)
         s_resized = true;
         return;
     }
+    if (res == VK_ERROR_SURFACE_LOST_KHR)
+        s_surface_lost = true;
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
         return;
     vkResetFences(r->device, 1, &s_fence[f]);
@@ -1503,6 +1588,8 @@ static void present_pixels(PGRAPHVkState *r, VkBuffer buf, int w, int h)
     nv2a_vk_queue_unlock();
     if (res == VK_ERROR_OUT_OF_DATE_KHR || (res == VK_SUBOPTIMAL_KHR && !s_system_turns))
         s_resized = true;
+    if (res == VK_ERROR_SURFACE_LOST_KHR)
+        s_surface_lost = true;
 }
 
 /* The overlay, over the frame the game is held at: the renderer's thread
@@ -1520,6 +1607,12 @@ static void overlay_run(PGRAPHState *pg)
 
     while (open) {
         int64_t t0 = g_get_monotonic_time();
+#ifdef __ANDROID__
+        if (!android_surface_current(r)) {
+            g_usleep(16000);
+            continue;
+        }
+#endif
         if (s_resized || !s_swapchain) {
             s_resized = false;
             if (!create_swapchain(r)) {
@@ -1714,6 +1807,10 @@ static void present_locked(PGRAPHState *pg, bool on_pfifo)
                 capture_display(pg);
         }
     }
+#ifdef __ANDROID__
+    if (!android_surface_current(r))
+        return;
+#endif
     if (s_surface == VK_NULL_HANDLE)
         return;
     if (!s_pool) {
@@ -1759,6 +1856,8 @@ static void present_locked(PGRAPHState *pg, bool on_pfifo)
         s_lat_dropped++;
         return;   /* every image queued: drop this frame rather than wait */
     }
+    if (res == VK_ERROR_SURFACE_LOST_KHR)
+        s_surface_lost = true;
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
         return;
     vkResetFences(r->device, 1, &s_fence[f]);
@@ -1931,6 +2030,8 @@ static void present_locked(PGRAPHState *pg, bool on_pfifo)
         nv2a_vk_queue_unlock();
         if (res == VK_ERROR_OUT_OF_DATE_KHR || (res == VK_SUBOPTIMAL_KHR && !s_system_turns))
             s_resized = true;
+        if (res == VK_ERROR_SURFACE_LOST_KHR)
+            s_surface_lost = true;
     }
     lat_note(ext);
 }
@@ -1961,4 +2062,9 @@ void nv2a_host_vk_finalize(PGRAPHState *pg)
     if (s_surface)
         vkDestroySurfaceKHR(s_instance, s_surface, NULL);
     s_surface = VK_NULL_HANDLE;
+#ifdef __ANDROID__
+    if (s_surface_window)
+        ANativeWindow_release(s_surface_window);
+    s_surface_window = NULL;
+#endif
 }
