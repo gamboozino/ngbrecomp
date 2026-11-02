@@ -181,8 +181,9 @@ of the pause menu. Changes apply at once and are saved.
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
   mission), Arcade Ninja Gaiden and Movie Theater without earning them (saved); All Weapons (every melee and
   projectile weapon at its highest level), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,
-  Counter Attack and Guillotine Throw technique scrolls), for the session: turned off, each takes back what it
-  gave and puts back your own pickups; a save made while one is on keeps what it gave
+  Counter Attack and Guillotine Throw technique scrolls; the story's own can still be picked up while it is on),
+  for the session: turned off, each takes back what it gave and puts back your own pickups; a save made while one
+  is on keeps what it gave
 - **Controls**: rebind every action (two keys or mouse buttons and a controller button each); camera
   inversion; start in third person; Camera Sensitivity; Toggle HUD (not bound unless chosen). The
   bindings follow the game's own Button Settings: an action keeps its key or button whatever the
