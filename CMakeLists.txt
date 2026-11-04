@@ -134,6 +134,7 @@ add_library(ngb_gen OBJECT ${RECOMP_GEN_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cutscene_skip.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/responsive.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fiber_delete.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/sound_boot.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/d3d/gpu_regs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/playtime.c
