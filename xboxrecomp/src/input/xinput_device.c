@@ -310,6 +310,15 @@ static void open_controllers(void)
         int s, have = 0;
         if (!SDL_IsGameController(i))
             continue;
+#ifdef __ANDROID__
+        /* Fingerprint sensors on many phones (uinput-fpc, uinput-goodix) say they are game controllers: taken as
+         * pads, they hid the touch controls (#181) */
+        {
+            const char *name = SDL_JoystickNameForIndex(i);
+            if (name && !strncmp(name, "uinput-", 7))
+                continue;
+        }
+#endif
         id = SDL_JoystickGetDeviceInstanceID(i);
         for (s = 0; s < XBOX_MAX_CONTROLLERS; s++)
             if (g_pads[s] && SDL_JoystickInstanceID(
