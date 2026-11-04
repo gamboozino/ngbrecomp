@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <wctype.h>
 
 /*
  * Helper: check if an ANSI string starts with a prefix (case-insensitive).
@@ -178,6 +179,7 @@ const wchar_t *xbox_LastHostPath(void)
 static WCHAR s_game_dir[MAX_PATH];
 static WCHAR s_save_dir[MAX_PATH];
 static BOOL  s_initialized = FALSE;
+static void mods_restore_cache(void);
 
 /*
  * The raw disk device, \Device\Harddisk0\Partition0.
@@ -304,7 +306,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
     }
 
     size_t len = wcslen(s_game_dir);
-    if (len > 0 && s_game_dir[len - 1] == L'\\')
+    if (len > 0 && (s_game_dir[len - 1] == L'\\' || s_game_dir[len - 1] == L'/'))   /* (a picker's D:/) */
         s_game_dir[len - 1] = L'\0';
 
     len = wcslen(s_save_dir);
@@ -370,6 +372,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
 
     s_initialized = TRUE;
     xbox_log(XBOX_LOG_INFO, XBOX_LOG_PATH, "Path init: game=%S, save=%S", s_game_dir, s_save_dir);
+    mods_restore_cache();
 }
 
 /* The host path the last translation produced.
@@ -469,6 +472,213 @@ translate:
 }
 
 /* ======================================================================== */
+
+/* ---- mods (#179) -------------------------------------------------------
+ *
+ * A game file the player put under <save dir>\mods with the same path -- the disc's (chr_ryu.afs,
+ * movie\cre.sfd), which the title also copies into its hard disk cache (Z:, the save dir's Cache, then read
+ * from there) -- is read instead. Data only: nothing of a mod's runs. Only an existing file opened to read
+ * (NtCreateFile), its size in a directory search (NtQueryDirectoryFile, how CRI's file layer sizes a file),
+ * and the quick menu's own icon reads (src/quick_ui.c) take it; writes (the cache's copies) never do. The
+ * mods folder is looked for once. */
+static int s_mods = -1;
+static WCHAR s_game_final[MAX_PATH], s_cache_final[MAX_PATH];   /* the two as Windows resolves them (links, drives) */
+
+/* p without the \\?\ (\\?\UNC\) that Windows' own resolved paths carry, into out */
+static void plain_path(const WCHAR* p, WCHAR* out, size_t n)
+{
+    if (!wcsncmp(p, L"\\\\?\\UNC\\", 8))
+        swprintf_s(out, n, L"\\\\%s", p + 8);
+    else
+        wcsncpy_s(out, n, !wcsncmp(p, L"\\\\?\\", 4) ? p + 4 : p, _TRUNCATE);
+}
+
+static void final_path(const WCHAR* p, WCHAR* out)
+{
+    WCHAR b[MAX_PATH];
+    DWORD n;
+    HANDLE h = CreateFileW(p, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                           FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    out[0] = 0;
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    n = GetFinalPathNameByHandleW(h, b, MAX_PATH, FILE_NAME_NORMALIZED);
+    CloseHandle(h);
+    if (n && n < MAX_PATH)
+        plain_path(b, out, MAX_PATH);
+}
+
+/* The game files taken from mods so far (their cache copies are the mod's): <save>\mods-cache.txt, one path a
+ * line, so that a mod deleted later has the game's own file put back over its copy (mods_restore_cache). */
+#define MODS_NOTED_MAX 1024
+static WCHAR s_noted[MODS_NOTED_MAX][MAX_PATH];
+static int s_noted_n;
+static SRWLOCK s_noted_lock = SRWLOCK_INIT;
+
+static void mods_note(const WCHAR* rel)
+{
+    WCHAR list[MAX_PATH];
+    char line[MAX_PATH * 3];
+    FILE* f;
+    AcquireSRWLockExclusive(&s_noted_lock);
+    for (int i = 0; i < s_noted_n; i++)
+        if (!_wcsicmp(s_noted[i], rel)) {
+            ReleaseSRWLockExclusive(&s_noted_lock);
+            return;
+        }
+    if (s_noted_n >= MODS_NOTED_MAX) {            /* (full: its lines would only repeat) */
+        ReleaseSRWLockExclusive(&s_noted_lock);
+        return;
+    }
+    wcsncpy_s(s_noted[s_noted_n++], MAX_PATH, rel, _TRUNCATE);
+    swprintf_s(list, MAX_PATH, L"%s\\mods-cache.txt", s_save_dir);
+    if (WideCharToMultiByte(CP_UTF8, 0, rel, -1, line, sizeof line, NULL, NULL) > 0 && (f = _wfopen(list, L"ab"))) {
+        fprintf(f, "%s\n", line);
+        fclose(f);
+    }
+    ReleaseSRWLockExclusive(&s_noted_lock);
+}
+
+static BOOL is_file(const WCHAR* p)
+{
+    DWORD a = GetFileAttributesW(p);
+    return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+/* At start: each noted file whose mod is gone gets the game's own file back over its cache copy (the game keeps
+ * a cached file, under the same name and size, without checking it again). */
+static void mods_restore_cache(void)
+{
+    WCHAR list[MAX_PATH], tmp[MAX_PATH], rel[MAX_PATH], a[MAX_PATH * 2], b[MAX_PATH * 2];
+    char line[MAX_PATH * 3];
+    FILE *f, *out;
+    int kept = 0;
+    swprintf_s(list, MAX_PATH, L"%s\\mods-cache.txt", s_save_dir);
+    swprintf_s(tmp, MAX_PATH, L"%s\\mods-cache.new", s_save_dir);
+    if (!(f = _wfopen(list, L"rb")))
+        return;
+    out = _wfopen(tmp, L"wb");
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!line[0] || !MultiByteToWideChar(CP_UTF8, 0, line, -1, rel, MAX_PATH))
+            continue;
+        swprintf_s(a, MAX_PATH * 2, L"%s\\mods\\%s", s_save_dir, rel);
+        if (is_file(a)) {                          /* (still a mod: kept) */
+            if (kept < MODS_NOTED_MAX)
+                wcsncpy_s(s_noted[kept], MAX_PATH, rel, _TRUNCATE);
+            kept++;
+            if (out)
+                fprintf(out, "%s\n", line);
+            continue;
+        }
+        swprintf_s(a, MAX_PATH * 2, L"%s\\%s", s_game_dir, rel);
+        swprintf_s(b, MAX_PATH * 2, L"%s\\Cache\\%s", s_save_dir, rel);
+        if (is_file(a) && is_file(b) && CopyFileW(a, b, FALSE))
+            fprintf(stderr, "[MODS] %S: the game's own file is back in the cache\n", rel);
+    }
+    fclose(f);
+    s_noted_n = kept < MODS_NOTED_MAX ? kept : MODS_NOTED_MAX;
+    if (out)
+        fclose(out);
+    if (!out || !kept) {
+        DeleteFileW(tmp);
+        if (!kept)
+            DeleteFileW(list);
+        return;
+    }
+    MoveFileExW(tmp, list, MOVEFILE_REPLACE_EXISTING);
+}
+
+int xbox_mods_present(void)
+{
+    if (s_mods < 0) {
+        WCHAR dir[MAX_PATH];
+        if (!s_initialized)
+            xbox_path_init(NULL, NULL);
+        swprintf_s(dir, MAX_PATH, L"%s\\mods", s_save_dir);
+        DWORD a = GetFileAttributesW(dir);
+        if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) {
+            final_path(s_game_dir, s_game_final);
+            swprintf_s(dir, MAX_PATH, L"%s\\Cache", s_save_dir);
+            final_path(dir, s_cache_final);
+            swprintf_s(dir, MAX_PATH, L"%s\\mods", s_save_dir);
+            fprintf(stderr, "[MODS] files in %S replace the game's\n", dir);
+            s_mods = 1;
+        } else {
+            s_mods = 0;
+        }
+    }
+    return s_mods;
+}
+
+/* host starts with base followed by a separator, slashes either way and case-blind (the dirs are kept with '/',
+ * Windows hands paths back with '\\'): the rest, else NULL */
+static const WCHAR* path_under(const WCHAR* host, const WCHAR* base)
+{
+    if (!*base)
+        return NULL;
+    for (; *base; host++, base++) {
+        WCHAR h = *host == L'/' ? L'\\' : towlower(*host), b = *base == L'/' ? L'\\' : towlower(*base);
+        if (h != b)
+            return NULL;
+    }
+    return *host == L'\\' || *host == L'/' ? host + 1 : NULL;
+}
+
+/* The mod for a translated path in the game dir or the cache, into out: TRUE when there is one (and the game's
+ * own file is there too, so that an open and a directory search agree) */
+BOOL xbox_mod_path(const WCHAR* host, WCHAR* out, DWORD n)
+{
+    const WCHAR* rel;
+    WCHAR h[MAX_PATH * 2], cache[MAX_PATH], mod[MAX_PATH * 2];
+    BOOL game = FALSE;
+    if (!host || !xbox_mods_present())
+        return FALSE;
+    plain_path(host, h, MAX_PATH * 2);
+    swprintf_s(cache, MAX_PATH, L"%s\\Cache", s_save_dir);
+    /* (the cache first: a save dir may be inside the game's) */
+    if (!(rel = path_under(h, cache)) && !(rel = path_under(h, s_cache_final))) {
+        if ((rel = path_under(h, s_game_dir)) || (rel = path_under(h, s_game_final)))
+            game = TRUE;
+    }
+    while (rel && (*rel == L'\\' || *rel == L'/'))
+        rel++;
+    if (!rel || !*rel || wcslen(s_save_dir) + 6 + wcslen(rel) + 1 > n)
+        return FALSE;                              /* (a path too long for the buffer: the game's own) */
+    swprintf_s(mod, MAX_PATH * 2, L"%s\\mods\\%s", s_save_dir, rel);
+    if (!is_file(mod) || !is_file(h))
+        return FALSE;
+    if (game)
+        mods_note(rel);
+    wcsncpy_s(out, n, mod, _TRUNCATE);   /* (out may be host: h is a copy) */
+    return TRUE;
+}
+
+/* The same for a path in the game dir given as rel ("spr.afs"), UTF-8: src/quick_ui.c */
+int xbox_mod_file(const char* rel, char* out, size_t n)
+{
+    WCHAR host[MAX_PATH], mod[MAX_PATH], wrel[MAX_PATH];
+    if (!rel || !xbox_mods_present() || !MultiByteToWideChar(CP_UTF8, 0, rel, -1, wrel, MAX_PATH))
+        return 0;
+    if (wcslen(s_game_dir) + 1 + wcslen(wrel) + 1 > MAX_PATH)
+        return 0;
+    swprintf_s(host, MAX_PATH, L"%s\\%s", s_game_dir, wrel);
+    if (!xbox_mod_path(host, mod, MAX_PATH))
+        return 0;
+    return WideCharToMultiByte(CP_UTF8, 0, mod, -1, out, (int)n, NULL, NULL) > 0;
+}
+
+/* host is a player's mod (a delete through a handle opened on one leaves it alone) */
+int xbox_mod_owned(const WCHAR* host)
+{
+    WCHAR dir[MAX_PATH], h[MAX_PATH * 2];
+    if (!host || s_mods != 1)
+        return 0;
+    plain_path(host, h, MAX_PATH * 2);
+    swprintf_s(dir, MAX_PATH, L"%s\\mods", s_save_dir);
+    return path_under(h, dir) != NULL;
+}
+
 #else /* !_WIN32  -- POSIX / Linux */
 /* ======================================================================== */
 
@@ -480,10 +690,12 @@ translate:
 #include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 static char s_game_dir[MAX_PATH];
 static char s_save_dir[MAX_PATH];
 static BOOL s_initialized = FALSE;
+static void mods_restore_cache(void);
 
 /* Strip a single trailing '/' (but never the root '/'). */
 static void strip_trailing_slash(char* s)
@@ -646,6 +858,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
     s_initialized = TRUE;
     xbox_log(XBOX_LOG_INFO, XBOX_LOG_PATH, "Path init: game=%s, save=%s",
              s_game_dir, s_save_dir);
+    mods_restore_cache();
 }
 
 /* The Xbox's file names ignore case, a POSIX file system's do not: a title asking for "media\font.ttf"
@@ -769,6 +982,176 @@ translate:
         XBOX_TRACE(XBOX_LOG_PATH, "%s -> %s", xbox_path, host_path_buf);
         return TRUE;
     }
+}
+
+
+/* ---- mods (#179): as the Windows half's ---- */
+static int s_mods = -1;
+#define MODS_NOTED_MAX 1024
+static char s_noted[MODS_NOTED_MAX][MAX_PATH];
+static int s_noted_n;
+static pthread_mutex_t s_noted_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int is_file(const char* p)
+{
+    struct stat st;
+    return stat(p, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static void mods_note(const char* rel)
+{
+    char list[MAX_PATH];
+    FILE* f;
+    pthread_mutex_lock(&s_noted_lock);
+    for (int i = 0; i < s_noted_n; i++)
+        if (!strcasecmp(s_noted[i], rel)) {
+            pthread_mutex_unlock(&s_noted_lock);
+            return;
+        }
+    if (s_noted_n >= MODS_NOTED_MAX) {            /* (full: its lines would only repeat) */
+        pthread_mutex_unlock(&s_noted_lock);
+        return;
+    }
+    snprintf(s_noted[s_noted_n++], MAX_PATH, "%s", rel);
+    snprintf(list, sizeof list, "%s/mods-cache.txt", s_save_dir);
+    if ((f = fopen(list, "ab"))) {
+        fprintf(f, "%s\n", rel);
+        fclose(f);
+    }
+    pthread_mutex_unlock(&s_noted_lock);
+}
+
+static int copy_file(const char* from, const char* to)
+{
+    char tmp[MAX_PATH * 2 + 8], buf[65536];
+    ssize_t r;
+    int in, out, ok = 1;
+    snprintf(tmp, sizeof tmp, "%s.ngbtmp", to);
+    if ((in = open(from, O_RDONLY)) < 0)
+        return 0;
+    if ((out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
+        close(in);
+        return 0;
+    }
+    while ((r = read(in, buf, sizeof buf)) > 0)
+        if (write(out, buf, (size_t)r) != r) { ok = 0; break; }
+    if (r < 0) ok = 0;
+    close(in);
+    if (close(out) != 0) ok = 0;
+    if (ok && rename(tmp, to) == 0)
+        return 1;
+    unlink(tmp);
+    return 0;
+}
+
+static void mods_restore_cache(void)
+{
+    char list[MAX_PATH], tmp[MAX_PATH + 8], line[MAX_PATH], a[MAX_PATH * 2], b[MAX_PATH * 2];
+    FILE *f, *out;
+    int kept = 0;
+    snprintf(list, sizeof list, "%s/mods-cache.txt", s_save_dir);
+    snprintf(tmp, sizeof tmp, "%s/mods-cache.new", s_save_dir);
+    if (!(f = fopen(list, "rb")))
+        return;
+    out = fopen(tmp, "wb");
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!line[0])
+            continue;
+        snprintf(a, sizeof a, "%s/mods/%s", s_save_dir, line);
+        fix_case(a, strlen(s_save_dir));
+        if (is_file(a)) {                          /* (still a mod: kept) */
+            if (kept < MODS_NOTED_MAX)
+                snprintf(s_noted[kept], MAX_PATH, "%s", line);
+            kept++;
+            if (out)
+                fprintf(out, "%s\n", line);
+            continue;
+        }
+        snprintf(a, sizeof a, "%s/%s", s_game_dir, line);
+        fix_case(a, strlen(s_game_dir));
+        snprintf(b, sizeof b, "%s/Cache/%s", s_save_dir, line);
+        fix_case(b, strlen(s_save_dir));
+        if (is_file(a) && is_file(b) && copy_file(a, b))
+            fprintf(stderr, "[MODS] %s: the game's own file is back in the cache\n", line);
+    }
+    fclose(f);
+    s_noted_n = kept < MODS_NOTED_MAX ? kept : MODS_NOTED_MAX;
+    if (out)
+        fclose(out);
+    if (!out || !kept) {
+        unlink(tmp);
+        if (!kept)
+            unlink(list);
+        return;
+    }
+    rename(tmp, list);
+}
+
+int xbox_mods_present(void)
+{
+    if (s_mods < 0) {
+        char dir[MAX_PATH];
+        struct stat st;
+        if (!s_initialized)
+            xbox_path_init(NULL, NULL);
+        snprintf(dir, sizeof dir, "%s/mods", s_save_dir);
+        fix_case(dir, strlen(s_save_dir));
+        s_mods = stat(dir, &st) == 0 && S_ISDIR(st.st_mode);
+        if (s_mods)
+            fprintf(stderr, "[MODS] files in %s replace the game's\n", dir);
+    }
+    return s_mods;
+}
+
+BOOL xbox_mod_path(const char* host, char* out, DWORD n)
+{
+    const char* rel = NULL;
+    char cache[MAX_PATH], mod[MAX_PATH * 2];
+    size_t g, c;
+    int game = 0;
+    if (!host || !xbox_mods_present())
+        return FALSE;
+    g = strlen(s_game_dir);
+    snprintf(cache, sizeof cache, "%s/Cache", s_save_dir);
+    c = strlen(cache);
+    if (!strncmp(host, cache, c) && host[c] == '/')   /* (the cache first: a save dir may be inside the game's) */
+        rel = host + c + 1;
+    else if (g && !strncmp(host, s_game_dir, g) && host[g] == '/') {
+        rel = host + g + 1;
+        game = 1;
+    }
+    while (rel && *rel == '/')
+        rel++;
+    if (!rel || !*rel || snprintf(mod, sizeof mod, "%s/mods/%s", s_save_dir, rel) >= (int)n)
+        return FALSE;
+    fix_case(mod, strlen(s_save_dir));
+    if (!is_file(mod) || !is_file(host))   /* (the game's own there too: an open and a search agree) */
+        return FALSE;
+    if (game)
+        mods_note(rel);
+    snprintf(out, n, "%s", mod);   /* (out may be host: rel is not used after) */
+    return TRUE;
+}
+
+int xbox_mod_file(const char* rel, char* out, size_t n)
+{
+    char host[MAX_PATH];
+    if (!rel || !xbox_mods_present() || snprintf(host, sizeof host, "%s/%s", s_game_dir, rel) >= (int)sizeof host)
+        return 0;
+    fix_case(host, strlen(s_game_dir));
+    return xbox_mod_path(host, out, (DWORD)n);
+}
+
+int xbox_mod_owned(const char* host)
+{
+    char dir[MAX_PATH];
+    size_t d;
+    if (!host || s_mods != 1)
+        return 0;
+    snprintf(dir, sizeof dir, "%s/mods/", s_save_dir);
+    d = strlen(dir);
+    return !strncasecmp(host, dir, d);
 }
 
 #endif /* _WIN32 */

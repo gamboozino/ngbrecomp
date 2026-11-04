@@ -218,6 +218,12 @@ NTSTATUS __stdcall xbox_NtCreateFile(
          * check, so it never showed under Proton. */
         if (FileAttributes & XBOX_FILE_ATTRIBUTE_READONLY)
             flags_and_attrs |= FILE_ATTRIBUTE_READONLY;
+        /* an existing file opened only to read: a mod in its place (#179, kernel_path.c) */
+        if (CreateDisposition == XBOX_FILE_OPEN &&
+            !(xbox_access_to_win32(DesiredAccess) & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA)) &&
+            !(DesiredAccess & (XBOX_DELETE | XBOX_FILE_WRITE_ATTRIBUTES)) &&   /* (a delete or rename: the file's own) */
+            xbox_mod_path(win_path, win_path, MAX_PATH))
+            fprintf(stderr, "  [MODS] %S\n", win_path);
         h = CreateFileW(win_path, xbox_access_to_win32(DesiredAccess),
             xbox_share_to_win32(ShareAccess), NULL,
             xbox_disposition_to_win32(CreateDisposition), flags_and_attrs, NULL);
@@ -752,6 +758,20 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
         }
     }
 
+    {   /* a mod's size in place of the file's (CRI sizes a file this way; #179) */
+        WCHAR dir[MAX_PATH], full[MAX_PATH], mod[MAX_PATH];
+        WIN32_FILE_ATTRIBUTE_DATA fa;
+        DWORD dn = xbox_mods_present() ? GetFinalPathNameByHandleW(FileHandle, dir, MAX_PATH, FILE_NAME_NORMALIZED) : 0;
+        const WCHAR* d = dir;   /* (as Windows gives it: xbox_mod_path takes off its \\?\ or \\?\UNC\) */
+        if (dn && dn < MAX_PATH && wcslen(d) + 1 + wcslen(ctx->find_data.cFileName) + 1 <= MAX_PATH) {
+            swprintf_s(full, MAX_PATH, L"%s\\%s", d, ctx->find_data.cFileName);
+            if (xbox_mod_path(full, mod, MAX_PATH) && GetFileAttributesExW(mod, GetFileExInfoStandard, &fa)) {
+                ctx->find_data.nFileSizeHigh = fa.nFileSizeHigh;
+                ctx->find_data.nFileSizeLow = fa.nFileSizeLow;
+            }
+        }
+    }
+
     entry = (PXBOX_FILE_DIRECTORY_INFORMATION)FileInformation;
     memset(entry, 0, Length);
     char filename_ansi[MAX_PATH];
@@ -897,6 +917,11 @@ NTSTATUS __stdcall xbox_NtCreateFile(
             mkdir(host_path, 0755);   /* EEXIST is fine */
         fd = open(host_path, O_RDONLY | O_DIRECTORY);
     } else {
+        /* an existing file opened only to read: a mod in its place (#179, kernel_path.c) */
+        if (CreateDisposition == XBOX_FILE_OPEN && !(posix_open_flags(DesiredAccess, CreateDisposition) & O_RDWR) &&
+            !(DesiredAccess & (XBOX_DELETE | XBOX_FILE_WRITE_ATTRIBUTES)) &&   /* (a delete or rename: the file's own) */
+            xbox_mod_path(host_path, host_path, MAX_PATH))
+            fprintf(stderr, "  [MODS] %s\n", host_path);
         fd = open(host_path, posix_open_flags(DesiredAccess, CreateDisposition), 0644);
     }
 
@@ -1121,6 +1146,8 @@ NTSTATUS __stdcall xbox_NtSetInformationFile(
                 const char* p = w32_handle_path(FileHandle);
                 /* A directory too (XDeleteSaveGame removes the save's folder this way, once
                  * it is empty); unlink refuses those. */
+                if (p && xbox_mod_owned(p))
+                    p = NULL;                      /* (a handle on a player's mod: the mod stays) */
                 if (p && unlink(p) != 0 && (errno == EISDIR || errno == EPERM))
                     rmdir(p);
             }
@@ -1324,8 +1351,11 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
 
     char full[MAX_PATH];
     snprintf(full, sizeof(full), "%s/%s", dpath ? dpath : ".", de->d_name);
-    if (stat(full, &st) != 0)
-        memset(&st, 0, sizeof(st));
+    {
+        char mod[MAX_PATH];   /* a mod's size in place of the file's (CRI sizes a file this way) */
+        if (stat(xbox_mod_path(full, mod, MAX_PATH) ? mod : full, &st) != 0)
+            memset(&st, 0, sizeof(st));
+    }
     LeaveCriticalSection(&s_dir_cs);
 
     PXBOX_FILE_DIRECTORY_INFORMATION entry = (PXBOX_FILE_DIRECTORY_INFORMATION)FileInformation;

@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+int xbox_mod_file(const char *rel, char *out, size_t n);   /* xboxrecomp kernel_path.c: a mod in a game file's place */
+
 int ngb_pc_setting(int which);
 void ngb_pc_set_setting(int which, int value);   /* src/ingame_menu.c */
 
@@ -379,8 +381,12 @@ static Icon *icon(const char *name)
     Icon *it = &s_icons[s_icon_count++];
     snprintf(it->name, sizeof it->name, "%s", name);
     char path[4200];
-    snprintf(path, sizeof path, "%s/spr.afs", s_game_dir);
-    FILE *f = fopen(path, "rb");
+    FILE *f = xbox_mod_file("spr.afs", path, sizeof path) ? fopen(path, "rb") : NULL;   /* (a mod's, as the game
+                                                                                           * reads it: #179) */
+    if (!f) {
+        snprintf(path, sizeof path, "%s/spr.afs", s_game_dir);
+        f = fopen(path, "rb");
+    }
     if (!f)
         return it;
     unsigned char header[8];

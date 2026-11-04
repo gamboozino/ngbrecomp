@@ -568,6 +568,12 @@ typedef char  xbox_host_char;
 const wchar_t *xbox_LastHostPath(void);
 
 BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, DWORD buf_size);
+/* Mods (#179): the file under <save dir>/mods standing in for a translated game-dir or cache path (out may be the
+ * same buffer), TRUE when there is one; and for a game-dir path given relative, narrow (src/quick_ui.c). */
+BOOL xbox_mod_path(const xbox_host_char* host, xbox_host_char* out, DWORD n);
+int xbox_mod_file(const char* rel, char* out, size_t n);
+int xbox_mods_present(void);   /* the mods folder is there (looked for once) */
+int xbox_mod_owned(const xbox_host_char* host);   /* host is in the mods folder */
 
 /* ============================================================================
  * Pool Allocator (kernel_pool.c)
