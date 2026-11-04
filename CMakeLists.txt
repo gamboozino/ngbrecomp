@@ -37,6 +37,20 @@ set(XBOXRECOMP_NV2A_VK ${NGB_NV2A_VK} CACHE BOOL "" FORCE)
 set(XBOXRECOMP_SDL_BACKENDS ON CACHE BOOL "" FORCE)   # Windows: same SDL audio/input as Linux
 set(XBOXRECOMP_WIN_VCPU ON CACHE BOOL "" FORCE)        # Windows: one virtual CPU, as on Linux
 
+# x86-64: the plain instruction set whatever CFLAGS say (a distribution's -march=native, x86-64-v3): the GPU's
+# registers are read and written by faulting into a decoder of the instructions (nv2a_runtime.c mmio_emulate),
+# which knows no VEX encodings -- a BMI2 shift reading a register crashed at the start (#190).
+# (GCC turns -march=native into one flag a feature, which a later -march does not undo: each named off.)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND NOT MSVC)
+    add_compile_options(-march=x86-64 -mtune=generic -mno-avx -mno-bmi -mno-bmi2 -mno-popcnt -mno-lzcnt -mno-movbe
+                        -mno-sse3)
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag(-mno-apxf NGB_HAS_MNO_APXF)
+    if(NGB_HAS_MNO_APXF)
+        add_compile_options(-mno-apxf)
+    endif()
+endif()
+
 # Optimisation: the level every target compiles at (the targets' own setting: CMake's Release -O3 comes
 # before it), and profile-guided optimisation -- NGB_PGO=generate builds a binary that records where its
 # time goes (LLVM_PROFILE_FILE), NGB_PGO=<file.profdata> one built with that profile (docs/TECHNICAL.md).
