@@ -95,7 +95,8 @@ static int usable_device(PFN_vkGetInstanceProcAddr gipa, int *qualcomm, int *mad
         }
         /* (push descriptors not needed -- the renderer binds a set per draw without them, #159 -- but on an Adreno
          * still a reason to take Turnip, which has them) */
-        ok = dyn && sync2 && (push || p.vendorID != 0x5143);
+        /* (Vulkan 1.1: the least the NV2A model takes) */
+        ok = p.apiVersion >= VK_API_VERSION_1_1 && dyn && sync2 && (push || p.vendorID != 0x5143);
         fprintf(stderr, "[GPU] %s: Vulkan %u.%u, %s%s\n", p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
                 VK_API_VERSION_MINOR(p.apiVersion), ok ? "has what the renderer needs" : "lacks what the renderer needs",
                 ok && !push ? " (no push descriptors)" : "");
@@ -131,6 +132,12 @@ PFN_vkGetInstanceProcAddr nv2a_vk_custom_loader(void)
     char dir[1024];
     if (!native_dir(dir, sizeof dir))
         return NULL;
+    /* An Adreno without multiview in hardware (605, 610: #192) has Turnip say Vulkan 1.0 unless told not to keep to
+     * the conformance rules, and its only rule kept back is multiview, which neither renderer uses */
+    const char *tu = getenv("TU_DEBUG");
+    char tu_debug[256];
+    snprintf(tu_debug, sizeof tu_debug, "%s%snoconform", tu && *tu ? tu : "", tu && *tu ? "," : "");
+    setenv("TU_DEBUG", tu_debug, 1);
     void *vk = adrenotools_open_libvulkan(RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, NULL, dir, dir, TURNIP_LIB, NULL, NULL);
     PFN_vkGetInstanceProcAddr gipa = vk ? (PFN_vkGetInstanceProcAddr)dlsym(vk, "vkGetInstanceProcAddr") : NULL;
     if (!gipa || !usable_device(gipa, NULL, NULL)) {
