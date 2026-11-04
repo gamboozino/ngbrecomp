@@ -66,7 +66,10 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
                                    memory_region_size(d->vram));
 
-    pgraph_vk_determine_gpu_properties(d);
+    /* The winding probe draws with a geometry shader; drivers without them (Mali, #180) crash making its
+     * pipeline. Only xemu's own drawing uses the result, and that needs geometry shaders anyway. */
+    if (pg->vk_renderer_state->enabled_physical_device_features.geometryShader)
+        pgraph_vk_determine_gpu_properties(d);
 }
 
 static void pgraph_vk_finalize(NV2AState *d)
