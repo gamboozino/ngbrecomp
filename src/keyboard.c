@@ -136,11 +136,11 @@ int xbox_keyboard_map(const Uint8 *k, Uint32 mouse, XBOX_INPUT_STATE *st)
 #ifdef __ANDROID__
     {   /* the touch controls (src/touch_pad.c), a pad: through its bindings as a controller's state goes */
         extern void ngb_touch_map(XBOX_INPUT_STATE *st);
-        extern void xbox_pad_remap(XBOX_INPUT_STATE *st);
+        extern void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port);
         XBOX_INPUT_STATE t;
         memset(&t, 0, sizeof t);
         ngb_touch_map(&t);
-        xbox_pad_remap(&t);
+        xbox_pad_remap(&t, 4);   /* (a port of its own: the pairs' state, src/bindings.c) */
         st->Gamepad.wButtons |= t.Gamepad.wButtons;
         for (int i = 0; i < 8; i++)
             if (t.Gamepad.bAnalogButtons[i] > st->Gamepad.bAnalogButtons[i])

@@ -105,6 +105,11 @@ static const char *const s_pad_name_ps[P_COUNT] = {
     "Cross", "Circle", "Square", "Triangle", "L1", "R1", "L2", "R2", "Start", "Select", "L3", "R3",
     "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right",
 };
+/* A Nintendo pad's, by label; by position (desktop) its face buttons swap: ngb_bind_input_name */
+static const char *const s_pad_name_ns[P_COUNT] = {
+    "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "+", "-", "L Stick", "R Stick",
+    "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right",
+};
 static const char *const s_mouse_name[6] = { "", "Mouse Left", "Mouse Middle", "Mouse Right", "Mouse 4", "Mouse 5" };
 
 const char *ngb_bind_name(int a) { return a >= 0 && a < A_COUNT ? s_act[a].name : ""; }
@@ -185,7 +190,20 @@ const char *ngb_bind_pad_combo(int a)
     int slot = game_slot(&s_act[a], tab);
     if (ngb_pad_prompts_ps())
         return slot == 8 ? "Square + Cross" : slot == 9 ? "Triangle + Circle" : NULL;
+    if (ngb_pad_prompts_nintendo() && ngb_bind_nintendo_position())
+        return slot == 8 ? "Y + B" : slot == 9 ? "X + A" : NULL;
     return slot == 8 ? "X + A" : slot == 9 ? "Y + B" : NULL;
+}
+
+/* The game's slot of that action's two buttons: 8 X + A (Wind Run's by default), 9 Y + B; -1 none */
+int ngb_bind_pad_combo_slot(int a)
+{
+    if (a < 0 || a >= A_COUNT)
+        return -1;
+    unsigned char tab[10];
+    game_buttons(tab);
+    int slot = game_slot(&s_act[a], tab);
+    return slot == 8 || slot == 9 ? slot : -1;
 }
 unsigned ngb_bind_generation(void) { return s_gen; }
 
@@ -203,8 +221,9 @@ static void identity_check(void)
 static int s_invert[2][2];
 static int s_third_start;
 static int s_mouse_pct = 100;   /* Camera Sensitivity, percent: the right stick, mouse and keys (#67) */
-static int s_prompts;           /* Button Prompts: 0 Auto (the device in use), 1 Xbox, 2 PlayStation, 3 PC */
-static const char *const s_prompts_ini[4] = { "auto", "xbox", "playstation", "pc" };
+static int s_prompts;           /* Button Prompts: 0 Auto (the device in use), 1 Xbox, 2 PlayStation, 3 Nintendo, 4 PC */
+#define PROMPTS_N 5
+static const char *const s_prompts_ini[PROMPTS_N] = { "auto", "xbox", "playstation", "nintendo", "pc" };
 
 void ngb_bind_defaults(void)
 {
@@ -239,23 +258,23 @@ int ngb_bind_prompts(void)
 void ngb_bind_step_prompts(int dir)
 {
     ensure();
-    s_prompts = (s_prompts + (dir < 0 ? 3 : 1)) % 4;
+    s_prompts = (s_prompts + (dir < 0 ? PROMPTS_N - 1 : 1)) % PROMPTS_N;
     s_gen++;
     save();
 }
 
 const char *ngb_bind_prompts_name(int v)
 {
-    static const char *const name[4] = { "Auto", "Xbox", "PlayStation", "PC" };
-    return name[v & 3];
+    static const char *const name[PROMPTS_N] = { "Auto", "Xbox", "PlayStation", "Nintendo", "PC" };
+    return v >= 0 && v < PROMPTS_N ? name[v] : "";
 }
 
-static int prompts_forced(void)   /* NGB_PAD_PROMPTS: 2 PlayStation, 1 Xbox, 0 not set */
+static int prompts_forced(void)   /* NGB_PAD_PROMPTS: 2 PlayStation, 3 Nintendo, 1 Xbox, 0 not set */
 {
     static int forced = -1;
     if (forced < 0) {
         const char *e = getenv("NGB_PAD_PROMPTS");
-        forced = !e ? 0 : !SDL_strcasecmp(e, "ps") ? 2 : 1;
+        forced = !e ? 0 : !SDL_strcasecmp(e, "ps") ? 2 : !SDL_strcasecmp(e, "nintendo") ? 3 : 1;
     }
     return forced;
 }
@@ -266,7 +285,7 @@ int ngb_prompts_keys(void)
     int p = ngb_bind_prompts();
     if (prompts_forced())
         return 0;
-    return p == 3 || (p == 0 && xbox_InputKeyboardActive());
+    return p == 4 || (p == 0 && xbox_InputKeyboardActive());
 }
 
 /* A PlayStation pad's buttons in the prompts and the button names */
@@ -278,13 +297,98 @@ int ngb_pad_prompts_ps(void)
     return p == 2 || (p == 0 && xbox_InputPadPlayStation());
 }
 
+/* A Nintendo pad's (a Switch Pro Controller's, Joy-Cons') */
+int ngb_pad_prompts_nintendo(void)
+{
+    int p = ngb_bind_prompts();
+    if (prompts_forced())
+        return prompts_forced() == 3;
+    return p == 3 || (p == 0 && xbox_InputPadNintendo());
+}
+
+/* A Nintendo pad's face buttons by position: the game's A is the button where the Xbox pad has its A (marked
+ * B), so two-button moves such as Ninpo are where the game's own layout puts them (#170). SDL makes the change
+ * (its hint), the prompts follow. Android's own controller mappings go by label only. */
+int ngb_bind_nintendo_position(void)
+{
+#ifdef __ANDROID__
+    return 0;
+#else
+    return 1;
+#endif
+}
+
+/* The picture (assets/prompts) of the game's button b -- XBOX_BUTTON_A..RTRIGGER, Black for the left bumper,
+ * White for the right -- on the pad the prompts show: set 1 PlayStation, 2 Nintendo (with its layout); NULL for
+ * the Xbox's own (the game's). */
+const char *ngb_pad_picture(int set, int b)
+{
+    static const char *const ps[8] = { "PS3_Cross", "PS3_Circle", "PS3_Square", "PS3_Triangle",
+                                       "PS3_L1", "PS3_R1", "PS3_L2", "PS3_R2" };
+    static const char *const ns[8] = { "Switch_A", "Switch_B", "Switch_X", "Switch_Y",
+                                       "Switch_LB", "Switch_RB", "Switch_LT", "Switch_RT" };
+    int i = b == XBOX_BUTTON_A ? 0 : b == XBOX_BUTTON_B ? 1 : b == XBOX_BUTTON_X ? 2 : b == XBOX_BUTTON_Y ? 3
+          : b == XBOX_BUTTON_BLACK ? 4 : b == XBOX_BUTTON_WHITE ? 5 : b == XBOX_BUTTON_LTRIGGER ? 6
+          : b == XBOX_BUTTON_RTRIGGER ? 7 : -1;
+    if (i < 0 || set < 1 || set > 2)
+        return NULL;
+    if (set == 1)
+        return ps[i];
+    if (ngb_bind_nintendo_position() && i < 4)
+        i ^= 1;                                    /* the face buttons by place: A <-> B, X <-> Y */
+    return ns[i];
+}
+
+/* The picture of the controller's button p (P_A...) on set 0 Xbox, 1 PlayStation, 2 Nintendo (its layout as in
+ * ngb_bind_input_name); P_COUNT and P_COUNT + 1 the left and right sticks (the moving and camera rows) */
+const char *ngb_pad_picture_p(int set, int p)
+{
+    static const char *const pic[3][P_COUNT + 2] = {
+        { "360_A", "360_B", "360_X", "360_Y", "360_LB", "360_RB", "360_LT", "360_RT", "360_Start", "360_Back",
+          "360_Left_Stick_Click", "360_Right_Stick_Click", "360_Dpad_Up", "360_Dpad_Down", "360_Dpad_Left",
+          "360_Dpad_Right", "360_Left_Stick", "360_Right_Stick" },
+        { "PS3_Cross", "PS3_Circle", "PS3_Square", "PS3_Triangle", "PS3_L1", "PS3_R1", "PS3_L2", "PS3_R2",
+          "PS3_Start", "PS3_Select", "PS3_Left_Stick_Click", "PS3_Right_Stick_Click", "PS3_Dpad_Up",
+          "PS3_Dpad_Down", "PS3_Dpad_Left", "PS3_Dpad_Right", "PS3_Left_Stick", "PS3_Right_Stick" },
+        { "Switch_A", "Switch_B", "Switch_X", "Switch_Y", "Switch_LB", "Switch_RB", "Switch_LT", "Switch_RT",
+          "Switch_Plus", "Switch_Minus", "Switch_Left_Stick_Click", "Switch_Right_Stick_Click", "Switch_Dpad_Up",
+          "Switch_Dpad_Down", "Switch_Dpad_Left", "Switch_Dpad_Right", "Switch_Left_Stick", "Switch_Right_Stick" },
+    };
+    if (set < 0 || set > 2 || p < 0 || p >= P_COUNT + 2)
+        return NULL;
+    if (set == 2 && p < 4 && ngb_bind_nintendo_position())
+        p ^= 1;                                    /* (P_A..P_Y: A B X Y, by place) */
+    return pic[set][p];
+}
+
+/* The controller's set whatever device is in use (the Controls page's controller column): 0 Xbox, 1 PS, 2 Nintendo */
+int ngb_pad_set_pad(void)
+{
+    return ngb_pad_prompts_ps() ? 1 : ngb_pad_prompts_nintendo() ? 2 : 0;
+}
+
+/* The pad set the prompts show now: 0 the Xbox's (the game's own), 1 PlayStation, 2 Nintendo; -1 keys */
+int ngb_pad_set(void)
+{
+    return ngb_prompts_keys() ? -1 : ngb_pad_prompts_ps() ? 1 : ngb_pad_prompts_nintendo() ? 2 : 0;
+}
+
 void ngb_bind_input_name(int in, char *out, int n)
 {
     if (!in)
         snprintf(out, n, "-");
-    else if (in & BIND_PAD)
-        snprintf(out, n, "%s", (in & 0xFF) < P_COUNT ? (ngb_pad_prompts_ps() ? s_pad_name_ps : s_pad_name)[in & 0xFF]
-                                                     : "?");
+    else if ((in & BIND_PAD) && BIND_PAD_SECOND(in) >= 0) {   /* two together: "LB + RB" */
+        char a[32], b[32];
+        ngb_bind_input_name(BIND_PAD | (in & 0xFF), a, sizeof a);
+        ngb_bind_input_name(BIND_PAD | BIND_PAD_SECOND(in), b, sizeof b);
+        snprintf(out, n, "%s + %s", a, b);
+    } else if (in & BIND_PAD) {
+        int b = in & 0xFF;
+        if (b < 4 && ngb_pad_prompts_nintendo() && !ngb_pad_prompts_ps() && ngb_bind_nintendo_position())
+            b ^= 1;                                    /* (P_A..P_Y: A B X Y) */
+        snprintf(out, n, "%s", b < P_COUNT ? (ngb_pad_prompts_ps() ? s_pad_name_ps
+                                              : ngb_pad_prompts_nintendo() ? s_pad_name_ns : s_pad_name)[b] : "?");
+    }
     else if (in & BIND_MOUSE)
         snprintf(out, n, "%s", (in & 0xFF) >= 1 && (in & 0xFF) <= 5 ? s_mouse_name[in & 0xFF] : "Mouse ?");
     else {
@@ -334,6 +438,21 @@ void ngb_bind_input_short(int in, char *out, int n)
     out[j] = 0;
 }
 
+/* A controller button by its saved name (the Xbox's), spaces around it allowed; -1 none */
+static int pad_named(const char *t)
+{
+    char s[64];
+    while (*t == ' ')
+        t++;
+    snprintf(s, sizeof s, "%s", t);
+    for (int i = (int)strlen(s) - 1; i >= 0 && s[i] == ' '; i--)
+        s[i] = 0;
+    for (int i = 0; i < P_COUNT; i++)
+        if (!SDL_strcasecmp(s, s_pad_name[i]))
+            return i;
+    return -1;
+}
+
 static int parse_input(const char *t)
 {
     while (*t == ' ')
@@ -347,10 +466,17 @@ static int parse_input(const char *t)
     for (int i = 1; i <= 5; i++)
         if (!SDL_strcasecmp(s, s_mouse_name[i]))
             return BIND_MOUSE | i;
-    if (!SDL_strncasecmp(s, "Pad ", 4))
-        for (int i = 0; i < P_COUNT; i++)
-            if (!SDL_strcasecmp(s + 4, s_pad_name[i]))
-                return BIND_PAD | i;
+    if (!SDL_strncasecmp(s, "Pad ", 4)) {
+        char one[64], *plus;
+        snprintf(one, sizeof one, "%s", s + 4);
+        if ((plus = strchr(one, '+'))) {           /* "Pad LB+RB": two together */
+            *plus = 0;
+            int a = pad_named(one), b = pad_named(plus + 1);
+            return a < 0 || b < 0 || a == b ? -1 : a < b ? BIND_PAD2(a, b) : BIND_PAD2(b, a);
+        }
+        int a = pad_named(one);
+        return a >= 0 ? BIND_PAD | a : -1;
+    }
     SDL_Scancode sc = SDL_GetScancodeFromName(s);
     return sc != SDL_SCANCODE_UNKNOWN ? (int)sc : -1;
 }
@@ -378,7 +504,10 @@ static void save(void)
         char k0[64], k1[64], p[64];
         ngb_bind_input_name(s_bind[a][0], k0, sizeof k0);
         ngb_bind_input_name(s_bind[a][1], k1, sizeof k1);
-        if (s_bind[a][2])
+        if (s_bind[a][2] && BIND_PAD_SECOND(s_bind[a][2]) >= 0)
+            snprintf(p, sizeof p, "Pad %s+%s", s_pad_name[s_bind[a][2] & 0xFF],
+                     s_pad_name[BIND_PAD_SECOND(s_bind[a][2])]);
+        else if (s_bind[a][2])
             snprintf(p, sizeof p, "Pad %s", s_pad_name[s_bind[a][2] & 0xFF]);
         else
             snprintf(p, sizeof p, "-");
@@ -392,6 +521,11 @@ static void save(void)
     fclose(f);
 }
 
+static void nintendo_apply(void)   /* the controllers start with it (xbox_InputInit) */
+{
+    xbox_InputNintendoLabels(!ngb_bind_nintendo_position());
+}
+
 void ngb_bind_load(void)
 {
     s_loaded = 1;
@@ -399,8 +533,10 @@ void ngb_bind_load(void)
     char path[1100], line[512];
     file_path(path, sizeof path, 0);
     FILE *f = fopen(path, "r");
-    if (!f)
+    if (!f) {
+        nintendo_apply();
         return;
+    }
     int first_set = 0;   /* a file from before the views were separate: its choice holds for both */
     int defaults = 0;
     while (fgets(line, sizeof line, f)) {
@@ -425,11 +561,13 @@ void ngb_bind_load(void)
             continue;
         }
         if (!strcmp(key, "button_prompts")) {
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PROMPTS_N; i++)
                 if (!SDL_strcasecmp(val, s_prompts_ini[i]))
                     s_prompts = i;
             continue;
         }
+        if (!strcmp(key, "nintendo_layout"))   /* (a choice in the 0.9.56 test builds) */
+            continue;
         if (!strcmp(key, "mouse_sensitivity")) {
             int v = atoi(val);
             v = (v + 12) / 25 * 25;
@@ -450,6 +588,8 @@ void ngb_bind_load(void)
                     continue;
                 if (slot == 2 && s_act[a].kind == T_AXIS)
                     continue;
+                if ((in & BIND_PAD) && BIND_PAD_SECOND(in) >= 0 && s_act[a].kind != T_AN2)
+                    continue;                          /* (two together only for the game's two-button moves) */
                 s_bind[a][slot] = in;
             }
         }
@@ -462,6 +602,7 @@ void ngb_bind_load(void)
     if (defaults < 1)
         s_third_start = 1;
     s_invert[1][1] = 0;   /* first-person up/down: the game's own Options > 1st Person Camera Control */
+    nintendo_apply();
     identity_check();
     s_gen++;
 }
@@ -485,16 +626,27 @@ void ngb_bind_set(int a, int slot, int in)
         return;
     if (slot == 2 && ngb_bind_pad_fixed(a))
         return;
+    /* Pause keeps a controller button (else no pause menu, nor this page, on a controller): it can't be cleared,
+     * and a button taken from it is refused when this action has none (or a pair) to give it in exchange */
+    if (slot == 2 && a == A_PAUSE && !in)
+        return;
+    if (slot == 2 && in && a != A_PAUSE && a < A_QUICK_WEAPONS && s_bind[A_PAUSE][2] == in) {
+        int old = s_bind[a][2];
+        if (!old || ((old & BIND_PAD) && BIND_PAD_SECOND(old) >= 0))
+            return;
+    }
     if (in) {
         for (int o = 0; o < A_COUNT; o++)
             for (int s = 0; s < 3; s++) {
                 if ((a >= A_QUICK_WEAPONS) != (o >= A_QUICK_WEAPONS) ||
                     s_bind[o][s] != in || (o == a && s == slot))
                     continue;
-                if (slot == 2)
-                    s_bind[o][s] = s_bind[a][2];       /* a controller button: swapped */
-                else
-                    s_bind[o][s] = 0;                  /* a key: moved here */
+                if (slot == 2 && o == A_PAUSE) {       /* (above: this one's old button, a single one) */
+                    s_bind[o][s] = s_bind[a][2];
+                    continue;
+                }
+                s_bind[o][s] = 0;                      /* a key or a controller button: moved here, the other
+                                                        * action left without it (Default Controls brings all back) */
             }
     }
     s_bind[a][slot] = in;
@@ -723,20 +875,43 @@ unsigned ngb_bind_quick_state(const Uint8 *keys, unsigned mouse, const XBOX_INPU
 
 /* xboxrecomp's input, each controller read (weak there): in play the
  * controller's buttons go to the actions they are bound to. */
-void xbox_pad_remap(XBOX_INPUT_STATE *st)
+/* (xbox_pad_remap's per-controller state, 4 the touch controls: the pairs' latches, a pair button's time down
+ * alone and the end of a tap let go in that time; the hold-back of a two-button move's own pair) */
+static int s_pair_latched[5][A_COUNT];
+static Uint64 s_pair_alone[5][P_COUNT], s_pair_tap[5][P_COUNT];
+static Uint64 s_hb_down[5][8];
+static BYTE s_hb_was[5][8], s_hb_back[5][8];
+
+static void hold_back_reset(DWORD port)   /* (the remap stepped aside: none of it holds after) */
+{
+    int i = port < 5 ? (int)port : 4;
+    memset(s_pair_latched[i], 0, sizeof s_pair_latched[i]);
+    memset(s_pair_alone[i], 0, sizeof s_pair_alone[i]);
+    memset(s_pair_tap[i], 0, sizeof s_pair_tap[i]);
+    memset(s_hb_down[i], 0, sizeof s_hb_down[i]);
+    memset(s_hb_was[i], 0, sizeof s_hb_was[i]);
+    memset(s_hb_back[i], 0, sizeof s_hb_back[i]);
+}
+
+void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port)
 {
     if (ngb_quick_frozen()) {
         memset(&st->Gamepad, 0, sizeof st->Gamepad);
+        hold_back_reset(port);
         return;
     }
     ensure();
-    if (ngb_menu_up())
+    if (ngb_menu_up()) {
+        hold_back_reset(port);
         return;
+    }
     apply_invert(st);
     int quick = ngb_quick_controls_active();
     /* The controller as it is when nothing is rebound -- here or in the game's own Button Settings. */
-    if (!quick && ((s_pad_identity && game_buttons_default()) || getenv("NGB_NO_PAD_REMAP")))
+    if (!quick && ((s_pad_identity && game_buttons_default()) || getenv("NGB_NO_PAD_REMAP"))) {
+        hold_back_reset(port);
         return;
+    }
     int v[P_COUNT], axes[4] = { 0 };
     pad_inputs(st, v);
     if (quick)
@@ -744,18 +919,100 @@ void xbox_pad_remap(XBOX_INPUT_STATE *st)
             if (quick_input(BIND_PAD | p)) v[p] = 0;
     st->Gamepad.wButtons = 0;
     memset(st->Gamepad.bAnalogButtons, 0, sizeof st->Gamepad.bAnalogButtons);
+    /* Two buttons held together first: their action. Each one's own action waits: from the pair's press until
+     * both are let go (the second let go after the first would do its own), and, as a pair's first button goes
+     * down alone, a few frames for the second to join it (let go in them, a tap: its own action, a moment). */
+    int *latched = s_pair_latched[port < 5 ? port : 4];
+    Uint64 *alone_since = s_pair_alone[port < 5 ? port : 4], *tap_until = s_pair_tap[port < 5 ? port : 4];
+    Uint64 now = SDL_GetTicks64();
+    int held[P_COUNT], quiet[P_COUNT] = { 0 }, member[P_COUNT] = { 0 }, in_latched[P_COUNT] = { 0 };
+    memcpy(held, v, sizeof held);
+    for (int a = 0; a < A_COUNT; a++) {             /* the pairs held: their actions */
+        int in = s_bind[a][2], b = BIND_PAD_SECOND(in), f = in & 0xFF;
+        if (!(in & BIND_PAD) || b < 0 || b >= P_COUNT || f >= P_COUNT) {
+            latched[a] = 0;
+            continue;
+        }
+        member[f] = member[b] = 1;
+        if (held[f] > 40 && held[b] > 40) {
+            press(st, &s_act[a], held[f] < held[b] ? held[f] : held[b], axes);
+            latched[a] = 1;
+        } else if (held[f] <= 40 && held[b] <= 40) {
+            latched[a] = 0;
+        }
+        if (latched[a])
+            in_latched[f] = in_latched[b] = 1;
+    }
+    for (int p = 0; p < P_COUNT; p++) {             /* then each pair button once (two pairs may share one) */
+        if (!member[p])
+            continue;
+        if (in_latched[p]) {
+            quiet[p] = 1;
+            alone_since[p] = 0;
+            continue;
+        }
+        if (held[p] <= 40 && alone_since[p] && now - alone_since[p] < 60)   /* down alone: 60 ms for the other */
+            tap_until[p] = now + 50;
+        if (held[p] <= 40)
+            alone_since[p] = 0;
+        else if (!alone_since[p])
+            alone_since[p] = now;
+        if (alone_since[p] && now - alone_since[p] < 60)
+            quiet[p] = 1;
+    }
+    for (int p = 0; p < P_COUNT; p++)
+        if (quiet[p])
+            v[p] = 0;
+        else if (tap_until[p] > now && !v[p])
+            v[p] = 255;
     for (int a = 0; a < A_COUNT; a++) {
         int in = s_bind[a][2];
-        if ((in & BIND_PAD) && (in & 0xFF) < P_COUNT && v[in & 0xFF])
+        if ((in & BIND_PAD) && BIND_PAD_SECOND(in) < 0 && (in & 0xFF) < P_COUNT && v[in & 0xFF])
             press(st, &s_act[a], v[in & 0xFF], axes);
     }
+    /* A two-button move bound elsewhere: the game's own pair (Y + B for Ninpo) made by two other actions held
+     * together (within 100 ms of each other, as a pair is pressed) would still be it: the one of the two that went
+     * down last waits until it is let go. One pressed while the other is long held (an attack in a jump) goes. */
+    Uint64 *down_at = s_hb_down[port < 5 ? port : 4];
+    BYTE *was = s_hb_was[port < 5 ? port : 4], *held_back = s_hb_back[port < 5 ? port : 4];
+    BYTE *an = st->Gamepad.bAnalogButtons;
+    for (int i = 0; i < 8; i++) {
+        if (an[i] && !was[i])
+            down_at[i] = now;
+        if (!an[i])
+            held_back[i] = 0;
+        was[i] = an[i] != 0;
+    }
+    unsigned char tab[10];
+    game_buttons(tab);
+    for (int a = 0; a < A_COUNT; a++) {
+        int in = s_bind[a][2];
+        if (s_act[a].kind != T_AN2 || latched[a] || in == s_act[a].pad)
+            continue;
+        if ((in & BIND_PAD) && BIND_PAD_SECOND(in) < 0 && (in & 0xFF) < P_COUNT && v[in & 0xFF])
+            continue;                              /* (its own one button: the pair is it) */
+        int slot = game_slot(&s_act[a], tab);
+        int b0 = slot < 0 ? -1 : slot < 8 ? slot : slot == 8 ? XBOX_BUTTON_X : XBOX_BUTTON_Y;
+        int b1 = slot == 8 ? XBOX_BUTTON_A : slot == 9 ? XBOX_BUTTON_B : -1;
+        if (b0 < 0 || b1 < 0 || !an[b0] || !an[b1] || held_back[b0] || held_back[b1])
+            continue;
+        Uint64 gap = down_at[b0] > down_at[b1] ? down_at[b0] - down_at[b1] : down_at[b1] - down_at[b0];
+        if (gap < 100)
+            held_back[down_at[b0] > down_at[b1] ? b0 : b1] = 1;
+    }
+    for (int i = 0; i < 8; i++)
+        if (held_back[i])
+            an[i] = 0;
 }
 
 /* ---------- waiting for an input ---------- */
 
 static volatile int s_cap_action = -1, s_cap_slot, s_cap_result;
-static Uint64 s_cap_since;
-static int s_cap_prev[P_COUNT];
+static Uint64 s_cap_since, s_cap_first_at;
+static int s_cap_prev[P_COUNT], s_cap_first = -1;   /* a two-button action's first button, while held */
+
+/* The actions a pair of buttons can be bound to: the game's own two-button moves */
+int ngb_bind_pad_pair(int a) { return a >= 0 && a < A_COUNT && s_act[a].kind == T_AN2; }
 
 int ngb_bind_capturing(void) { return s_cap_action >= 0; }
 
@@ -765,6 +1022,7 @@ void ngb_bind_capture_begin(int a, int slot)
     s_cap_result = 0;
     s_cap_slot = slot;
     s_cap_since = SDL_GetTicks64();
+    s_cap_first = -1;
     XBOX_INPUT_STATE st;
     memset(s_cap_prev, 0, sizeof s_cap_prev);
     if (xbox_InputGetStateRaw(0, &st) == 0)
@@ -789,11 +1047,22 @@ int ngb_bind_capture_tick(void)
         if (xbox_InputGetStateRaw(0, &st) == 0) {
             pad_inputs(&st, v);
             for (int p = 0; p < P_COUNT && !r; p++)
-                if (v[p] > 120 && s_cap_prev[p] <= 120)
-                    r = BIND_PAD | p;
+                if (v[p] > 120 && s_cap_prev[p] <= 120) {
+                    if (!ngb_bind_pad_pair(a))
+                        r = BIND_PAD | p;
+                    else if (s_cap_first < 0) {        /* a pair's first: held, a second may join it */
+                        s_cap_first = p;
+                        s_cap_first_at = SDL_GetTicks64();
+                    } else if (p != s_cap_first)       /* (one order: X + A is A + X) */
+                        r = s_cap_first < p ? BIND_PAD2(s_cap_first, p) : BIND_PAD2(p, s_cap_first);
+                }
+            /* let go alone, or held a while alone: that one button */
+            if (!r && s_cap_first >= 0 &&
+                (v[s_cap_first] <= 40 || SDL_GetTicks64() - s_cap_first_at > 1500))
+                r = BIND_PAD | s_cap_first;
             memcpy(s_cap_prev, v, sizeof v);
         }
-        if (!r && SDL_GetTicks64() - s_cap_since > 6000)
+        if (!r && s_cap_first < 0 && SDL_GetTicks64() - s_cap_since > 6000)
             r = -1;                                    /* none: as it was */
     }
     if (!r)

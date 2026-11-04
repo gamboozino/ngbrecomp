@@ -1369,8 +1369,11 @@ int main(int argc, char **argv)
     }
     /* Controllers and keyboard, on the thread that pumps the window's
      * events (hotplug arrives there too). */
-    if (s_use_gpu && !s_headless)
+    if (s_use_gpu && !s_headless) {
+        extern void ngb_bind_load(void);
+        ngb_bind_load();   /* (the Nintendo pads' layout: the controllers start with it, src/bindings.c) */
         xbox_InputInit();
+    }
 #endif
 
 #if defined(_WIN32)

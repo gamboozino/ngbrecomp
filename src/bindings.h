@@ -27,6 +27,10 @@ enum {
  * controller input (BIND_PAD | one of the P_ below). */
 #define BIND_MOUSE 0x1000
 #define BIND_PAD   0x2000
+/* Two controller buttons held together (Ninpo, Wind Run: a pair of the player's choosing), the second one's
+ * P_ + 1 in bits 16-20 of a BIND_PAD input */
+#define BIND_PAD2(first, second) (BIND_PAD | (first) | ((second) + 1) << 16)
+#define BIND_PAD_SECOND(in) ((((in) >> 16) & 0x1F) - 1)
 enum { P_A, P_B, P_X, P_Y, P_BLACK, P_WHITE, P_LT, P_RT, P_START, P_BACK, P_LS, P_RS,
        P_DU, P_DD, P_DL, P_DR, P_COUNT };
 
@@ -37,8 +41,8 @@ const char *ngb_bind_name(int action);        /* "Attack" */
 const char *ngb_bind_help(int action);        /* a line about it */
 int ngb_bind_get(int action, int slot);       /* slots 0-1 the keys, 2 the controller */
 int ngb_bind_pad_fixed(int action);           /* the sticks: not the controller's to change */
-/* Sets a slot: a key taken from another action leaves it; a controller button
- * taken from another action swaps with it. Saved at once. */
+/* Sets a slot: a key or controller button taken from another action leaves it
+ * (that action has none there then). Saved at once. */
 void ngb_bind_set(int action, int slot, int input);
 void ngb_bind_defaults(void);
 /* The camera's direction in play (the right stick, and the mouse and keys for it), for view 0 the
@@ -60,7 +64,15 @@ void ngb_bind_load(void);
 void ngb_bind_input_name(int input, char *out, int n);
 int ngb_pad_prompts_ps(void);            /* a PlayStation pad's buttons in the prompts (#113) */
 int ngb_prompts_keys(void);              /* the keyboard's keys in the prompts */
-int ngb_bind_prompts(void);              /* Button Prompts: 0 Auto, 1 Xbox, 2 PlayStation, 3 PC */
+int ngb_pad_prompts_nintendo(void);      /* a Nintendo pad's (#170) */
+int ngb_bind_prompts(void);              /* Button Prompts: 0 Auto, 1 Xbox, 2 PlayStation, 3 Nintendo, 4 PC */
+int ngb_pad_set(void);                   /* the prompts' pad: 0 Xbox, 1 PlayStation, 2 Nintendo; -1 the keys */
+int ngb_pad_set_pad(void);               /* the same, the controller's whatever is in use */
+const char *ngb_pad_picture_p(int set, int p);   /* the picture of P_ button p (P_COUNT, +1: the sticks) */
+const char *ngb_pad_picture(int set, int xbox_button);   /* its picture for the game's button; NULL the Xbox's */
+int ngb_bind_nintendo_position(void);    /* Nintendo pads' face buttons: 1 by position, 0 by label (Android) */
+int ngb_bind_pad_pair(int a);            /* the action takes two controller buttons held together (Ninpo, Wind Run) */
+int ngb_bind_pad_combo_slot(int a);      /* the game's two-button slot of the action: 8 X + A, 9 Y + B; -1 */
 void ngb_bind_step_prompts(int dir);
 const char *ngb_bind_prompts_name(int v);
 const char *ngb_bind_pad_combo(int a);   /* "X + A" for Wind Run, "Y + B" for Ninpo; else NULL */

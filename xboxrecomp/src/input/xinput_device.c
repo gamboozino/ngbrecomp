@@ -230,6 +230,16 @@ int xbox_InputPadPlayStation(void)   /* XInput: Xbox pads only */
     return 0;
 }
 
+int xbox_InputPadNintendo(void)
+{
+    return 0;
+}
+
+void xbox_InputNintendoLabels(int labels)
+{
+    (void)labels;
+}
+
 void xbox_InputMouseStick(float full, short *x, short *y)
 {
     (void)full;
@@ -280,6 +290,7 @@ DWORD xbox_InputGetCapabilities(DWORD dwPort, DWORD dwFlags, XBOX_INPUT_CAPABILI
 #include <SDL.h>
 
 static SDL_GameController *g_pads[XBOX_MAX_CONTROLLERS];
+static SDL_Joystick *g_vpad;   /* RECOMP_PAD_HOST's test pad: the only one taken while it is there */
 /* Each slot's joystick instance and SDL controller type, cached on the window's thread (open_controllers),
  * for xbox_InputPadPlayStation; -1 an empty slot. */
 static volatile int g_pad_id[XBOX_MAX_CONTROLLERS] = { -1, -1, -1, -1 };
@@ -309,6 +320,8 @@ static void open_controllers(void)
         SDL_JoystickID id;
         int s, have = 0;
         if (!SDL_IsGameController(i))
+            continue;
+        if (g_vpad && SDL_JoystickGetDeviceInstanceID(i) != SDL_JoystickInstanceID(g_vpad))
             continue;
 #ifdef __ANDROID__
         /* Fingerprint sensors on many phones (uinput-fpc, uinput-goodix) say they are game controllers: taken as
@@ -350,11 +363,130 @@ static volatile int g_kbm_active = -1;
 static volatile int g_hotplug;
 static volatile int g_pad_last = -1;   /* the joystick instance of the pad last touched */
 
+static volatile int g_labels = 1, g_labels_set = -1;   /* Nintendo pads by label (SDL's default) or by position */
+
+/* RECOMP_PAD_HOST=<file>, for tests: a virtual controller SDL sees as a real one (the host's own pages, a
+ * title's bindings and its pairs read it, unlike RECOMP_PAD_LIVE's USB pad). Each line appended to the file
+ * is <button>[+<button>...][:<hold ms>] (150 ms by default), one after another with 200 ms between (none
+ * after a line starting with &, to change what is held without letting go):
+ * a b x y lb rb lt rt start back ls rs up down left right. Polled on the window's thread. */
+static struct { unsigned mask; Uint64 at, until; } g_vq[64];
+static int g_vq_n, g_vq_on = -1;
+
+static unsigned vpad_mask(const char *s, unsigned *hold)
+{
+    static const char *const name[] = { "a", "b", "x", "y", "back", NULL, "start", "ls", "rs", "lb", "rb",
+                                        "up", "down", "left", "right" };   /* (SDL_CONTROLLER_BUTTON_*) */
+    unsigned m = 0;
+    *hold = 150;
+    while (*s) {
+        size_t n = strcspn(s, "+:\r\n");
+        int b = -1;
+        for (int i = 0; i < (int)(sizeof name / sizeof *name); i++)
+            if (name[i] && strlen(name[i]) == n && !strncmp(s, name[i], n))
+                b = i;
+        if (n == 2 && !strncmp(s, "lt", 2)) b = 16;
+        if (n == 2 && !strncmp(s, "rt", 2)) b = 17;
+        if (b >= 0) m |= 1u << b;
+        s += n;
+        if (*s == ':') { *hold = (unsigned)strtoul(s + 1, NULL, 0); break; }
+        if (*s) s++;
+    }
+    return m;
+}
+
+static void vpad_poll(void)
+{
+    static const char *path;
+    static long consumed;
+    static char line[128];
+    static size_t nl;
+    if (!g_vpad)
+        return;
+    if (!path)
+        path = getenv("RECOMP_PAD_HOST");
+    Uint64 now = SDL_GetTicks64();
+    FILE *f = fopen(path, "rb");
+    if (f && fseek(f, 0, SEEK_END) == 0 && ftell(f) < consumed)
+        consumed = 0;                                   /* (the file started over) */
+    if (f && fseek(f, consumed, SEEK_SET) == 0) {
+        int c;
+        while ((c = fgetc(f)) != EOF) {
+            consumed++;
+            if (c != '\n') {
+                if (nl < sizeof line - 1) line[nl++] = (char)c;
+                continue;
+            }
+            line[nl] = 0;
+            nl = 0;
+            int join = line[0] == '&';
+            unsigned hold, m = vpad_mask(line + join, &hold);
+            if (!m || g_vq_n >= 64)
+                continue;
+            static Uint64 last_until;                  /* (the last one's end, popped or not) */
+            Uint64 at = last_until + (join ? 0 : 200);
+            if (at < now) at = now;
+            last_until = at + hold;
+            g_vq[g_vq_n].mask = m;
+            g_vq[g_vq_n].at = at;
+            g_vq[g_vq_n].until = at + hold;
+            g_vq_n++;
+            fprintf(stderr, "  PAD: host \"%s\"\n", line);
+        }
+    }
+    if (f)
+        fclose(f);
+    unsigned m = 0;
+    while (g_vq_n && now >= g_vq[0].until) {
+        memmove(g_vq, g_vq + 1, --g_vq_n * sizeof *g_vq);
+    }
+    if (g_vq_n && now >= g_vq[0].at)
+        m = g_vq[0].mask;
+    if ((int)m == g_vq_on)
+        return;
+    g_vq_on = (int)m;
+    for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX && b < 15; b++)
+        SDL_JoystickSetVirtualButton(g_vpad, b, (m >> b) & 1);
+    SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_TRIGGERLEFT, (m >> 16) & 1 ? 32767 : -32768);
+    SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, (m >> 17) & 1 ? 32767 : -32768);
+}
+
+static void vpad_attach(void)
+{
+    const char *p = getenv("RECOMP_PAD_HOST");
+    if (!p || !*p)
+        return;
+    SDL_VirtualJoystickDesc d;
+    SDL_zero(d);
+    d.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
+    d.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+    d.naxes = SDL_CONTROLLER_AXIS_MAX;
+    d.nbuttons = 15;
+    d.name = "Test pad";
+    int i = SDL_JoystickAttachVirtualEx(&d);
+    g_vpad = i < 0 ? NULL : SDL_JoystickOpen(i);
+    if (g_vpad) {
+        SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_TRIGGERLEFT, -32768);
+        SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, -32768);
+    }
+    fprintf(stderr, "  PAD: host test pad from %s%s\n", p, g_vpad ? "" : " (not attached)");
+}
+
 /* The window's thread, after it pumped SDL's events (outside its locks). */
 void xbox_InputHotplugPoll(void)
 {
+    vpad_poll();
     if (g_pad_lock && __atomic_exchange_n(&g_hotplug, 0, __ATOMIC_ACQ_REL))
         open_controllers();
+}
+
+/* A Nintendo pad's face buttons by their labels (1: the game's A is the one marked A) or by their places (0: the
+ * one where an Xbox pad's A is), for xbox_InputInit: SDL picks a pad's mapping as it starts its controllers (only
+ * its own Switch driver, not Android's nor evdev's, would follow a later change), so a change waits for the next
+ * start. */
+void xbox_InputNintendoLabels(int labels)
+{
+    __atomic_store_n(&g_labels, labels != 0, __ATOMIC_RELEASE);
 }
 /* Mouse motion since the last sample, for the right stick (see keyboard_state). */
 static volatile int g_mouse_dx, g_mouse_dy;
@@ -439,6 +571,20 @@ int xbox_InputPadPlayStation(void)
     return 0;
 }
 
+/* The pad in use is a Nintendo one: a Switch Pro Controller, Joy-Cons, or an adapter that says so (#170). */
+int xbox_InputPadNintendo(void)
+{
+    int id = __atomic_load_n(&g_pad_last, __ATOMIC_ACQUIRE);
+    for (int s = 0; s < XBOX_MAX_CONTROLLERS; s++)
+        if (g_pad_id[s] >= 0 && (id < 0 || g_pad_id[s] == id)) {
+            int t = g_pad_type[s];
+            return t == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO || t == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT ||
+                   t == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT ||
+                   t == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR;
+        }
+    return 0;
+}
+
 /* The mouse's motion as a stick: its speed over the last ~10 ms, filtered,
  * at full deflection from about `full` pixels a second. Every caller sees
  * the same value (the state is polled from several places). */
@@ -475,8 +621,13 @@ void xbox_InputInit(void)
         return;
     done = 1;
     g_pad_lock = SDL_CreateMutex();
+    g_labels_set = __atomic_load_n(&g_labels, __ATOMIC_ACQUIRE);
+    SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, g_labels_set ? "1" : "0");
+    if (SDL_WasInit(SDL_INIT_GAMECONTROLLER) && !g_labels_set)
+        SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);   /* (the settings screen's, with SDL's default: by label) */
     if (!SDL_WasInit(SDL_INIT_GAMECONTROLLER))
         SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+    vpad_attach();
     open_controllers();
     SDL_AddEventWatch(pad_event_watch, NULL);
 }
@@ -574,9 +725,9 @@ static int keyboard_state(XBOX_INPUT_STATE *st)
 /* The title may move the controller's buttons to other actions (its
  * controls settings): each read of a controller, before the keyboard is
  * merged. Weak: by default as they are. */
-__attribute__((weak)) void xbox_pad_remap(XBOX_INPUT_STATE *st)
+__attribute__((weak)) void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port)
 {
-    (void)st;
+    (void)st; (void)port;
 }
 
 static DWORD input_get_state(DWORD dwPort, XBOX_INPUT_STATE *pState, int raw)
@@ -649,7 +800,18 @@ static DWORD input_get_state(DWORD dwPort, XBOX_INPUT_STATE *pState, int raw)
     pState->Gamepad.sThumbRY =
         (SHORT)(-1 - SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_RIGHTY));
     SDL_UnlockMutex(g_pad_lock);
-    if (!raw) xbox_pad_remap(pState);   /* the title's button bindings, if it has any */
+    if (!raw) xbox_pad_remap(pState, dwPort);   /* the title's button bindings, if it has any */
+    if (!raw && g_vpad && dwPort == 0) {         /* (the test pad's: what the title is handed, as it changes) */
+        static unsigned last;
+        unsigned now = pState->Gamepad.wButtons;
+        for (int i = 0; i < 8; i++)
+            now |= (pState->Gamepad.bAnalogButtons[i] > 30u) << (16 + i);
+        if (now != last)
+            fprintf(stderr, "  PAD: title gets %04X A%d B%d X%d Y%d Bk%d Wh%d LT%d RT%d\n", now & 0xFFFF,
+                    (now >> 16) & 1, (now >> 17) & 1, (now >> 18) & 1, (now >> 19) & 1, (now >> 20) & 1,
+                    (now >> 21) & 1, (now >> 22) & 1, (now >> 23) & 1);
+        last = now;
+    }
 
     /* RECOMP_KEYBOARD=1: the keyboard drives port 0 alongside the pad. */
     if (!raw && dwPort == 0 && keyboard_mode() == 1) {

@@ -105,6 +105,7 @@ endforeach()
 # set and its blank key: each embedded, and a table of them by file name (src/pause_tab.c).
 file(GLOB NGB_KEY_PNGS ${CMAKE_CURRENT_SOURCE_DIR}/assets/prompts/keys/*.png
                        ${CMAKE_CURRENT_SOURCE_DIR}/assets/prompts/ps/*.png    # PlayStation buttons (#113)
+                       ${CMAKE_CURRENT_SOURCE_DIR}/assets/prompts/switch/*.png # Nintendo buttons (#170)
                        ${CMAKE_CURRENT_SOURCE_DIR}/assets/prompts/xbox/*.png) # the Controls page's Xbox combos
 if(ANDROID)   # the touch controls' sticks and d-pad (Kenney's Mobile Controls, CC0: assets/touch/License-Kenney.txt)
     file(GLOB NGB_TOUCH_PNGS ${CMAKE_CURRENT_SOURCE_DIR}/assets/touch/*.png)

@@ -107,6 +107,9 @@ int xbox_InputControllerPresent(void);
 int xbox_InputKeyboardActive(void);
 /* The pad in use is a PlayStation one (its button prompts). */
 int xbox_InputPadPlayStation(void);
+/* The pad in use is a Nintendo one; its face buttons by label (1, SDL's default) or by place (0). */
+int xbox_InputPadNintendo(void);
+void xbox_InputNintendoLabels(int labels);
 /* The mouse's recent motion as a stick, full deflection at `full` px/s. */
 void xbox_InputMouseStick(float full, short *x, short *y);
 

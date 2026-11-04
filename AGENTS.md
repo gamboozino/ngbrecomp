@@ -64,6 +64,12 @@ Driving and watching a headless run:
   directions, `name:<ms>` to hold). It acts at the USB level, so code that reads the host's input
   (the recomp's own menu pages) does not see it — use `xdotool` on the gamescope's own X display
   (find it in the game's environment; never `:0`) for keys and the mouse.
+- `RECOMP_PAD_HOST=<file>`: a virtual controller SDL takes for a real one, the only one opened while
+  it is there (the machine's own pads are left out). Lines appended: `<button>[+<button>...][:<hold ms>]`
+  (`a b x y lb rb lt rt start back ls rs up down left right`), 200 ms apart, or right after the previous
+  one when the line starts with `&` (hold one, then add a second). Unlike `RECOMP_PAD_LIVE` it reaches
+  the recomp's own pages and the button bindings; the log shows `PAD: title gets ...`, what the game
+  is handed after the bindings, as it changes.
 - `NV2A_CAPTURE=<prefix>` and `NV2A_CAPTURE_EVERY=<n>`: a PPM of the presented picture every n
   frames. Keep `render_scale` low in test settings, or the captures fill `/tmp`.
 - `NV2A_FPS_LOG=1`: frame rate, and `[LAT]` presentation timing.

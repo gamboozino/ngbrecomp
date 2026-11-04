@@ -158,13 +158,14 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
 };
 
 #include "bindings.h"
+#include "input/xinput_xbox.h"   /* (XBOX_BUTTON_*: the buttons the prompts picture) */
 /* the actions; then On/Off rows: Invert Camera X and Y (the third-person camera, #26), Invert First-Person X
  * (#33, #63; its up/down is the game's own 1st Person Camera Control), Start in Third Person (#23); then
  * Default Controls */
 #define CTL_INVX A_COUNT
 #define CTL_START (A_COUNT + 3)
 #define CTL_MOUSE (A_COUNT + 4)   /* Camera Sensitivity: a value, Left / Right (#67) */
-#define CTL_PROMPTS (A_COUNT + 5) /* Button Prompts: Auto, Xbox, PlayStation, PC (#113) */
+#define CTL_PROMPTS (A_COUNT + 5) /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
 #define CTL_DEF  (A_COUNT + 6)
 #define CTL_ROWS (A_COUNT + 7)
 #define CTL_TOGGLE(r) ((r) >= CTL_INVX && (r) <= CTL_START)
@@ -846,6 +847,7 @@ static void page_text_fit(uint32_t *px, uint8_t *m, const char *t, float x, floa
 
 static int picture_icon(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, const char *name,
                         float at[4]);
+static void key_icon(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, int in);
 static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
 {
     page_text(px, m, "Keyboard / Mouse", (s_ctl_cx[0] + s_ctl_cx[1]) / 2, CTL_Y0 - 8, 14, 0x8C8C96, 1);
@@ -902,18 +904,34 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
             float cx = s_ctl_cx[c], w = s_ctl_w[c];
             page_fill(px, cx - w / 2, y + 3, w, ROW_H - 6, on ? 0x6E64DC : 0x14141C, on ? 0.9f : 0.55f,
                       on ? 0.9f : 0.55f);
+            const float k = (float)PAGE_TW / PAGE_W, iy0 = (y + 5) * k, iy1 = (y + ROW_H - 5) * k;
+            int in = ngb_bind_get(r, c), set = ngb_pad_set_pad();
+            float at[4];
             if (on && capturing)
-                snprintf(name, sizeof name, c == 2 ? "Press a button" : "Press a key");
-            else if (fixed)
-                snprintf(name, sizeof name, r >= A_CAM_UP ? "R Stick" : "L Stick");
-            else if (combo) {                              /* the two buttons' pictures, the pad's own */
-                const float k = (float)PAGE_TW / PAGE_W;
-                float at[4];
-                int ps = ngb_pad_prompts_ps(), wr = combo[0] == 'X' || combo[0] == 'S';   /* Wind Run, else Ninpo */
-                picture_icon(px, PAGE_TW, PAGE_TH, (cx - 25) * k, (y + 5) * k, (cx - 6) * k, (y + ROW_H - 5) * k,
-                             wr ? (ps ? "PS3_Square" : "360_X") : (ps ? "PS3_Triangle" : "360_Y"), at);
-                picture_icon(px, PAGE_TW, PAGE_TH, (cx + 6) * k, (y + 5) * k, (cx + 25) * k, (y + ROW_H - 5) * k,
-                             wr ? (ps ? "PS3_Cross" : "360_A") : (ps ? "PS3_Circle" : "360_B"), at);
+                snprintf(name, sizeof name, c == 2 ? (ngb_bind_pad_pair(r) ? "Press 1 or 2" : "Press a button") : "Press a key");
+            else if (fixed || (c == 2 && (in & BIND_PAD))) {   /* the controller's buttons as pictures, its set's */
+                int second = fixed ? -1 : BIND_PAD_SECOND(in);
+                int first = fixed ? (r >= A_CAM_UP ? P_COUNT + 1 : P_COUNT) : (in & 0xFF);
+                if (second >= 0) {                     /* two together */
+                    picture_icon(px, PAGE_TW, PAGE_TH, (cx - 25) * k, iy0, (cx - 6) * k, iy1,
+                                 ngb_pad_picture_p(set, first), at);
+                    picture_icon(px, PAGE_TW, PAGE_TH, (cx + 6) * k, iy0, (cx + 25) * k, iy1,
+                                 ngb_pad_picture_p(set, second), at);
+                    page_text_fit(px, m, "+", cx, y + 18, 15, 0xC8C8D0, 1, w - 6);
+                } else {
+                    picture_icon(px, PAGE_TW, PAGE_TH, (cx - 12) * k, iy0, (cx + 12) * k, iy1,
+                                 ngb_pad_picture_p(set, first), at);
+                }
+                continue;
+            } else if (c < 2 && in) {                  /* a key or mouse button: its keycap, as play's prompts */
+                key_icon(px, PAGE_TW, PAGE_TH, (cx - w / 2 + 4) * k, iy0, (cx + w / 2 - 4) * k, iy1, in);
+                continue;
+            } else if (combo) {                        /* the game's own two buttons, dimmer (none bound here) */
+                int wr = ngb_bind_pad_combo_slot(r) == 8;   /* Wind Run's X + A, else Ninpo's Y + B */
+                picture_icon(px, PAGE_TW, PAGE_TH, (cx - 25) * k, iy0, (cx - 6) * k, iy1,
+                             ngb_pad_picture_p(set, wr ? P_X : P_Y), at);
+                picture_icon(px, PAGE_TW, PAGE_TH, (cx + 6) * k, iy0, (cx + 25) * k, iy1,
+                             ngb_pad_picture_p(set, wr ? P_A : P_B), at);
                 page_text_fit(px, m, "+", cx, y + 18, 15, 0x6E6E78, 1, w - 6);
                 continue;
             } else
@@ -928,7 +946,9 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
     page_fill(px, 446, CTL_Y0 + 2 + ty, 2, th - 4, 0xC8C4FF, 0.9f, 0.9f);
     const char *help = NULL;
     if (focused && row >= 0 && capturing)
-        help = s_ctl_col == 2 ? "Press the controller's button (wait to cancel)." : "Press a key or mouse button (Esc cancels).";
+        help = s_ctl_col != 2 ? "Press a key or mouse button (Esc cancels)."
+             : ngb_bind_pad_pair(row) ? "Press a button, or two together for a pair (wait to cancel)."
+             : "Press the controller's button (wait to cancel).";
     else if (focused && row == CTL_DEF)
         help = "Every action as it was.";
     else if (focused && CTL_TOGGLE(row))
@@ -940,6 +960,8 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
     else if (focused && row >= 0)
         help = s_ctl_col == 2 && ngb_bind_pad_fixed(row) ? ngb_bind_help(row)
              : ngb_pad_prompts_ps() ? "Cross: change   Square / Delete: clear   (play only; the menus keep theirs)"
+             : ngb_pad_prompts_nintendo() && ngb_bind_nintendo_position()
+             ? "B: change   Y / Delete: clear   (play only; the menus keep theirs)"
              : "A: change   X / Delete: clear   (play only; the menus keep theirs)";
     if (focused && help)
         page_text_fit(px, m, help, 445, CTL_Y0 + CTL_SHOWN * ROW_H + 16, 14, 0xFFFFFF, 2, 440);
@@ -1304,14 +1326,16 @@ extern const int ngb_key_png_count;
 #define KC_CELL_H 23
 #define KS 4                      /* the icons drawn at 4x the game's texture */
 
-/* The picture's name for an input (src/bindings.h), or NULL: none in the set. */
+/* The picture's name for an input (src/bindings.h), or NULL: none in the set -- also for keys a picture would
+ * show the same as another's (Mouse 4 and 5, the right-hand Shift, Ctrl, Alt and Windows keys, the keypad's):
+ * key_icon writes their names on a blank key instead. */
 static const char *key_picture(int in)
 {
     static char name[40];
     if (in & BIND_MOUSE) {
         int b = in & 0xFF;
         return b == 1 ? "Mouse_Left_Key_Dark" : b == 2 ? "Mouse_Middle_Key_Dark" : b == 3 ? "Mouse_Right_Key_Dark"
-                                                                                       : "Mouse_Simple_Key_Dark";
+                                                                                       : NULL;
     }
     if (in >= SDL_SCANCODE_A && in <= SDL_SCANCODE_Z) {
         snprintf(name, sizeof name, "%c_Key_Dark", 'A' + (in - SDL_SCANCODE_A));
@@ -1321,22 +1345,18 @@ static const char *key_picture(int in)
         snprintf(name, sizeof name, "%d_Key_Dark", in == SDL_SCANCODE_0 ? 0 : 1 + (in - SDL_SCANCODE_1));
         return name;
     }
-    if (in >= SDL_SCANCODE_KP_1 && in <= SDL_SCANCODE_KP_0) {   /* (no keypad set: the digit) */
-        snprintf(name, sizeof name, "%d_Key_Dark", in == SDL_SCANCODE_KP_0 ? 0 : 1 + (in - SDL_SCANCODE_KP_1));
-        return name;
-    }
     if (in >= SDL_SCANCODE_F1 && in <= SDL_SCANCODE_F12) {
         snprintf(name, sizeof name, "F%d_Key_Dark", 1 + (in - SDL_SCANCODE_F1));
         return name;
     }
     switch (in) {
     case SDL_SCANCODE_SPACE:        return "Space_Key_Dark";
-    case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return "Shift_Key_Dark";
-    case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL:   return "Ctrl_Key_Dark";
-    case SDL_SCANCODE_LALT: case SDL_SCANCODE_RALT:     return "Alt_Key_Dark";
+    case SDL_SCANCODE_LSHIFT:       return "Shift_Key_Dark";
+    case SDL_SCANCODE_LCTRL:        return "Ctrl_Key_Dark";
+    case SDL_SCANCODE_LALT:         return "Alt_Key_Dark";
     case SDL_SCANCODE_TAB:          return "Tab_Key_Dark";
     case SDL_SCANCODE_ESCAPE:       return "Esc_Key_Dark";
-    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: return "Enter_Key_Dark";
+    case SDL_SCANCODE_RETURN:       return "Enter_Key_Dark";
     case SDL_SCANCODE_BACKSPACE:    return "Backspace_Key_Dark";
     case SDL_SCANCODE_CAPSLOCK:     return "Caps_Lock_Key_Dark";
     case SDL_SCANCODE_DELETE:       return "Del_Key_Dark";
@@ -1349,20 +1369,19 @@ static const char *key_picture(int in)
     case SDL_SCANCODE_DOWN:         return "Arrow_Down_Key_Dark";
     case SDL_SCANCODE_LEFT:         return "Arrow_Left_Key_Dark";
     case SDL_SCANCODE_RIGHT:        return "Arrow_Right_Key_Dark";
-    case SDL_SCANCODE_MINUS: case SDL_SCANCODE_KP_MINUS: return "Minus_Key_Dark";
-    case SDL_SCANCODE_EQUALS: case SDL_SCANCODE_KP_PLUS: return "Plus_Key_Dark";
-    case SDL_SCANCODE_KP_MULTIPLY:  return "Asterisk_Key_Dark";
+    case SDL_SCANCODE_MINUS:        return "Minus_Key_Dark";
+    case SDL_SCANCODE_KP_PLUS:      return "Plus_Key_Dark";
     case SDL_SCANCODE_LEFTBRACKET:  return "Bracket_Left_Key_Dark";
     case SDL_SCANCODE_RIGHTBRACKET: return "Bracket_Right_Key_Dark";
     case SDL_SCANCODE_SEMICOLON:    return "Semicolon_Key_Dark";
     case SDL_SCANCODE_APOSTROPHE:   return "Quote_Key_Dark";
-    case SDL_SCANCODE_SLASH: case SDL_SCANCODE_KP_DIVIDE: return "Slash_Key_Dark";
+    case SDL_SCANCODE_SLASH:        return "Slash_Key_Dark";
     case SDL_SCANCODE_GRAVE:        return "Tilda_Key_Dark";
     case SDL_SCANCODE_COMMA:        return "Mark_Left_Key_Dark";
     case SDL_SCANCODE_PERIOD:       return "Mark_Right_Key_Dark";
     case SDL_SCANCODE_NUMLOCKCLEAR: return "Num_Lock_Key_Dark";
     case SDL_SCANCODE_PRINTSCREEN:  return "Print_Screen_Key_Dark";
-    case SDL_SCANCODE_LGUI: case SDL_SCANCODE_RGUI: return "Win_Key_Dark";
+    case SDL_SCANCODE_LGUI:         return "Win_Key_Dark";
     default:                        return NULL;
     }
 }
@@ -1518,7 +1537,7 @@ static void kc_tab_seen(uint32_t id, float x0, float y0, float x1, float y1)
  * those plates. */
 #define TK_SPRITE (PT_SPRITE + 9)     /* + 0 Q / L2, + 1 E / R2 */
 #define TK_TEX    (PT_TEX + 9)
-static GuestTex s_tk[2];              /* 0 the keys, 1 the PlayStation buttons */
+static GuestTex s_tk[3];              /* 0 the keys, 1 the PlayStation buttons, 2 the Nintendo ones (ZL, ZR) */
 static uint32_t s_tk_entry, s_tk_defs;
 
 static int tk_ready(void)
@@ -1528,7 +1547,7 @@ static int tk_ready(void)
     static int failed;
     if (failed)
         return 0;
-    for (int t = 0; t < 2; t++) {
+    for (int t = 0; t < 3; t++) {
         uint32_t *px = calloc(64 * KS * 32 * KS, sizeof *px);
         float at[4];
         /* the prompts' keys (21 x 23 cells), larger */
@@ -1547,7 +1566,8 @@ static int tk_ready(void)
                         if (a > 0)
                             px[Y * 64 * KS + (int)x0 + X] = (uint32_t)lroundf(a * 255) << 24 | 0x26262Bu;
                     }
-                picture_icon(px, 64 * KS, 32 * KS, x0 + KS, KS, x0 + 20 * KS, 22 * KS, i ? "PS3_R2" : "PS3_L2", at);
+                picture_icon(px, 64 * KS, 32 * KS, x0 + KS, KS, x0 + 20 * KS, 22 * KS,
+                             ngb_pad_picture(t, i ? XBOX_BUTTON_RTRIGGER : XBOX_BUTTON_LTRIGGER), at);
             }
         } else {
             key_icon(px, 64 * KS, 32 * KS, 0, 0, 21 * KS, 23 * KS, SDL_SCANCODE_Q);
@@ -1584,10 +1604,10 @@ static void kc_tab_keys(void)
         if (n++ % 120 == 0)
             fprintf(stderr, "[TAB] tick: kbm %d first %.1f..%.1f\n", xbox_InputKeyboardActive(), s_tab_first[0], s_tab_first[2]);
     }
-    int keys = ngb_prompts_keys();
-    if ((!keys && !ngb_pad_prompts_ps()) || s_tab_first[2] <= s_tab_first[0] || !tk_ready())
+    int set = ngb_pad_set();      /* -1 the keys, 1 PlayStation, 2 Nintendo: their pictures; 0 the game's own */
+    if (!set || s_tab_first[2] <= s_tab_first[0] || !tk_ready())
         return;
-    MEM32(s_tk_entry) = MEM32(s_tk_entry + 4) = s_tk[keys ? 0 : 1].hdr;
+    MEM32(s_tk_entry) = MEM32(s_tk_entry + 4) = s_tk[set < 0 ? 0 : set].hdr;
     /* Over the row's L and R plates, at their size: they stay at x 52..84 and 636..668 whichever tab is
      * chosen (the tabs' plates between them grow and move), 44..76 high with the row at rest -- 18.5
      * above the Weapon plate's centre, which follows the row as it slides in */
@@ -1637,17 +1657,20 @@ static void kc_check(uint32_t id)
  * L1 and R1, the buttons they are on. Xelu's PS3 set (CC0, assets/prompts/ps): the symbols in their
  * colours on black buttons, as on the DualShock 2 of the game's time. Each picture goes where its
  * sprite's definition takes it from, at KS times the texture's size. */
-static const struct { uint16_t id; uint8_t slot; const char *name; } k_ps[8] = {
-    { 5, 0, "PS3_Square" }, { 6, 0, "PS3_Triangle" }, { 7, 0, "PS3_Circle" }, { 8, 0, "PS3_Cross" },
-    { 9, 0, "PS3_L2" }, { 10, 0, "PS3_R2" }, { 0xB, 1, "PS3_L1" }, { 0xC, 2, "PS3_R1" },
+static const struct { uint16_t id; uint8_t slot; uint8_t button; } k_ps[8] = {
+    { 5, 0, XBOX_BUTTON_X }, { 6, 0, XBOX_BUTTON_Y }, { 7, 0, XBOX_BUTTON_B }, { 8, 0, XBOX_BUTTON_A },
+    { 9, 0, XBOX_BUTTON_LTRIGGER }, { 10, 0, XBOX_BUTTON_RTRIGGER }, { 0xB, 1, XBOX_BUTTON_BLACK },
+    { 0xC, 2, XBOX_BUTTON_WHITE },
 };
+/* A Nintendo pad's the same way (#170): Xelu's Switch set, by label or by place (ngb_pad_picture). */
 static struct {
     GuestTex t;
     uint32_t orig;                /* the game's texture header in the table */
     int made;                     /* 0 not yet, 1 made, -1 could not */
-} s_ps[3];                        /* 0 the cells' texture, 1 Black's, 2 White's */
+    unsigned gen;                 /* (Nintendo's: the layout it was made for) */
+} s_ps[2][3];                     /* [0 PlayStation, 1 Nintendo]: 0 the cells' texture, 1 Black's, 2 White's */
 
-static int ps_make(int slot, uint32_t entry, uint32_t hdr)
+static int ps_make(int set, int slot, uint32_t entry, uint32_t hdr)
 {
     int w, h;
     uint32_t *game = read_texture(hdr, MEM32(entry + 4), &w, &h);
@@ -1661,11 +1684,12 @@ static int ps_make(int slot, uint32_t entry, uint32_t hdr)
             continue;
         float at[4];
         picture_icon(px, w * KS, h * KS, MEMF(d) * w * KS, MEMF(d + 4) * h * KS, MEMF(d + 8) * w * KS,
-                     MEMF(d + 12) * h * KS, k_ps[i].name, at);
+                     MEMF(d + 12) * h * KS, ngb_pad_picture(set + 1, k_ps[i].button), at);
     }
-    int ok = make_texture(&s_ps[slot].t, w * KS, h * KS, MEM32(hdr + 0xC) & 0xFF);
+    GuestTex *t = &s_ps[set][slot].t;
+    int ok = t->hdr || make_texture(t, w * KS, h * KS, MEM32(hdr + 0xC) & 0xFF);
     if (ok)
-        upload(&s_ps[slot].t, px);
+        upload(t, px);
     free(px);
     return ok;
 }
@@ -1695,36 +1719,44 @@ static void ps_white_size(uint32_t def, int big)
     }
 }
 
-/* Each button icon the game queues, before the keyboard's (kc_check): the PlayStation pictures while a
- * PlayStation pad is in use, else the game's own back. */
+/* Each button icon the game queues, before the keyboard's (kc_check): the PlayStation or Nintendo pictures
+ * while such a pad is in use, else the game's own back. */
 static void ps_check(uint32_t id)
 {
     if (id < 5 || id > 0xC)
         return;
-    int slot = id <= 10 ? 0 : (int)id - 10;
+    int slot = id <= 10 ? 0 : (int)id - 10, set = ngb_pad_set() - 1;
     uint32_t def = sprite_def(id);
-    if (!def || s_ps[slot].made < 0)
+    if (!def)
         return;
     uint32_t entry = 0x8DBB28 + MEM32(def + 0x10) * 8, now = MEM32(entry);
-    int ours = s_ps[slot].made > 0 && now == s_ps[slot].t.hdr;
-    if (ngb_prompts_keys() || !ngb_pad_prompts_ps()) {
-        if (ours)
-            MEM32(entry) = s_ps[slot].orig;
+    int ours = -1;                /* the set whose texture is there now */
+    for (int k = 0; k < 2; k++)
+        if (s_ps[k][slot].made > 0 && now == s_ps[k][slot].t.hdr)
+            ours = k;
+    if (set < 0 || set > 1 || s_ps[set][slot].made < 0) {
+        if (ours >= 0)
+            MEM32(entry) = s_ps[ours][slot].orig;
         if (slot == 2)
             ps_white_size(def, 0);
         return;
     }
     if (slot == 2)
         ps_white_size(def, 1);
-    if (!ours)                    /* (the keys' texture there: the game's is the one it replaced) */
-        s_ps[slot].orig = slot == 0 && s_kc_made > 0 && (now == s_kc[0].hdr || now == s_kc[1].hdr) ? s_kc_orig
-                                                                                                   : now;
-    if (!s_ps[slot].made) {
-        s_ps[slot].made = ps_make(slot, entry, s_ps[slot].orig) ? 1 : -1;
-        if (s_ps[slot].made < 0)
+    if (ours < 0)                 /* (the keys' texture there: the game's is the one it replaced) */
+        s_ps[set][slot].orig = slot == 0 && s_kc_made > 0 && (now == s_kc[0].hdr || now == s_kc[1].hdr) ? s_kc_orig
+                                                                                                         : now;
+    else if (ours != set)
+        s_ps[set][slot].orig = s_ps[ours][slot].orig;
+    if (!s_ps[set][slot].made || (set == 1 && s_ps[set][slot].gen != ngb_bind_generation())) {
+        s_ps[set][slot].gen = ngb_bind_generation();
+        s_ps[set][slot].made = ps_make(set, slot, entry, s_ps[set][slot].orig) ? 1 : -1;
+        if (s_ps[set][slot].made < 0) {
+            MEM32(entry) = s_ps[set][slot].orig;
             return;
+        }
     }
-    MEM32(entry) = s_ps[slot].t.hdr;
+    MEM32(entry) = s_ps[set][slot].t.hdr;
 }
 
 /* ---------- "hold" prompts ---------- */
@@ -1734,10 +1766,10 @@ static void ps_check(uint32_t id)
  * prompts each button is that one's picture instead, the game's arrow over it. They are play's buttons,
  * so the keyboard's are play's keys, not the menu's. */
 static struct {
-    GuestTex t[2];                /* 0 PlayStation, 1 the keys */
+    GuestTex t[3];                /* 0 PlayStation, 1 the keys, 2 Nintendo */
     uint32_t orig;                /* the game's texture header in the table */
-    int made[2];                  /* 0 not yet, 1 made, -1 could not */
-    unsigned gen;                 /* the bindings the keys' one was made from */
+    int made[3];                  /* 0 not yet, 1 made, -1 could not */
+    unsigned gen[3];              /* the bindings the keys' (and Nintendo's layout) one was made from */
 } s_hold;
 
 /* Whether the cell's pixel (x, y) is the arrow: its shaft, then its head narrowing to the tip. */
@@ -1752,10 +1784,10 @@ static int hold_arrow(int x, int y)
     return x >= y - 8 && x <= 28 - y;
 }
 
-static int hold_make(int keys, uint32_t entry, uint32_t hdr)
+static int hold_make(int kind, uint32_t entry, uint32_t hdr)
 {
-    static const char *const ps[6] = { "PS3_Square", "PS3_Triangle", "PS3_Circle", "PS3_Cross", "PS3_L2", "PS3_R2" };
     static const int play_b[6] = { 2, 3, 1, 0, 6, 7 };   /* X Y B A L R */
+    int keys = kind == 1;
     int w, h;
     uint32_t *game = read_texture(hdr, MEM32(entry + 4), &w, &h);
     if (!game)
@@ -1773,7 +1805,7 @@ static int hold_make(int keys, uint32_t entry, uint32_t hdr)
             if (in)
                 key_icon(px, w * KS, h * KS, x0, y0, x1, y1, in);
         } else {
-            picture_icon(px, w * KS, h * KS, x0, y0, x1, y1, ps[i], at);
+            picture_icon(px, w * KS, h * KS, x0, y0, x1, y1, ngb_pad_picture(kind ? 2 : 1, play_b[i]), at);
         }
     }
     /* The game's arrow over them, two rows higher (the top two are clear): a PlayStation button is
@@ -1791,7 +1823,7 @@ static int hold_make(int keys, uint32_t entry, uint32_t hdr)
             px[Y * w * KS + X] = (uint32_t)lroundf(oa * 255) << 24 | (m & 0xFFFFFF);
         }
     free(game);
-    GuestTex *t = &s_hold.t[keys];
+    GuestTex *t = &s_hold.t[kind];
     int ok = t->hdr || make_texture(t, w * KS, h * KS, MEM32(hdr + 0xC) & 0xFF);
     if (ok)
         upload(t, px);
@@ -1807,8 +1839,8 @@ static void hold_check(uint32_t id)
     if (!def || !y || MEM32(def + 0x10) != MEM32(y + 0x10))   /* (the cells of one texture only) */
         return;
     uint32_t entry = 0x8DBB28 + MEM32(def + 0x10) * 8, now = MEM32(entry);
-    int ours = now && (now == s_hold.t[0].hdr || now == s_hold.t[1].hdr);
-    int kind = ngb_prompts_keys() ? 1 : ngb_pad_prompts_ps() ? 0 : -1;
+    int ours = now && (now == s_hold.t[0].hdr || now == s_hold.t[1].hdr || now == s_hold.t[2].hdr);
+    int set = ngb_pad_set(), kind = set < 0 ? 1 : set == 1 ? 0 : set == 2 ? 2 : -1;
     if (kind < 0 || s_hold.made[kind] < 0) {
         if (ours)
             MEM32(entry) = s_hold.orig;               /* the controller's icons back */
@@ -1816,9 +1848,9 @@ static void hold_check(uint32_t id)
     }
     if (!ours)
         s_hold.orig = now;
-    if (!s_hold.made[kind] || (kind == 1 && s_hold.gen != ngb_bind_generation())) {
-        if (kind == 1)                                /* (the keys' picture is the one the bindings make) */
-            s_hold.gen = ngb_bind_generation();
+    if (!s_hold.made[kind] || (kind && s_hold.gen[kind] != ngb_bind_generation())) {
+        /* (the keys' picture is the one the bindings make, Nintendo's the one its layout does) */
+        s_hold.gen[kind] = ngb_bind_generation();
         s_hold.made[kind] = hold_make(kind, entry, s_hold.orig) ? 1 : -1;
         if (s_hold.made[kind] < 0) {
             MEM32(entry) = s_hold.orig;
@@ -2221,8 +2253,8 @@ static void pt_draw(void)
      * ran into the column's: a scroll could leave the page as it was) */
     int shown = (s_cat & 7) << 28 | ((s_row + 1) & 0xFF) << 20 | (s_ctl_col & 3) << 18 |
                 (s_cat == CAT_CTL ? s_ctl_top & 0x3F : 0) << 12;
-    if (s_cat == CAT_CTL)                             /* and the bindings, and waiting for one */
-        shown ^= (int)(ngb_bind_generation() & 0x7FF) << 1 ^ ngb_bind_capturing();
+    if (s_cat == CAT_CTL)                             /* and the bindings, and waiting for one, and the pad's set */
+        shown ^= (int)(ngb_bind_generation() & 0x7FF) << 1 ^ ngb_bind_capturing() ^ ngb_pad_set_pad() << 25;
     if (s_drawn.page != 0 || s_focus != s_drawn.focused || shown != s_drawn.row ||
         memcmp(vals, s_drawn.vals, sizeof vals)) {
         draw_page(s_focus, s_cat, s_row);
@@ -2530,7 +2562,7 @@ void ngb_controls_panel_tick(int want)
         return;
     }
     int shown = ((s_ov_row + 1) & 0xFF) << 20 | (s_ctl_col & 3) << 18 | (s_ctl_top & 0x3F) << 12;   /* as the tab's */
-    shown ^= (int)(ngb_bind_generation() & 0x7FF) << 1 ^ ngb_bind_capturing();
+    shown ^= (int)(ngb_bind_generation() & 0x7FF) << 1 ^ ngb_bind_capturing() ^ ngb_pad_set_pad() << 25;
     if (shown != s_ov_drawn) {
         ov_draw();
         s_ov_drawn = shown;
