@@ -564,24 +564,93 @@ static int unpack_archive(const char *archive, const char *tmp)
     return -1;
 }
 
+/* A link, not what it points to: a folder the player picked can hold links to anything (#189). */
+static int is_link(const char *p)
+{
+#if defined(_WIN32)
+    /* a symbolic link or a junction: not every reparse point (OneDrive's folders are ones too) */
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+    DWORD a = GetFileAttributesA(p);
+    if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_REPARSE_POINT))
+        return 0;
+    if ((h = FindFirstFileA(p, &fd)) == INVALID_HANDLE_VALUE)
+        return 1;   /* (unreadable: kept as a link, never followed) */
+    FindClose(h);
+    return fd.dwReserved0 == IO_REPARSE_TAG_SYMLINK || fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT;
+#else
+    struct stat st;
+    return lstat(p, &st) == 0 && S_ISLNK(st.st_mode);
+#endif
+}
+
+/* Only the folders this file made (.partial, .unpack) and an install it can replace (install_from): a link
+ * inside goes, never what it points to. */
 static void remove_tree(const char *path)
 {
-    DIR *d = opendir(path);
+    DIR *d;
     struct dirent *e;
-    if (d) {
+    if (is_link(path)) {
+#if defined(_WIN32)
+        if (!RemoveDirectoryA(path))
+#endif
+            unlink(path);
+        return;
+    }
+    if ((d = opendir(path))) {
         while ((e = readdir(d))) {
             char p[4096];
             if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
                 continue;
             snprintf(p, sizeof p, "%s/%s", path, e->d_name);
-            if (is_dir(p))
+            if (is_dir(p) && !is_link(p))
                 remove_tree(p);
             else
+#if defined(_WIN32)
+            if (!is_link(p) || !RemoveDirectoryA(p))
+#endif
                 unlink(p);
         }
         closedir(d);
     }
     rmdir(path);
+}
+
+/* The file an install leaves in its folder: what install_from may replace with a new one. */
+#define INSTALL_MARK ".ngb-install"
+
+static int is_empty_dir(const char *path)
+{
+    DIR *d = opendir(path);
+    struct dirent *e;
+    int empty = 1;
+    if (!d)
+        return 1;
+    while (empty && (e = readdir(d)))
+        if (strcmp(e->d_name, ".") && strcmp(e->d_name, ".."))
+            empty = 0;
+    closedir(d);
+    return empty;
+}
+
+/* dest, where an install goes: nothing there, an empty folder, or an earlier install -- one with the mark, or,
+ * from before it, the game's own "game" folder with a default.xbe. Anything else is the player's, and stays:
+ * ngb-setup --install-to with a folder of other things once deleted all of them (#189). */
+static int may_replace(const char *dest)
+{
+    char mark[4200];
+    const char *base = strrchr(dest, '/');
+    if (!is_dir(dest) && !is_link(dest) && !is_file(dest))
+        return 1;
+    if (is_link(dest) || !is_dir(dest))
+        return 0;
+    if (is_empty_dir(dest))
+        return 1;
+    snprintf(mark, sizeof mark, "%s/%s", dest, INSTALL_MARK);
+    if (is_file(mark))
+        return 1;
+    base = base ? base + 1 : dest;
+    return !strcmp(base, "game") && has_xbe(dest);
 }
 
 /* ---- the picker -------------------------------------------------------- */
@@ -741,6 +810,10 @@ static int install_from(const char *src, const char *dest)
     if (!(dot && (!strcasecmp(dot, ".iso") || !strcasecmp(dot, ".xiso") ||
                   !strcasecmp(dot, ".7z") || !strcasecmp(dot, ".zip"))) && !is_fd_image(src))
         return install_image(src, dest);
+    if (!may_replace(dest)) {
+        fail("%s is not empty and is not an earlier install of the game: choose an empty folder.", dest);
+        return -1;
+    }
     snprintf(part, sizeof part, "%s.partial", dest);
     remove_tree(part);
     s_cancel = 0;
@@ -751,7 +824,16 @@ static int install_from(const char *src, const char *dest)
         rc = -1;
     }
     if (rc == 0) {
-        remove_tree(dest);
+        char mark[4400];
+        FILE *f;
+        snprintf(mark, sizeof mark, "%s/%s", part, INSTALL_MARK);
+        if ((f = fopen(mark, "w"))) {
+            fputs("Ninja Gaiden Black's game files, installed from the player's disc. A new install replaces "
+                  "this folder.\n", f);
+            fclose(f);
+        }
+        if (may_replace(dest))   /* (asked again: it is replaced only now, long after the check above) */
+            remove_tree(dest);
         if (rename(part, dest) != 0) {
             fail("Cannot move the game into %s: %s", dest, strerror(errno));
             rc = -1;
