@@ -27,8 +27,11 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QStorageInfo>
+#include <QUrl>
 #include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -220,11 +223,33 @@ private:
         dlg.setFileMode(mode);
         if (mode == QFileDialog::Directory)
             dlg.setOption(QFileDialog::ShowDirsOnly);
+        dlg.setSidebarUrls(places());
         const QRect avail = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 800);
         dlg.resize(qMin(900, avail.width() - 32), qMin(600, avail.height() - 48));
+        if (auto *split = dlg.findChild<QSplitter *>())   /* (its side panel showed "stor..." for a drive's name) */
+            split->setSizes({ 190, dlg.width() - 190 });
         if (dlg.exec() != QDialog::Accepted || dlg.selectedFiles().isEmpty())
             return QString();
         return dlg.selectedFiles().first();
+    }
+
+    /* Qt's own dialog's side panel: home, Downloads, and the drives mounted under /run/media, /media and /mnt
+     * (a Steam Deck's SD card is at /run/media/deck/<its name>; the panel had only home on it, #194) */
+    static QList<QUrl> places()
+    {
+        QList<QUrl> urls;
+        urls << QUrl::fromLocalFile(QDir::homePath());
+        const QString dl = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+        if (QDir(dl).exists())
+            urls << QUrl::fromLocalFile(dl);
+        for (const QStorageInfo &v : QStorageInfo::mountedVolumes()) {
+            const QString r = v.rootPath();
+            if (v.isValid() && v.isReady() &&
+                (r.startsWith("/run/media/") || r.startsWith("/media/") || r.startsWith("/mnt/")))
+                urls << QUrl::fromLocalFile(r);
+        }
+        urls << QUrl::fromLocalFile("/");
+        return urls;
     }
 
     static QString shortPath(const QString &p)
