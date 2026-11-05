@@ -322,6 +322,10 @@ How it works, and the details of every feature: [docs/TECHNICAL.md](docs/TECHNIC
 [docs/renderer.md](docs/renderer.md). How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md); the layout, tools
 and test rules, also for coding agents: [AGENTS.md](AGENTS.md).
 
+## Support
+
+If you'd like to support the project: [ko-fi.com/gamboozino](https://ko-fi.com/gamboozino)
+
 ## Credits
 
 - [xboxrecomp](https://github.com/sp00nznet/xboxrecomp) by sp00nznet: the recompiler and Xbox
