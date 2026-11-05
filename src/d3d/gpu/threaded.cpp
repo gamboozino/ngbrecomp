@@ -51,6 +51,23 @@ constexpr size_t kFreeBatches = 64;   // spare batches kept for reuse
 // title may be waiting on memory the GPU emulation writes (a semaphore) behind calls it has not handed over
 constexpr auto kIdleTake = std::chrono::microseconds(1500);
 
+// NV2A_PACE_LOG (testing): the hand-overs, every 2 s
+struct PaceCounts {
+    std::atomic<uint32_t> hook{0}, hook_busy{0}, hook_submit{0}, hook_gate{0}, idle{0}, idle_busy{0}, idle_submit{0},
+        batches{0};
+    std::atomic<uint64_t> lat_us{0}, lat_max{0}, exec_us{0};
+};
+static PaceCounts g_pace;
+static bool PaceOn() {   // (read late: on Android env.txt is applied after the library is loaded)
+    static const bool on = std::getenv("NV2A_PACE_LOG") != nullptr;
+    return on;
+}
+#define g_pace_on PaceOn()
+static uint64_t PaceNowUs() {
+    return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 enum class Op : uint8_t { State, Headers, Peek, Draw, Clear, Copy, Present, Flush, Gamma, VisBegin, VisEnd };
 
 struct Cmd {
@@ -73,6 +90,7 @@ struct HeaderSend {
 
 struct Batch {
     uint64_t id = 0;
+    uint64_t handed_us = 0;   // (NV2A_PACE_LOG)
     uint32_t put = 0;   // the title's DMA_PUT as it was handed over: the push buffer may be read this far once drawn
     std::vector<Cmd> cmds;
     std::vector<uint8_t> bytes;
@@ -301,7 +319,12 @@ public:
     // The title reads the push buffer's progress (it may be waiting on it): what it has recorded since the last
     // batch goes now (Release). Skipped while a call is being recorded.
     void TitleWaits() {
-        if (!cap_.try_lock()) return;
+        if (g_pace_on) g_pace.hook++;
+        if (!cap_.try_lock()) {
+            if (g_pace_on) g_pace.hook_busy++;
+            return;
+        }
+        if (g_pace_on) (cur_->cmds.empty() ? g_pace.hook_gate : g_pace.hook_submit)++;
         Release();
         cap_.unlock();
     }
@@ -454,6 +477,7 @@ private:
             return id;
         }
         cur_->put = nv2a_pfifo_put();
+        if (g_pace_on) cur_->handed_us = PaceNowUs();
         submitted_ = id;
         {
             std::lock_guard lock(m_);
@@ -531,9 +555,13 @@ private:
                 if (!cv_.wait_for(lock, kIdleTake, [&] { return stop_ || !queue_.empty(); })) {
                     // nothing handed over for a while: what the title has recorded may be what it waits on
                     lock.unlock();
+                    if (g_pace_on) g_pace.idle++;
                     if (cap_.try_lock()) {
+                        if (g_pace_on && !cur_->cmds.empty()) g_pace.idle_submit++;
                         Release();
                         cap_.unlock();
+                    } else if (g_pace_on) {
+                        g_pace.idle_busy++;
                     }
                     continue;
                 }
@@ -541,7 +569,27 @@ private:
                 b = queue_.front();
                 queue_.pop_front();
             }
+            uint64_t t0 = g_pace_on ? PaceNowUs() : 0;
             ExecuteBatch(*b);
+            if (g_pace_on) {
+                uint64_t t1 = PaceNowUs(), lat = b->handed_us ? t1 - b->handed_us : 0;
+                g_pace.batches++;
+                g_pace.exec_us += t1 - t0;
+                g_pace.lat_us += lat;
+                if (lat > g_pace.lat_max) g_pace.lat_max = lat;
+                static uint64_t last = t1;
+                if (t1 - last >= 2000000) {
+                    last = t1;
+                    uint32_t n = g_pace.batches.exchange(0);
+                    std::fprintf(stderr, "[PACE] render: %u batches, drawing %.0f ms, handed over to drawn avg %.2f max "
+                                 "%.2f ms; title waits %u (lock busy %u, handed %u, gate %u); idle takes %u (lock busy "
+                                 "%u, handed %u)\n", n, g_pace.exec_us.exchange(0) / 1000.0,
+                                 n ? g_pace.lat_us.exchange(0) / 1000.0 / n : 0, g_pace.lat_max.exchange(0) / 1000.0,
+                                 g_pace.hook.exchange(0), g_pace.hook_busy.exchange(0), g_pace.hook_submit.exchange(0),
+                                 g_pace.hook_gate.exchange(0), g_pace.idle.exchange(0), g_pace.idle_busy.exchange(0),
+                                 g_pace.idle_submit.exchange(0));
+                }
+            }
             uint64_t id = b->id;
             uint32_t put = b->put;
             Recycle(b);

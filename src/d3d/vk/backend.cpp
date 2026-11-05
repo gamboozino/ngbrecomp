@@ -483,6 +483,24 @@ private:
     static constexpr uint32_t kVisQueries = 512;
     struct VisQuery { uint32_t test; float div; };
     VkQueryPool vis_pool_[2] = {};
+    // NGB_D3D_STATS: each command buffer's GPU time (timestamps at its start and end) and the render thread's waits
+    // for the GPU in Submit, per frame in the stats line
+    VkQueryPool ts_pool_[2] = {};
+    bool ts_written_[2] = {};
+    double ts_period_ns_ = 0;
+    uint64_t gpu_ns_ = 0, sync_us_ = 0;
+    uint32_t syncs_ = 0, stat_frames_ = 0;
+    void TsEnd() {
+        if (ts_pool_[slot_]) d_.vkCmdWriteTimestamp(cmd_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, ts_pool_[slot_], 1);
+    }
+    void TsRead(int slot) {
+        if (!ts_pool_[slot] || !ts_written_[slot]) return;
+        uint64_t t[2];
+        if (d_.vkGetQueryPoolResults(dev_, ts_pool_[slot], 0, 2, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
+            t[1] > t[0])
+            gpu_ns_ += uint64_t(double(t[1] - t[0]) * ts_period_ns_);
+        ts_written_[slot] = false;
+    }
     std::vector<VisQuery> vis_q_[2];
     std::vector<std::pair<uint32_t, uint32_t>> vis_end_[2];   // test, report slot
     std::unordered_map<uint32_t, double> vis_sum_;
@@ -646,7 +664,7 @@ private:
     uint32_t compiles_ = 0, pipes_made_ = 0;
 
     // NGB_D3D_STATS: per frame, what the draws came to
-    struct Stats { uint32_t draws, noasm, notarget, nopipe, drawn, clears, copies; } st_{};
+    struct Stats { uint32_t draws, noasm, notarget, nopipe, drawn, clears, copies, passes; } st_{};
     std::unordered_map<uint32_t, uint32_t> rt_draws_;
     bool stats_ = false;
 
@@ -936,6 +954,22 @@ bool VulkanBackend::Init(uint32_t, uint32_t) {
     qci.queryCount = kVisQueries;
     for (auto& p : vis_pool_)
         if (d_.vkCreateQueryPool(dev_, &qci, nullptr, &p) != VK_SUCCESS) p = VK_NULL_HANDLE;
+    if (stats_) {
+        uint32_t qn = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(phys_, &qn, nullptr);
+        std::vector<VkQueueFamilyProperties> qf(qn);
+        vkGetPhysicalDeviceQueueFamilyProperties(phys_, &qn, qf.data());
+        VkPhysicalDeviceProperties tp;
+        vkGetPhysicalDeviceProperties(phys_, &tp);
+        if (qfam_ < qn && qf[qfam_].timestampValidBits) {
+            ts_period_ns_ = tp.limits.timestampPeriod;
+            VkQueryPoolCreateInfo tci{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+            tci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+            tci.queryCount = 2;
+            for (auto& p : ts_pool_)
+                if (d_.vkCreateQueryPool(dev_, &tci, nullptr, &p) != VK_SUCCESS) p = VK_NULL_HANDLE;
+        }
+    }
     Begin();
     Barrier(null2d_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Barrier(nullcube_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1032,6 +1066,11 @@ void VulkanBackend::Begin() {
     d_.vkBeginCommandBuffer(cmd_, &bi);
     recording_ = true;
     if (vis_pool_[slot_]) d_.vkCmdResetQueryPool(cmd_, vis_pool_[slot_], 0, kVisQueries);
+    if (ts_pool_[slot_]) {
+        d_.vkCmdResetQueryPool(cmd_, ts_pool_[slot_], 0, 2);
+        d_.vkCmdWriteTimestamp(cmd_, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, ts_pool_[slot_], 0);
+        ts_written_[slot_] = true;
+    }
 }
 
 // Everything recorded so far, done: the slot's commands submitted and waited for, and the other
@@ -1039,7 +1078,9 @@ void VulkanBackend::Begin() {
 void VulkanBackend::Submit() {
     if (!recording_) return;
     EndRendering();
+    TsEnd();
     d_.vkEndCommandBuffer(cmd_);
+    auto sync_t0 = stats_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd_;
@@ -1053,6 +1094,11 @@ void VulkanBackend::Submit() {
     }
     submitted_[slot_] = false;
     VisResults(slot_);
+    if (stats_) {
+        syncs_++;
+        sync_us_ += uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - sync_t0).count());
+    }
     d_.vkResetCommandBuffer(cmd_, 0);
     ResetSets(slot_);
     if (!submitted_[slot_ ^ 1]) ResetSets(slot_ ^ 1);
@@ -1067,6 +1113,7 @@ void VulkanBackend::Submit() {
 void VulkanBackend::EndFrame() {
     if (!recording_) return;
     EndRendering();
+    TsEnd();
     d_.vkEndCommandBuffer(cmd_);
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
@@ -1479,6 +1526,7 @@ void VulkanBackend::FillMs(Target& t) {
     ri.colorAttachmentCount = 1;
     ri.pColorAttachments = &ca;
     d_.vkCmdBeginRendering(cmd_, &ri);
+    st_.passes++;
     VkViewport vpt{0, 0, float(t.ms.w), float(t.ms.h), 0, 1};
     VkRect2D sc{{0, 0}, {t.ms.w, t.ms.h}};
     d_.vkCmdSetViewport(cmd_, 0, 1, &vpt);
@@ -1508,6 +1556,7 @@ void VulkanBackend::VisibilityEnd(uint32_t report_va) {
 // The slot's frame is done: its queries' counts, and the reports of the tests that ended in it -- laid out as
 // the GPU writes them (xemu's pgraph_write_zpass_pixel_cnt_report): a timestamp, the count, 0.
 void VulkanBackend::VisResults(int slot) {
+    TsRead(slot);
     if (!vis_q_[slot].empty()) {
         std::vector<uint64_t> r(vis_q_[slot].size());
         if (d_.vkGetQueryPoolResults(dev_, vis_pool_[slot], 0, uint32_t(r.size()), r.size() * 8, r.data(), 8,
@@ -1655,6 +1704,7 @@ void VulkanBackend::GammaCopy(Image& src, Image& dst, float bars, float bars_y) 
     ri.colorAttachmentCount = 1;
     ri.pColorAttachments = &ca;
     d_.vkCmdBeginRendering(cmd_, &ri);
+    st_.passes++;
     VkViewport vpt{0, 0, float(dst.w), float(dst.h), 0, 1};
     VkRect2D sc{{0, 0}, {dst.w, dst.h}};
     d_.vkCmdSetViewport(cmd_, 0, 1, &vpt);
@@ -1752,6 +1802,7 @@ void VulkanBackend::EdgeSample(Image& src, float bars, float bars_y) {
     ri.colorAttachmentCount = 1;
     ri.pColorAttachments = &ca;
     d_.vkCmdBeginRendering(cmd_, &ri);
+    st_.passes++;
     VkViewport vpt{0, 0, 16, 4, 0, 1};
     VkRect2D sc{{0, 0}, {16, 4}};
     d_.vkCmdSetViewport(cmd_, 0, 1, &vpt);
@@ -1862,6 +1913,7 @@ void VulkanBackend::BeginRendering(Target* rt, Target* ds) {
     ri.pDepthAttachment = ds ? &da : nullptr;
     ri.pStencilAttachment = ds ? &da : nullptr;
     d_.vkCmdBeginRendering(cmd_, &ri);
+    st_.passes++;
     rendering_ = true;
 }
 
@@ -4090,12 +4142,19 @@ void VulkanBackend::Present(const Surface& front) {
             dump_count_ = 40;
         }
     }
+    stat_frames_++;
     if (stats_ && presents_ % 60 == 0) {
         std::fprintf(stderr, "[D3D] frame %u: %u draws (%u not assembled, %u no target, %u no pipeline, %u drawn), "
                      "front %08X; draws by target:", presents_, st_.draws, st_.noasm, st_.notarget, st_.nopipe, st_.drawn,
                      front.data);
         for (auto& [k, v] : rt_draws_) std::fprintf(stderr, " %08X:%u", k, v);
         std::fprintf(stderr, "\n");
+        std::fprintf(stderr, "[D3D] render passes %u; per frame over the last %u: GPU %.2f ms, %.1f waits for the GPU "
+                     "(%.2f ms)\n", st_.passes, stat_frames_, stat_frames_ ? gpu_ns_ / 1e6 / stat_frames_ : 0.0,
+                     stat_frames_ ? double(syncs_) / stat_frames_ : 0.0,
+                     stat_frames_ ? sync_us_ / 1000.0 / stat_frames_ : 0.0);
+        gpu_ns_ = sync_us_ = 0;
+        syncs_ = stat_frames_ = 0;
         std::fprintf(stderr, "[D3D] constants reused %u, copied %u\n", reuse_hits_, reuse_misses_);
         reuse_hits_ = reuse_misses_ = 0;
     }

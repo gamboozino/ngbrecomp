@@ -84,9 +84,18 @@ static uint64_t rd(void *dev, uint32_t off, int size)
          * spinning a core for most of every frame (battery and heat on a
          * handheld). 100 us is nothing against a 16.7 ms frame. */
         if (repeats > 32) {
+            extern int nv2a_pace_on;
+            extern void nv2a_pace_nap(int64_t us);
+            struct timespec a, b;
+            if (nv2a_pace_on > 0)
+                clock_gettime(CLOCK_MONOTONIC, &a);
             vcpu_block_begin();
             vcpu_nap_us(100);
             vcpu_block_end();
+            if (nv2a_pace_on > 0) {
+                clock_gettime(CLOCK_MONOTONIC, &b);
+                nv2a_pace_nap((b.tv_sec - a.tv_sec) * 1000000LL + (b.tv_nsec - a.tv_nsec) / 1000);
+            }
         } else if (off == 0x800044 || repeats) {
             vcpu_yield_any();
         }

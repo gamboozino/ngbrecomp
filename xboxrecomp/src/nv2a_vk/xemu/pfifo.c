@@ -153,6 +153,10 @@ static bool is_flip_stall_complete(NV2AState *d)
     return false;
 }
 
+extern int nv2a_pace_on;
+extern void nv2a_pace_stall(int64_t us);
+static int64_t s_pace_stall_since;   /* (NV2A_PACE_LOG: when this flip stall began) */
+
 static bool pfifo_stall_for_flip(NV2AState *d, bool graph_held)
 {
     bool should_stall = false;
@@ -162,8 +166,14 @@ static bool pfifo_stall_for_flip(NV2AState *d, bool graph_held)
             qemu_mutex_lock(&d->pgraph.lock);
         if (!is_flip_stall_complete(d)) {
             should_stall = true;
+            if (nv2a_pace_on > 0 && !s_pace_stall_since)
+                s_pace_stall_since = g_get_monotonic_time();
         } else {
             d->pgraph.waiting_for_flip = false;
+            if (s_pace_stall_since) {
+                nv2a_pace_stall(g_get_monotonic_time() - s_pace_stall_since);
+                s_pace_stall_since = 0;
+            }
         }
         if (!graph_held)
             qemu_mutex_unlock(&d->pgraph.lock);
@@ -602,7 +612,25 @@ void *pfifo_thread(void *arg)
             /* xboxrecomp: or for a present the renderer has scheduled
              * (pgraph/vk/renderer.c, early present). */
             extern volatile int64_t nv2a_present_due_us;
+            extern void nv2a_pace_idle(int why, int64_t us);
+            /* (NV2A_PACE_LOG: why this wait: 0 no commands, 1 no FIFO access, 2 a software method, 3 a flip,
+             * 4 other) */
+            int pace_why = !nv2a_pace_on ? -1
+                         : d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET] == d->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUT] ? 0
+                         : !can_fifo_access(d) ? 1 : qatomic_read(&d->pgraph.waiting_for_nop) ? 2
+                         : qatomic_read(&d->pgraph.waiting_for_flip) ? 3 : 4;
+            int64_t pace_t0 = pace_why >= 0 ? g_get_monotonic_time() : 0;
             int64_t due = qatomic_read(&nv2a_present_due_us);
+            if (pace_why == 4) {
+                uint64_t g = __atomic_load_n(&s_gate, __ATOMIC_ACQUIRE);
+                if ((g >> 32) && d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET] == (uint32_t)g)
+                    pace_why = 7;   /* (held at the gate: the renderer has not drawn further) */
+            }
+            if (pace_why == 4 && due)
+                pace_why = 5;   /* (waiting for a present the renderer scheduled) */
+            else if (pace_why == 4 && (d->pfifo.halt ||
+                     GET_MASK(d->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUSH], NV_PFIFO_CACHE1_DMA_PUSH_STATUS)))
+                pace_why = 6;   /* (halted, or the pusher suspended) */
             int64_t wait = due ? due - g_get_monotonic_time() : 0;
             if (due && wait <= 0) {
                 /* due already: go round and present */
@@ -617,6 +645,8 @@ void *pfifo_thread(void *arg)
             } else {
                 qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
             }
+            if (pace_why >= 0)
+                nv2a_pace_idle(pace_why, g_get_monotonic_time() - pace_t0);
         }
 
         if (d->exiting) {

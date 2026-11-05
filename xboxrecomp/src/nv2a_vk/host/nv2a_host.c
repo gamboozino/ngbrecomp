@@ -797,6 +797,91 @@ static int display_vblank(void)
 }
 #endif
 
+/* NV2A_PACE_LOG=1: every 2 s, how the frame clock and the flips it releases are keeping time (testing): the
+ * vblank's lateness, the time from the vblank to the title's interrupt handler releasing the flip
+ * (NV_PGRAPH_INCREMENT), how long PFIFO stood stalled on each flip, and the guest's naps polling the GPU. */
+int nv2a_pace_on = -1;
+volatile int64_t nv2a_pace_tick_us;
+volatile int64_t nv2a_pace_late_sum, nv2a_pace_late_max, nv2a_pace_rel_sum, nv2a_pace_rel_max,
+    nv2a_pace_stall_sum, nv2a_pace_stall_max, nv2a_pace_nap_us;
+volatile int nv2a_pace_ticks, nv2a_pace_rels, nv2a_pace_stalls, nv2a_pace_naps;
+static void pace_max(volatile int64_t *m, int64_t v) { if (v > *m) *m = v; }
+static volatile int64_t s_pace_idle[8];
+void nv2a_pace_idle(int why, int64_t us)   /* (pfifo.c: the PFIFO thread's waits, by why) */
+{
+    if (why >= 0 && why < 8)
+        __atomic_add_fetch(&s_pace_idle[why], us, __ATOMIC_RELAXED);
+}
+static int64_t s_pace_nop_since;
+volatile int64_t nv2a_pace_nop_sum, nv2a_pace_nop_max;
+volatile int nv2a_pace_nops;
+void nv2a_pace_nop(int begin)   /* (pgraph.c: a software method's interrupt raised, 1, and cleared, 0) */
+{
+    int64_t now = g_get_monotonic_time();
+    if (begin) {
+        s_pace_nop_since = now;
+        return;
+    }
+    if (!s_pace_nop_since)
+        return;
+    nv2a_pace_nop_sum += now - s_pace_nop_since;
+    pace_max(&nv2a_pace_nop_max, now - s_pace_nop_since);
+    nv2a_pace_nops++;
+    s_pace_nop_since = 0;
+}
+void nv2a_pace_release(void)   /* (pgraph.c: NV_PGRAPH_INCREMENT) */
+{
+    int64_t d = g_get_monotonic_time() - nv2a_pace_tick_us;
+    __atomic_add_fetch(&nv2a_pace_rel_sum, d, __ATOMIC_RELAXED);
+    pace_max(&nv2a_pace_rel_max, d);
+    __atomic_add_fetch(&nv2a_pace_rels, 1, __ATOMIC_RELAXED);
+}
+void nv2a_pace_stall(int64_t us)   /* (pfifo.c: a flip stall's end) */
+{
+    __atomic_add_fetch(&nv2a_pace_stall_sum, us, __ATOMIC_RELAXED);
+    pace_max(&nv2a_pace_stall_max, us);
+    __atomic_add_fetch(&nv2a_pace_stalls, 1, __ATOMIC_RELAXED);
+}
+void nv2a_pace_nap(int64_t us)   /* (nv2a_runtime.c: a nap polling a register) */
+{
+    __atomic_add_fetch(&nv2a_pace_nap_us, us, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&nv2a_pace_naps, 1, __ATOMIC_RELAXED);
+}
+static void pace_tick(const struct timespec *deadline)
+{
+    if (nv2a_pace_on < 0)
+        nv2a_pace_on = getenv("NV2A_PACE_LOG") != NULL;
+    if (!nv2a_pace_on)
+        return;
+    int64_t now = g_get_monotonic_time();
+    int64_t late = now - ((int64_t)deadline->tv_sec * 1000000 + deadline->tv_nsec / 1000);
+    nv2a_pace_tick_us = now;
+    nv2a_pace_late_sum += late;
+    pace_max(&nv2a_pace_late_max, late);
+    if (++nv2a_pace_ticks >= 120) {
+        int r = nv2a_pace_rels, s = nv2a_pace_stalls, n = nv2a_pace_naps;
+        fprintf(stderr, "[PACE] vblank late avg %.2f max %.2f ms; release %d, avg %.2f max %.2f ms after it; "
+                        "flip stalls %d, avg %.2f max %.2f ms; guest naps %d, %.0f ms; "
+                        "software methods %d, waited avg %.3f max %.2f ms, %.0f ms in all\n",
+                nv2a_pace_late_sum / 1000.0 / nv2a_pace_ticks, nv2a_pace_late_max / 1000.0, r,
+                r ? nv2a_pace_rel_sum / 1000.0 / r : 0, nv2a_pace_rel_max / 1000.0, s,
+                s ? nv2a_pace_stall_sum / 1000.0 / s : 0, nv2a_pace_stall_max / 1000.0, n, nv2a_pace_nap_us / 1000.0,
+                nv2a_pace_nops, nv2a_pace_nops ? nv2a_pace_nop_sum / 1000.0 / nv2a_pace_nops : 0,
+                nv2a_pace_nop_max / 1000.0, nv2a_pace_nop_sum / 1000.0);
+        nv2a_pace_nops = 0;
+        nv2a_pace_nop_sum = nv2a_pace_nop_max = 0;
+        fprintf(stderr, "[PACE] PFIFO idle: no commands %.0f, no access %.0f, software method %.0f, flip %.0f, "
+                        "present due %.0f, halted %.0f, at the gate %.0f, other %.0f ms\n", s_pace_idle[0] / 1000.0,
+                s_pace_idle[1] / 1000.0, s_pace_idle[2] / 1000.0, s_pace_idle[3] / 1000.0, s_pace_idle[5] / 1000.0,
+                s_pace_idle[6] / 1000.0, s_pace_idle[7] / 1000.0, s_pace_idle[4] / 1000.0);
+        for (int i = 0; i < 8; i++)
+            s_pace_idle[i] = 0;
+        nv2a_pace_ticks = nv2a_pace_rels = nv2a_pace_stalls = nv2a_pace_naps = 0;
+        nv2a_pace_late_sum = nv2a_pace_late_max = nv2a_pace_rel_sum = nv2a_pace_rel_max = 0;
+        nv2a_pace_stall_sum = nv2a_pace_stall_max = nv2a_pace_nap_us = 0;
+    }
+}
+
 static void *vblank_thread(void *unused)
 {
     NV2AState *d = &s_nv2a;
@@ -826,6 +911,7 @@ static void *vblank_thread(void *unused)
         }
         __atomic_store_n(&nv2a_vblank_us, g_get_monotonic_time(),
                          __ATOMIC_RELEASE);
+        pace_tick(&next);
 
         /* NV2A_DUMP_SCANOUT=prefix: the scanout surface as it is in guest
          * RAM, every 5 s, as PPM (X8R8G8B8, linear). */

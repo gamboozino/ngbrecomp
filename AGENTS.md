@@ -73,6 +73,19 @@ Driving and watching a headless run:
 - `NV2A_CAPTURE=<prefix>` and `NV2A_CAPTURE_EVERY=<n>`: a PPM of the presented picture every n
   frames. Keep `render_scale` low in test settings, or the captures fill `/tmp`.
 - `NV2A_FPS_LOG=1`: frame rate, and `[LAT]` presentation timing.
+- `NV2A_PACE_LOG=1`: every 2 s, how the frames are paced (`[PACE]`): the vblank's lateness, the flip releases
+  and stalls, the guest's naps polling the GPU, the software-method interrupts, why the PFIFO thread was idle
+  (no commands, a flip, held at the Multithreaded Renderer's gate...), and with that renderer its hand-overs
+  (batches, hand-over to drawn, the title's waits). The first place to look when frames are slow but no thread
+  is busy.
+- `NGB_D3D_STATS=1`: every 60 frames the draws by target, the render passes, and per frame the GPU's time
+  (timestamps around each command buffer) and the render thread's waits for the GPU.
+- `NGB_D3D_KICKOFF_KB=n`: Direct3D's kick-off size; 256 by default with the Multithreaded Renderer, 0 the
+  title's 32 (src/d3d/d3d.c).
+- On Android, `simpleperf` (the NDK's, pushed to `/data/local/tmp`) profiles the game (the APK is profileable):
+  `record --app io.github.gamboozino.ngbrecomp -e cpu-clock --call-graph fp [--trace-offcpu]`, then
+  `binary_cache_builder.py -lib <dir with build/android-release/build/libmain.so>` and `simpleperf report`.
+  `--trace-offcpu` shows where threads wait; it needs `-e cpu-clock` given.
 - F7, or `NGB_TRACE_FILE=<file>` (recording starts when the file appears): every draw of the next
   frames and a small picture of each, in `~/ngb-trace-<n>` (`HOME` decides where).
 - `NGB_RENDERER=xemu`: xemu's hardware-accurate renderer instead of ours — the reference for "is this
