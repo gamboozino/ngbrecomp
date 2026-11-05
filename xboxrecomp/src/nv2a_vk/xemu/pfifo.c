@@ -615,7 +615,7 @@ void *pfifo_thread(void *arg)
             extern void nv2a_pace_idle(int why, int64_t us);
             /* (NV2A_PACE_LOG: why this wait: 0 no commands, 1 no FIFO access, 2 a software method, 3 a flip,
              * 4 other) */
-            int pace_why = !nv2a_pace_on ? -1
+            int pace_why = nv2a_pace_on <= 0 ? -1
                          : d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET] == d->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUT] ? 0
                          : !can_fifo_access(d) ? 1 : qatomic_read(&d->pgraph.waiting_for_nop) ? 2
                          : qatomic_read(&d->pgraph.waiting_for_flip) ? 3 : 4;

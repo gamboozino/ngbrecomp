@@ -629,7 +629,8 @@ void TakeInit() {
     if (!e) e = "CDevice_SetStateVB,D3DDevice_SetRenderState_Simple";
     // (the Multithreaded Renderer too: the library's resource stamps, which its waits read, are SetTexture's,
     // SetPalette's and SetStreamSource's, and the fences SetFence's and the draws'; none of them taken)
-    if (g_mirror || !std::strcmp(e, "none")) return;
+    // (nor while the NV2A emulation draws too, unseen, for a comparison: it needs every method)
+    if (g_mirror || std::getenv("NGB_D3D_KEEP_NV2A") || !std::strcmp(e, "none")) return;
     for (const Takeable& t : kTakeable) {
         const char* n = d3d_funcs[t.fn].name;
         size_t len = std::strlen(n);

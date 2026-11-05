@@ -997,6 +997,13 @@ VulkanBackend::~VulkanBackend() {
     } else if (dev_) {
         d_.vkDeviceWaitIdle(dev_);
     }
+    if (dev_) {   // (the shared device outlives this backend: its query pools go with it)
+        for (int i = 0; i < 2; i++) {
+            if (vis_pool_[i]) d_.vkDestroyQueryPool(dev_, vis_pool_[i], nullptr);
+            if (ts_pool_[i]) d_.vkDestroyQueryPool(dev_, ts_pool_[i], nullptr);
+            vis_pool_[i] = ts_pool_[i] = VK_NULL_HANDLE;
+        }
+    }
     if (dev_) {
         for (auto& image:continuous_glow_) DestroyImage(image);
         for (auto& image:glow_soft_) DestroyImage(image);
