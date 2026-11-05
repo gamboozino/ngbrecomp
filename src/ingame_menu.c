@@ -315,8 +315,7 @@ static int f1_menu(void)
 {
     static int on = -1;
     if (on < 0) {
-        on = getenv("NGB_F1_MENU") != NULL;
-        usb_gamepad_back_start_host = on;   /* else Start+Back is the game's soft reset (#38) */
+        on = getenv("NGB_F1_MENU") != NULL;   /* (and Start under Back the host's: src/bindings.c) */
     }
     return on;
 }

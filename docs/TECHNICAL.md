@@ -395,6 +395,10 @@ page keeps its picture of the Xbox controller. The Controls page's Button Prompt
 device in use, as above), Xbox, PlayStation, Nintendo or PC (the keys), saved in `controls.ini`
 (`button_prompts`). `NGB_PAD_PROMPTS=ps` (or `nintendo`) shows that set whatever the setting, any other value
 the Xbox's.
+Start+Back Reset (Controls, `start_back_reset` in `controls.ini`, on by default) is the game's own reset: Start and
+Back held go back to the title. Off, the game gets no Start while Back is held (`usb_gamepad_back_start_host`, the
+same strip `NGB_F1_MENU` uses), so the two never reach it together (#195); Return to Main Menu still works, its
+press is added after the strip.
 The techniques' "hold the button" icons (sprites 0x1CE-0x1D3) are a texture of their own, six
 cells with an arrow over the button: with PlayStation or PC prompts each button is redrawn as that set's,
 the game's arrow kept over it (`hold_check`, #125); the keys are play's, not the menu's.

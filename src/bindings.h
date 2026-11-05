@@ -54,6 +54,10 @@ void ngb_bind_set_invert(int view, int axis, int on);
  * game's own start (0; src/camera.c, #23). */
 int ngb_bind_third_person_start(void);
 void ngb_bind_set_third_person_start(int on);
+/* Start+Back Reset (Controls): the game's own reset to the title, Start and Back held; off, the game gets no
+ * Start while Back is held (#195). On by default. */
+int ngb_bind_soft_reset(void);
+void ngb_bind_set_soft_reset(int on);
 /* Camera Sensitivity (Controls): the camera's camera speed in percent; a step either way */
 int ngb_bind_mouse_sensitivity(void);
 float ngb_bind_camera_boost(void);   /* the cameras' turn: Camera Sensitivity over 100% (src/camera.c) */

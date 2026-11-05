@@ -20,6 +20,7 @@
 #include "bindings.h"
 #include "port.h"
 #include "input/xinput_xbox.h"
+#include "usb/usb_gamepad.h"
 
 int ngb_quick_controls_active(void);
 int ngb_quick_frozen(void);
@@ -220,15 +221,20 @@ static void identity_check(void)
  * (controls.ini; #33 #63 #23) */
 static int s_invert[2][2];
 static int s_third_start;
+static int s_soft_reset = 1;   /* Start+Back Reset: the game's own reset to the title (#195) */
 static int s_mouse_pct = 100;   /* Camera Sensitivity, percent: the right stick, mouse and keys (#67) */
 static int s_prompts;           /* Button Prompts: 0 Auto (the device in use), 1 Xbox, 2 PlayStation, 3 Nintendo, 4 PC */
 #define PROMPTS_N 5
 static const char *const s_prompts_ini[PROMPTS_N] = { "auto", "xbox", "playstation", "nintendo", "pc" };
 
+static void soft_reset_apply(void);
+
 void ngb_bind_defaults(void)
 {
     memset(s_invert, 0, sizeof s_invert);
     s_third_start = 1;   /* (on from 0.9.45) */
+    s_soft_reset = 1;
+    soft_reset_apply();
     s_mouse_pct = 100;
     s_prompts = 0;
     for (int a = 0; a < A_COUNT; a++) {
@@ -516,14 +522,23 @@ static void save(void)
     fprintf(f, "invert_camera_x = %d\ninvert_camera_y = %d\n", s_invert[0][0], s_invert[0][1]);
     fprintf(f, "invert_first_person_x = %d\n", s_invert[1][0]);
     fprintf(f, "third_person_on_load = %d\n", s_third_start);
+    fprintf(f, "start_back_reset = %d\n", s_soft_reset);
     fprintf(f, "mouse_sensitivity = %d\n", s_mouse_pct);
     fprintf(f, "button_prompts = %s\n", s_prompts_ini[s_prompts]);
     fclose(f);
 }
 
+/* Start+Back Reset off: while Back is held the game gets no Start, so the two are never held together (another
+ * program on the same combo reset the game, #195). NGB_F1_MENU takes Start under Back too (src/ingame_menu.c). */
+static void soft_reset_apply(void)
+{
+    usb_gamepad_back_start_host = !s_soft_reset || getenv("NGB_F1_MENU") != NULL;
+}
+
 static void nintendo_apply(void)   /* the controllers start with it (xbox_InputInit) */
 {
     xbox_InputNintendoLabels(!ngb_bind_nintendo_position());
+    soft_reset_apply();
 }
 
 void ngb_bind_load(void)
@@ -554,6 +569,10 @@ void ngb_bind_load(void)
         }
         if (!strcmp(key, "third_person_on_load")) {
             s_third_start = atoi(val) != 0;
+            continue;
+        }
+        if (!strcmp(key, "start_back_reset")) {
+            s_soft_reset = atoi(val) != 0;
             continue;
         }
         if (!strcmp(key, "defaults")) {
@@ -749,6 +768,21 @@ void ngb_bind_set_third_person_start(int on)
 {
     ensure();
     s_third_start = on != 0;
+    s_gen++;
+    save();
+}
+
+int ngb_bind_soft_reset(void)
+{
+    ensure();
+    return s_soft_reset;
+}
+
+void ngb_bind_set_soft_reset(int on)
+{
+    ensure();
+    s_soft_reset = on != 0;
+    soft_reset_apply();
     s_gen++;
     save();
 }
