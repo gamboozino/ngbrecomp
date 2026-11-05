@@ -48,10 +48,7 @@
  * xbox_memory_layout.h and must match the definitions there -- a plain extern
  * here binds to the TLS template rather than the calling thread's copy, which
  * reads as every register being zero. */
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
-extern RECOMP_TLS uint32_t g_ebx, g_esi, g_edi;
 extern uint32_t g_xbox_code_lo, g_xbox_code_hi;
-extern RECOMP_TLS uint32_t g_seh_ebp;
 extern ptrdiff_t g_xbox_mem_offset;
 
 /* Dispatch table lookup (for function pointer args) */

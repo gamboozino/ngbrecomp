@@ -41,7 +41,6 @@
 #endif
 
 /* RECOMP_TLS: the runtime's guest registers are thread-local (as in src/main.c) */
-extern RECOMP_TLS uint32_t g_esp;
 extern ptrdiff_t g_xbox_mem_offset;
 extern void xbox_InputInit(void);
 extern void xbe_entry_point(void);
@@ -56,7 +55,6 @@ extern MCPXAPUState *g_apu_state;
 extern bool apu_hook_handle_mmio(PCONTEXT ctx, uintptr_t fault_addr, uint32_t fault_xbox_va, int is_write);
 #define APU_TRAP_BASE 0xFE800000u
 #define APU_TRAP_END  0xFE880000u
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_ebx, g_esi, g_edi;
 
 static char s_game_dir[4096], s_save_dir[4096];
 
@@ -396,7 +394,6 @@ int main(int argc, char **argv)
  * (the generated code's RECOMP_ABI_CALL), once per callee: where a recompiled function breaks its caller. */
 void recomp_abi_violation_log(uint32_t va, uint32_t ebx0, uint32_t esi0, uint32_t edi0, uint32_t esp0)
 {
-    extern RECOMP_TLS uint32_t g_ebx, g_esi, g_edi;
     static uint32_t seen[64];
     static int count;
     for (int i = 0; i < count; i++)

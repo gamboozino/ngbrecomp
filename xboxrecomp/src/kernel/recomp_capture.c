@@ -38,13 +38,7 @@
 #else
 #  define CAP_TLS __thread
 #endif
-typedef union { float f[4]; uint32_t u[4]; } CapXmm;
-extern CAP_TLS uint32_t g_eax, g_ecx, g_edx, g_ebx, g_esp, g_esi, g_edi;
-extern CAP_TLS uint32_t g_ebp, g_seh_ebp, g_fs_base;
-extern CAP_TLS int g_df, g_fp_top;
-extern CAP_TLS double g_fp_stack[8];
-extern CAP_TLS uint16_t g_fp_control_word;
-extern CAP_TLS CapXmm g_xmm0, g_xmm1, g_xmm2, g_xmm3, g_xmm4, g_xmm5, g_xmm6, g_xmm7;
+#include "recomp_regs.h"   /* the registers: g_eax... */
 
 typedef void (*recomp_func_t)(void);
 extern recomp_func_t recomp_lookup(uint32_t va);
@@ -196,7 +190,7 @@ static void write_state(const char *dir, const char *tag)
     for (int i = 0; i < 8; i++)
         fprintf(f, "fp%d %.17g\n", i, g_fp_stack[i]);
     {
-        CapXmm *x[8] = { &g_xmm0, &g_xmm1, &g_xmm2, &g_xmm3,
+        RecompXmm *x[8] = { &g_xmm0, &g_xmm1, &g_xmm2, &g_xmm3,
                             &g_xmm4, &g_xmm5, &g_xmm6, &g_xmm7 };
         for (int i = 0; i < 8; i++)
             fprintf(f, "xmm%d %u %u %u %u\n", i, x[i]->u[0], x[i]->u[1],

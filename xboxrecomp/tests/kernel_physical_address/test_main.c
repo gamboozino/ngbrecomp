@@ -6,7 +6,7 @@
 #include <stdlib.h>
 typedef void (*guest_fn)(void);
 extern guest_fn recomp_lookup_kernel(uint32_t);
-extern RECOMP_TLS uint32_t g_eax, g_esp;
+#include "recomp_regs.h"   /* the registers: g_eax... */
 extern ptrdiff_t g_xbox_mem_offset;
 void *recomp_lookup(ULONG address) { (void)address; abort(); }
 void *recomp_lookup_manual(ULONG address) { (void)address; abort(); }

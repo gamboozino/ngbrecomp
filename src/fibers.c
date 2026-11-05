@@ -57,6 +57,7 @@ typedef struct HostFiber {
     void *stack;                  /* host stack, NULL for a thread's own */
     int started;
     int running;                  /* on some host thread now */
+    const void *host;             /* the host thread it last ran on (t_host's address) */
     uint32_t ebx, esi, edi, seh_ebp, esp, fs0;
 } HostFiber;
 
@@ -126,6 +127,7 @@ void ngb_ctx_switch(void **save_sp, void *load_sp);
 
 static __thread HostFiber *t_running;   /* the fiber this host thread runs */
 static __thread HostFiber *t_left;      /* the one it just switched away from: not running once off its stack */
+static __thread char t_host;            /* (its address: which host thread this is) */
 
 /* On the new fiber's stack: the fiber left is off its own now (DeleteFiber may free it). */
 static void fiber_left_done(void)
@@ -326,7 +328,15 @@ void sub_0032A293(void)
     cur->seh_ebp = g_seh_ebp; cur->esp = g_esp;
     cur->fs0 = MEM32(XBOX_FS_BASE);
     cur->started = 1;
+    cur->host = &t_host;
     MEM32(current + 0xC) = fiber_stamp(cur);
+    /* A fiber's C frames resumed on another host thread would go on with the first one's registers (a function
+     * finds the thread's g_regs once: recomp_regs.h); XAPI's fibers stay on their thread, so say so if one moved */
+    if (next->started && next->host && next->host != &t_host) {
+        static int told;
+        if (!told++)
+            fprintf(stderr, "[FIBER] fiber %08X resumed on another host thread\n", target);
+    }
     MEM32(tdata + 8) = target;
     __atomic_store_n(&next->running, 1, __ATOMIC_RELEASE);
     t_left = cur;

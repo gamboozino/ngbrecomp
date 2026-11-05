@@ -49,7 +49,6 @@ static XBOX_THREAD_LOCAL KIRQL g_current_irql = PASSIVE_LEVEL;
  * critical section, blocked against the thread that held it, and the title
  * froze with IRQL raised on the blocked thread. Every change of
  * g_current_irql is published here. */
-extern RECOMP_TLS uint32_t g_fs_base;
 /* The offset lifted code adds to every guest address; host code that reads
  * guest memory on its behalf uses the same one. */
 extern ptrdiff_t g_xbox_mem_offset;
@@ -123,7 +122,6 @@ static struct {
     void *ra;
     uint32_t guest_ra, guest_esp;   /* the host ra only ever names the bridge */
 } s_holders[IRQL_HOLDERS];
-extern RECOMP_TLS uint32_t g_esp;
 
 static void irql_holder_add(void *ra)
 {

@@ -293,6 +293,7 @@ void xbox_WatchInit(void);
 #else
 #  define RECOMP_TLS _Thread_local
 #endif
+#include "recomp_regs.h"   /* the registers: g_eax... */
 
 /* SSE register storage, shared with the generated code. Defined in both this
  * header and templates/runtime/recomp_types.h -- a translation unit can end up
@@ -358,7 +359,6 @@ typedef union RecompXmm {
  * thread gets its own from xbox_AllocThreadTib() and points g_fs_base at
  * it. */
 #define XBOX_TIB_MAIN       0x00004000
-extern RECOMP_TLS uint32_t g_fs_base;
 #define XBOX_FS_BASE        g_fs_base
 
 #define XBOX_STACK_BASE     0x00780000

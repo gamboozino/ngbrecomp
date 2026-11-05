@@ -60,7 +60,10 @@ class RuntimeHelpersDefinedTest(unittest.TestCase):
         self.assertIn("typedef union RecompXmm", runtime)
         main_c = (_ROOT / "templates" / "new-game" / "src" / "main.c").read_text(
             encoding="utf-8")
-        self.assertIn("RecompXmm g_xmm0", main_c)
+        regs = (_RUNTIME.parent / "recomp_regs.h").read_text(encoding="utf-8")
+        self.assertIn("RecompXmm r_xmm0", regs)
+        self.assertIn("#define g_xmm0 ", regs)
+        self.assertIn('#include "kernel/recomp_regs.h"', main_c)
 
 
 if __name__ == "__main__":

@@ -155,7 +155,7 @@ extern uint32_t g_xbox_code_hi;
  * waiting for work never returns and startup deadlocks.
  *
  * On hardware each thread has its own register set, so model it that way.
- * Thread-local costs an indirection per access; a deadlock costs the title. */
+ * Thread-local costs an indirection per function; a deadlock costs the title. */
 #if defined(_MSC_VER)
 #  define RECOMP_TLS __declspec(thread)
 #elif defined(__GNUC__) || defined(__clang__)
@@ -164,13 +164,13 @@ extern uint32_t g_xbox_code_hi;
 #  define RECOMP_TLS _Thread_local
 #endif
 
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
-extern RECOMP_TLS uint32_t g_ebx, g_esi, g_edi;
+/* The registers themselves, one thread-local struct (recomp_regs.h: one TLS
+ * access per function where a dlopen'd library pays one per variable). */
+#include "recomp_regs.h"
+
 
 /* x87 stack. Per-thread for the same reason the integer registers are:
  * arguments are passed in st(0)/st(1) across call boundaries. */
-extern RECOMP_TLS double g_fp_stack[8];
-extern RECOMP_TLS int g_fp_top;
 
 /**
  * SEH frame pointer bridge.
@@ -188,10 +188,8 @@ extern RECOMP_TLS int g_fp_top;
  * Per-thread, because a TIB is. fs:[0] is the SEH chain head and fs:[4]
  * reaches the CRT's per-thread data, so a single shared base makes every
  * guest thread the same thread as far as the CRT is concerned. */
-extern RECOMP_TLS uint32_t g_fs_base;
 #define XBOX_FS_BASE g_fs_base
 
-extern RECOMP_TLS uint32_t g_seh_ebp;
 
 /* ---- non-local jumps (setjmp / longjmp) --------------------------------
  *
@@ -233,7 +231,6 @@ extern RECOMP_TLS uint32_t g_seh_ebp;
 #include <setjmp.h>
 jmp_buf *recomp_setjmp_slot(uint32_t buf_va);
 int recomp_guest_longjmp(uint32_t buf_va, uint32_t value);
-extern RECOMP_TLS uint32_t g_ebp;
 
 /* EFLAGS.DF, and the signed step the string instructions take because of it.
  *
@@ -247,16 +244,12 @@ extern RECOMP_TLS uint32_t g_ebp;
  * be found by name, and the dashboard rebooted rather than showing a UI.
  * memmove's overlapping case is the same instruction and the same bug.
  */
-extern RECOMP_TLS int g_df;
 #define RECOMP_DF_STEP(n) (g_df ? -(int32_t)(n) : (int32_t)(n))
 
 /* x87 control and status. Thread-local for the same reason the x87 stack
    above is: one guest routine can lift to several C functions, so a compare
    and the FNSTSW that reads it can land in different bodies, and the control
    word has to survive a call. (g_fp_stack/g_fp_top are declared above.) */
-extern RECOMP_TLS uint16_t g_fp_control_word;
-extern RECOMP_TLS int g_fp_cmp;
-extern RECOMP_TLS uint16_t g_fp_cc;
 /* x87 precision control (control word bits 8-9). The stack is double-backed,
  * which matches PC=53 and is close enough for PC=64, but PC=24 -- what the
  * Xbox runs with -- rounds every arithmetic result to float. A title that
@@ -479,8 +472,6 @@ typedef union RecompXmm {
 } RecompXmm;
 #endif
 
-extern RECOMP_TLS RecompXmm g_xmm0, g_xmm1, g_xmm2, g_xmm3;
-extern RECOMP_TLS RecompXmm g_xmm4, g_xmm5, g_xmm6, g_xmm7;
 
 /* -- construction -- */
 
@@ -1135,8 +1126,6 @@ typedef union RecompMmx {
 } RecompMmx;
 #endif
 
-extern RECOMP_TLS RecompMmx g_mm0, g_mm1, g_mm2, g_mm3;
-extern RECOMP_TLS RecompMmx g_mm4, g_mm5, g_mm6, g_mm7;
 
 static inline RecompMmx MMX_ZERO(void) { RecompMmx r; r.q = 0; return r; }
 

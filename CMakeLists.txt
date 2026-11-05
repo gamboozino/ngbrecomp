@@ -292,6 +292,9 @@ if(WIN32)
     endif()
 elseif(ANDROID)
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME main)
+    # -Bsymbolic: the library's calls to its own functions go straight there, not through the PLT (exported, they
+    # could be replaced by another library's; nothing does): 3% of the game thread on a Pixel 4a
+    target_link_options(${PROJECT_NAME} PRIVATE -Wl,-Bsymbolic)
     target_link_libraries(${PROJECT_NAME} PRIVATE android log m SDL2::SDL2)
     # libadrenotools (Turnip loaded for this app: src/android_gpu.c), from packaging/android/build.sh
     find_library(NGB_ADRENOTOOLS adrenotools REQUIRED)

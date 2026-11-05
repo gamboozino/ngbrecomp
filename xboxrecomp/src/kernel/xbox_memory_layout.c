@@ -1242,10 +1242,56 @@ uint32_t g_xbox_image_hi = 0;
 uint32_t g_xbox_code_lo = 0;
 uint32_t g_xbox_code_hi = 0;
 
-/* Global registers for recompiled code (via recomp_types.h) */
+/* The registers of recompiled code, each host thread its own (recomp_regs.h): the first thread's fs: base is
+ * the TIB the loader built, x87 starts as FNINIT leaves it (control word 0x037F, C3 set) */
+RECOMP_TLS RecompRegs g_regs = { .r_fs_base = XBOX_TIB_MAIN, .r_fp_control_word = 0x037Fu, .r_fp_cc = 0x4000 };
+
+#if defined(__ANDROID__) && defined(__aarch64__)
+/* A thread's first register access (recomp_regs.h): its TLS_SLOT_APP pointed at its registers. Called from the
+ * middle of any function, so every register the C call may change is kept, the whole of v8-v15 too (a C call keeps
+ * only their low halves; x18 is the platform's: untouched). */
+RecompRegs *recomp_regs_slot(void)
+{
+    RecompRegs *r = &g_regs;
+    ((RecompRegs **)__builtin_thread_pointer())[2] = r;
+    return r;
+}
+__asm__(".text\n"
+        ".globl recomp_regs_slot_asm\n"
+        ".hidden recomp_regs_slot_asm\n"
+        ".type recomp_regs_slot_asm, %function\n"
+        ".p2align 2\n"
+        "recomp_regs_slot_asm:\n"
+        "  stp x29, x30, [sp, #-16]!\n"
+        "  mov x29, sp\n"
+        "  sub sp, sp, #656\n"
+        "  stp x1, x2, [sp, #0]\n   stp x3, x4, [sp, #16]\n   stp x5, x6, [sp, #32]\n   stp x7, x8, [sp, #48]\n"
+        "  stp x9, x10, [sp, #64]\n stp x11, x12, [sp, #80]\n stp x13, x14, [sp, #96]\n stp x15, x16, [sp, #112]\n"
+        "  str x17, [sp, #128]\n"
+        "  stp q0, q1, [sp, #144]\n stp q2, q3, [sp, #176]\n stp q4, q5, [sp, #208]\n stp q6, q7, [sp, #240]\n"
+        "  stp q16, q17, [sp, #272]\n stp q18, q19, [sp, #304]\n stp q20, q21, [sp, #336]\n stp q22, q23, [sp, #368]\n"
+        "  stp q24, q25, [sp, #400]\n stp q26, q27, [sp, #432]\n stp q28, q29, [sp, #464]\n stp q30, q31, [sp, #496]\n"
+        "  stp q8, q9, [sp, #528]\n stp q10, q11, [sp, #560]\n stp q12, q13, [sp, #592]\n stp q14, q15, [sp, #624]\n"
+        "  mrs x9, nzcv\n"
+        "  str x9, [sp, #136]\n"
+        "  bl recomp_regs_slot\n"
+        "  ldr x9, [sp, #136]\n"
+        "  msr nzcv, x9\n"
+        "  ldp q0, q1, [sp, #144]\n ldp q2, q3, [sp, #176]\n ldp q4, q5, [sp, #208]\n ldp q6, q7, [sp, #240]\n"
+        "  ldp q16, q17, [sp, #272]\n ldp q18, q19, [sp, #304]\n ldp q20, q21, [sp, #336]\n ldp q22, q23, [sp, #368]\n"
+        "  ldp q24, q25, [sp, #400]\n ldp q26, q27, [sp, #432]\n ldp q28, q29, [sp, #464]\n ldp q30, q31, [sp, #496]\n"
+        "  ldp q8, q9, [sp, #528]\n ldp q10, q11, [sp, #560]\n ldp q12, q13, [sp, #592]\n ldp q14, q15, [sp, #624]\n"
+        "  ldp x1, x2, [sp, #0]\n   ldp x3, x4, [sp, #16]\n   ldp x5, x6, [sp, #32]\n   ldp x7, x8, [sp, #48]\n"
+        "  ldp x9, x10, [sp, #64]\n ldp x11, x12, [sp, #80]\n ldp x13, x14, [sp, #96]\n ldp x15, x16, [sp, #112]\n"
+        "  ldr x17, [sp, #128]\n"
+        "  add sp, sp, #656\n"
+        "  ldp x29, x30, [sp], #16\n"
+        "  ret\n"
+        ".size recomp_regs_slot_asm, .-recomp_regs_slot_asm\n");
+#endif
+
 /* Each guest thread's TIB. The first thread uses the one the loader built;
  * a spawned thread gets its own from xbox_AllocThreadTib(). */
-RECOMP_TLS uint32_t g_fs_base = XBOX_TIB_MAIN;
 
 /* The shape of the TLS block the loader built, so a new thread can be
  * given one just like it: where the initialised image data starts, how
@@ -1253,8 +1299,6 @@ RECOMP_TLS uint32_t g_fs_base = XBOX_TIB_MAIN;
  * at is. Zero total means the image had no TLS directory. */
 static uint32_t g_tls_template_va, g_tls_total, g_tls_thread_size = 64;
 
-RECOMP_TLS uint32_t g_eax = 0, g_ecx = 0, g_edx = 0, g_esp = 0;
-RECOMP_TLS uint32_t g_ebx = 0, g_esi = 0, g_edi = 0;
 
 #ifdef RECOMP_ABI_CHECK
 /* Report a lifted function that returned without restoring ebx/esi/edi.
@@ -1316,9 +1360,6 @@ void recomp_abi_violation_log(uint32_t va, uint32_t ebx0, uint32_t esi0,
 #endif
 
 /* SEH frame pointer bridge (see recomp_types.h for explanation) */
-RECOMP_TLS uint32_t g_seh_ebp = 0;
-RECOMP_TLS double g_fp_stack[8];
-RECOMP_TLS int g_fp_top = 0;
 
 /* Set once at startup. The generated code reads it at the ret of every
  * --force-return function, so it has to be cheap and it has to default to
@@ -1327,13 +1368,8 @@ RECOMP_TLS int g_fp_top = 0;
 int g_force_return = 0;
 /* x87 control and status. The reset default masks every exception and
  * rounds to nearest, which is what the CRT expects before _control87. */
-RECOMP_TLS uint16_t g_fp_control_word = 0x037Fu;
-RECOMP_TLS int g_fp_cmp = 0;
-RECOMP_TLS uint16_t g_fp_cc = 0x4000;
 
 /* Defined below, with the other guest registers. */
-extern RECOMP_TLS uint32_t g_ebp;
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_ebx, g_esi, g_edi;
 
 /* ---- non-local jumps ---------------------------------------------------
  *
@@ -1831,13 +1867,8 @@ void xbox_WatchdogStart(void)
 }
 
 /* SSE. 128 bits of architectural state, per-thread like the rest. */
-RECOMP_TLS RecompMmx g_mm0, g_mm1, g_mm2, g_mm3;
-RECOMP_TLS RecompMmx g_mm4, g_mm5, g_mm6, g_mm7;
-RECOMP_TLS RecompXmm g_xmm0, g_xmm1, g_xmm2, g_xmm3;
-RECOMP_TLS RecompXmm g_xmm4, g_xmm5, g_xmm6, g_xmm7;
 /* Last frame established by `mov ebp, esp`. Read by frameless functions
  * that address their caller's frame through ebp. */
-RECOMP_TLS uint32_t g_ebp = 0;
 
 /* EFLAGS.DF. Zero means the string instructions walk forwards, which is the
  * ABI's resting state and what almost every one of them does -- so this is
@@ -1846,7 +1877,6 @@ RECOMP_TLS uint32_t g_ebp = 0;
  * `std; repne scasb`, and memmove goes backwards when its regions overlap the
  * wrong way. Thread-local, because `std` and the `cld` that undoes it can land
  * in different lifted bodies of the same guest routine. */
-RECOMP_TLS int g_df = 0;
 
 /* ICALL trace ring buffer */
 volatile uint32_t g_icall_trace[16] = {0};

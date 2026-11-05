@@ -215,7 +215,6 @@ void recomp_icall_not_code_log(uint32_t va)
             return;
     }
     {   /* the caller: the call pushed its return address, still on the guest stack */
-        extern RECOMP_TLS uint32_t g_esp;
         extern ptrdiff_t g_xbox_mem_offset;
         uint32_t ret = g_esp && g_xbox_mem_offset ? *(uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp) : 0;
         fprintf(stderr, "[ICALL] target 0x%08X is not code -- skipped %llu time(s) "

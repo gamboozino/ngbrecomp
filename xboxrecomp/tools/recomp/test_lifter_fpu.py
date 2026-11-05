@@ -109,14 +109,18 @@ class FpuLifterTest(unittest.TestCase):
             root / "templates" / "new-game" / "src" / "main.c"
         ).read_text()
 
-        self.assertIn("extern RECOMP_TLS double g_fp_stack[8];", runtime_types)
-        self.assertIn("extern RECOMP_TLS int g_fp_top;", runtime_types)
+        regs = (root / "templates" / "runtime" / "recomp_regs.h").read_text()
+        # (the registers are one thread-local struct, recomp_regs.h, which the
+        # generated code's header and the new-game template both include)
+        self.assertIn('#include "recomp_regs.h"', runtime_types)
+        self.assertIn("double r_fp_stack[8];", regs)
+        self.assertIn("#define g_fp_stack ", regs)
+        self.assertIn("#define g_fp_top ", regs)
+        self.assertIn("#define g_fp_control_word ", regs)
+        self.assertIn("extern RECOMP_TLS RecompRegs g_regs;", regs)
         self.assertIn("#define SMEM64(addr)", runtime_types)
-        self.assertIn("extern RECOMP_TLS double g_fp_stack[8];", main)
-        self.assertIn("extern RECOMP_TLS int g_fp_top;", main)
-        self.assertIn("extern RECOMP_TLS uint16_t g_fp_control_word;", runtime_types)
         self.assertIn("#define RECOMP_PARITY8(x)", runtime_types)
-        self.assertIn("extern RECOMP_TLS uint16_t g_fp_control_word;", main)
+        self.assertIn('#include "kernel/recomp_regs.h"', main)
 
     def test_control_word_store_and_load_use_shared_state(self):
         operand = Operand(type="mem", mem_base="ebp", mem_disp=0xFFFFFFFC,

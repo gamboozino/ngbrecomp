@@ -168,13 +168,7 @@ HARNESS_HEAD = r'''
 #define RECOMP_GENERATED_CODE 1
 #include "recomp_types.h"
 ptrdiff_t g_xbox_mem_offset;
-RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi, g_seh_ebp, g_fs_base;
-RECOMP_TLS RecompXmm g_xmm0, g_xmm1, g_xmm2, g_xmm3, g_xmm4, g_xmm5, g_xmm6, g_xmm7;
-RECOMP_TLS double g_fp_stack[8];
-RECOMP_TLS int g_fp_top;
-RECOMP_TLS uint16_t g_fp_control_word = 0x027F;
-RECOMP_TLS int g_df;
-RECOMP_TLS RecompMmx g_mm0, g_mm1, g_mm2, g_mm3, g_mm4, g_mm5, g_mm6, g_mm7;
+RECOMP_TLS RecompRegs g_regs = { .r_fp_control_word = 0x027F };   /* the registers (recomp_regs.h) */
 uint32_t g_recomp_capture_va;
 int recomp_capture_entry(uint32_t va) { (void)va; return 0; }
 static RecompXmm *X[8];

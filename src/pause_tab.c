@@ -1960,9 +1960,9 @@ static int pt_tab_x(int i, int x6)
 
 /* ---------- calling the game ---------- */
 
-typedef struct { uint32_t ebx, esi, edi, ebp, esp, seh; } Saved;
-static void save(Saved *s) { s->ebx = ebx; s->esi = esi; s->edi = edi; s->ebp = g_ebp; s->esp = esp; s->seh = g_seh_ebp; }
-static void restore(const Saved *s) { ebx = s->ebx; esi = s->esi; edi = s->edi; g_ebp = s->ebp; esp = s->esp; g_seh_ebp = s->seh; }
+typedef struct { uint32_t s_ebx, s_esi, s_edi, s_ebp, s_esp, s_seh; } Saved;   /* (not ebx...: macros of the registers) */
+static void save(Saved *s) { s->s_ebx = ebx; s->s_esi = esi; s->s_edi = edi; s->s_ebp = g_ebp; s->s_esp = esp; s->s_seh = g_seh_ebp; }
+static void restore(const Saved *s) { ebx = s->s_ebx; esi = s->s_esi; edi = s->s_edi; g_ebp = s->s_ebp; esp = s->s_esp; g_seh_ebp = s->s_seh; }
 
 void sub_002216B0(void);
 void sub_00221170(void);

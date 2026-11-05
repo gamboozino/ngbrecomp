@@ -41,7 +41,7 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va) { (void)xbox_va; return NUL
 
 /* The seam, plus the guest CPU state the dispatcher reads and writes. */
 extern recomp_func_t recomp_lookup_kernel(uint32_t xbox_va);
-extern RECOMP_TLS uint32_t g_eax, g_esp;
+#include "recomp_regs.h"   /* the registers: g_eax... */
 extern ptrdiff_t g_xbox_mem_offset;
 
 static int failures;
