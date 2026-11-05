@@ -382,6 +382,16 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
         xbox_OhciHandleMmio(ep->ContextRecord, xbox_va))
         return EXCEPTION_CONTINUE_EXECUTION;
 
+    /* The renderer could not start and is saying so: the other renderer's start-up on the PFIFO thread
+     * crashing in the GPU's driver meanwhile (Mali, #196) ended the program before the message showed. That
+     * message ends it; this thread waits. */
+    extern int ngb_renderer_fatal_elsewhere(void);
+    if (ngb_renderer_fatal_elsewhere()) {
+        fprintf(stderr, "[CRASH] at RIP=0x%llX while the renderer's message is up: this thread waits\n",
+                (unsigned long long)ep->ContextRecord->Rip);
+        for (;;)
+            usleep(1000000);
+    }
     fprintf(stderr, "[CRASH] Access violation at RIP=0x%llX, fault addr=0x%llX (%s)\n",
             (unsigned long long)ep->ContextRecord->Rip,
             (unsigned long long)fault_addr, is_write ? "write" : "read");
