@@ -267,6 +267,24 @@ int d3d_hook(int fn)
         s_in_since = now_ms();
     if (fn == D3DF_D3DDevice_RunPushBuffer)
         push_dump();
+    /* The Multithreaded Renderer: the GPU emulation reads the push buffer only as far as the render thread has
+     * drawn (src/d3d/gpu/threaded.cpp), and Direct3D runs only so far ahead of the GPU, counted in kick-offs it
+     * seems (D3D_MakeRequestedSpace walks a table of them; a bigger buffer changed nothing, bigger kick-offs did).
+     * At the title's 32 KB a kick-off, a heavy frame had the title waiting, a few hundred times a second, on the
+     * drawing of what it had just recorded: game and render thread taking turns (40 fps on a Pixel 4a where each
+     * needed 9 ms a frame; 30-40 fps stretches of the attract demo now 55-60). 256 KB kick-offs
+     * (Direct3D_CreateDevice takes 0x3D9588 as set), in the title's own buffer. NGB_D3D_KICKOFF_KB=n another
+     * size, 0 the title's. */
+    if (fn == D3DF_Direct3D_CreateDevice) {
+        int ngb_pc_setting(int which);
+        const char *thread = getenv("NGB_D3D_THREAD"), *k = getenv("NGB_D3D_KICKOFF_KB");
+        int threaded = thread ? strcmp(thread, "0") != 0 : ngb_pc_setting(30) != 0;   /* (as src/d3d/hle.cpp) */
+        unsigned kb = k ? (unsigned)atoi(k) : threaded && s_hle > 0 ? 256 : 0;   /* (only with the port's renderer) */
+        if (kb >= 4 && kb <= 512 && kb * 1024u > MEM32(0x3D9588) && kb * 1024u * 4 <= MEM32(0x3D958C)) {
+            fprintf(stderr, "[D3D] kick-off every %u KB (the title's %u)\n", kb, MEM32(0x3D9588) / 1024);
+            MEM32(0x3D9588) = kb * 1024u;
+        }
+    }
     if (s_hle) {
         uint32_t regs[8] = { eax, ecx, edx, ebx, esp, g_ebp, esi, edi };
         span_enter();
