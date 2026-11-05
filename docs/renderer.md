@@ -199,7 +199,7 @@ debug knobs out once it is the default.
   `dump_dir/vertices_<frame>.txt`, every fixed-function draw's matrices, positions and guest call stack. F7 traces carry each point draw's state (`pt`: sprite, scaling, size, min, max, A B C,
   the vertex's attribute bits).
 
-## The render thread (2026-10-27, opt-in: Graphics > Multithreaded Renderer)
+## The render thread (2026-10-27: Graphics > Multithreaded Renderer, on by default on Android)
 
 Graphics > Multithreaded Renderer (needs a restart), or `NGB_D3D_THREAD=1` (`0` off) over it, draws on a thread of its own (src/d3d/gpu/threaded.cpp, after TGP482's SDK
 render_thread.cpp): the title's thread records each call -- the state that changed, the resource headers
@@ -221,3 +221,23 @@ the emulation's lock (nv2a_vk_mmio_read) and calls the progress hook inside it; 
 ran outside a host section, so the hook's own section ended at depth 0 and gave the virtual CPU away there, the
 GPU's interrupt took the CPU and waited for the lock, and the title waited for the CPU. Register accesses are now
 a host section around the lock. (Linux's signal handler already makes one, so it never froze.)
+
+Kick-offs (0.9.57). With the push buffer read only as far as has been drawn, Direct3D's limit on how far it
+runs ahead of the GPU -- counted in kick-offs, it seems: D3D_MakeRequestedSpace walks a table of them -- had the
+title waiting on the drawing of what it had just recorded, a few hundred times a second in a heavy frame, the
+title's thread and the render thread taking turns (a Pixel 4a at 40 fps where each needed 9 ms a frame and the
+GPU 5-10 ms; `NV2A_PACE_LOG=1` showed PFIFO held at the gate 1.5 s of every 2). A bigger push buffer changed
+nothing; bigger kick-offs did: with the render thread, Direct3D_CreateDevice gets 256 KB ones in the title's
+own 1 MB buffer (0x3D9588, src/d3d/d3d.c; `NGB_D3D_KICKOFF_KB=n`, 0 the title's 32 KB). The attract demo on
+that phone: 30-40 fps stretches at 55-60, 48 -> 58.6 fps on average with the register changes.
+
+## Calls taken (stage B, 0.9.57 default)
+
+Two of the title's most frequent calls end at the hook, their library body skipped: CDevice_SetStateVB (the
+lazy state flush and the vertex arrays) and D3DDevice_SetRenderState_Simple (two words into the push buffer).
+What those bodies write only feeds the NV2A model, which draws nothing while this renderer draws; the renderer
+has the state from the hooks. Each was checked in the library's code for anything the title or the rest of the
+library reads (src/d3d/hle.cpp kTakeable: why SetStateUP, SetLight and the resource-stamping calls are not
+taken). 8% less CPU on a desktop, the pictures as they were in five chapters and the shader scenes, with the
+render thread on and off. `NGB_D3D_TAKE=name,...` takes only those, `none` none; never in mirror mode or with
+`NGB_D3D_KEEP_NV2A=1`.

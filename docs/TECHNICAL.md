@@ -22,6 +22,11 @@ console is xboxrecomp's runtime:
 - **Audio**: the game's DirectSound calls on a host mixer (below) into SDL2's output, stereo or 5.1.
 - **Input**: SDL2 controllers, keyboard and mouse, as the Xbox's USB pad through an OHCI model.
 
+The lifted code keeps the guest's registers (`g_eax`... the x87, SSE and MMX state) in one thread-local
+struct, `xboxrecomp/templates/runtime/recomp_regs.h`, which the pipeline copies beside the generated
+`recomp_types.h`: each guest thread has its own, as on hardware, and the old names are macros of its
+members.
+
 The arcade Ninja Gaiden (#18) is another program on the disc that the Xbox reboots into
 (`XLaunchNewImage`): `NinjaTrilogy.xbe`, or `NinjaTomoe.xbe` (the Japanese build, chosen by the game's
 region flag 0xDB9890). Each is lifted the same way (`tools/pipeline_trilogy.sh [tomoe]`, into
@@ -91,6 +96,12 @@ from Linux x86-64:
   (`compat_signal_stack`): the C library's is 16 KiB. Bionic lacks `memfd_create` before API 30 (the
   syscall), `pthread_cancel`, `explicit_bzero` and, before API 33, `backtrace`
   (`platform/android_backtrace.h`, from the unwinder).
+- **The registers:** in a library loaded with `dlopen`, every thread-local access a function makes is a
+  call into the dynamic linker's resolver (11% of the game thread on a Pixel 4a). On Android arm64 the
+  thread's `TLS_SLOT_APP` (the thread pointer's word 2, free for apps from API 29) points at its registers
+  instead, read once per function and filled on a thread's first use (`recomp_regs.h`,
+  `recomp_regs_slot_asm` in `xbox_memory_layout.c`); `-Bsymbolic` keeps the library's calls to its own
+  functions off the PLT. Together: the attract demo from 48 to 54 fps on that phone.
 - **The clocks:** the guest threads take turns on one virtual CPU, so no core looks busy and the governor
   kept them at 0.7-1.1 GHz: 50 ms frames on a Pixel 9a. Each frame reports its time to Android's
   performance hints (API 33+, `ngb_android_frame`), which raise them: 60 fps.
@@ -114,7 +125,8 @@ from Linux x86-64:
   release by `packaging/android/build.sh`) is loaded for the app by libadrenotools (`src/android_gpu.c`,
   through `nv2a_vk_custom_loader`; no setting, `NGB_GPU_DRIVER=system|turnip` forces one for testing);
   the window's surface is then made through that loader (`present_sdl.c`).
-- **Defaults:** fullscreen, the Multithreaded Renderer on (60 fps against 42-58 without on a Pixel 9a).
+- **Defaults:** fullscreen, the Multithreaded Renderer on (60 fps against 42-58 without on a Pixel 9a), with
+  256 KB Direct3D kick-offs (docs/renderer.md: the demo's 30-40 fps stretches on a Pixel 4a at 55-60).
   The arcade programs and Return to Main Menu's restart are not there yet (no programs to start beside
   the app).
 
@@ -345,8 +357,13 @@ Controls (the Settings tab's Controls category and RECOMP SETTINGS' CONTROLS; th
 Options > Controller Settings > Button Settings is left as the game has it, for the controller)
 changes them: each action in play has two keys or mouse
 buttons and a controller button; A (Enter, a click) waits for the new one -- Esc cancels; for the
-controller, its next button, or six seconds -- and X (Delete) clears it. A key taken from another
-action leaves it; a controller button taken from another action swaps with it. They are kept in
+controller, its next button, or six seconds -- and X (Delete) clears it. Ninpo and Wind Run, the game's
+two-button moves, can take two controller buttons held together (the first held, a second pressed; the
+first let go alone, or held 1.5 s, binds just it): the pair presses the move, each button alone its own
+action (a member pressed alone waits 60 ms for the other), and, moved, the game's own pair for it (Y + B,
+X + A) made by two other actions within 100 ms no longer does it. A key or button taken from another
+action leaves it (Pause always keeps a controller button: one taken from it only in exchange for the
+other action's). The page draws each binding as its key or button picture. They are kept in
 `controls.ini` beside `settings.ini` (`src/bindings.c`); in play the keyboard and mouse press the
 pad as bound and the controller's buttons are moved to their actions (`xbox_pad_remap`, weak in
 xboxrecomp's input). The sticks are not moved; the menus keep their own controls, the controller
@@ -369,13 +386,27 @@ A, B, X and Y, L2 and R2 for the triggers, L1 and R1 for Black and White (the bu
 pause menu's L and R plates too (on a dark plate the size of the game's), and R1 drawn the size of L1 (the
 game draws White's icon smaller); the Controls page names them the same way. The Controls page shows the
 two-button actions (Ninpo, Wind Run) as the pad's button pictures, Xelu's Xbox 360 ones on an Xbox pad
-(`assets/prompts/xbox`). The game's Button Settings
+(`assets/prompts/xbox`). With a Nintendo pad (a Switch Pro Controller, Joy-Cons) the prompts are Xelu's
+Switch set (`assets/prompts/switch`), and its face buttons work by position, as on an Xbox pad (SDL's
+`SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS` off, set in `xbox_InputInit` before the controllers open): the
+bottom button, marked B, is the game's A, and the prompts swap to match. Android's own controller mappings
+go by label only, so there the button marked A is the game's A. The game's Button Settings
 page keeps its picture of the Xbox controller. The Controls page's Button Prompts picks the set: Auto (the
-device in use, as above), Xbox, PlayStation or PC (the keys), saved in `controls.ini` (`button_prompts`).
-`NGB_PAD_PROMPTS=ps` shows the PlayStation's whatever the setting, any other value the Xbox's.
+device in use, as above), Xbox, PlayStation, Nintendo or PC (the keys), saved in `controls.ini`
+(`button_prompts`). `NGB_PAD_PROMPTS=ps` (or `nintendo`) shows that set whatever the setting, any other value
+the Xbox's.
 The techniques' "hold the button" icons (sprites 0x1CE-0x1D3) are a texture of their own, six
 cells with an arrow over the button: with PlayStation or PC prompts each button is redrawn as that set's,
 the game's arrow kept over it (`hold_check`, #125); the keys are play's, not the menu's.
+
+Mods (#179): a file under `<save folder>/mods` with the path a game file has in the game folder (or in the
+hard disk cache, `<save folder>/Cache`, where the game copies its stage files) is read instead of it. Only a
+read of an existing file takes it (NtCreateFile opening to read, with no write or delete access), and a
+directory search reports its size (CRI's file layer sizes files that way); writes, deletes and the cache's
+own copies never touch a mod (`xbox_mod_path`, `xboxrecomp/src/kernel/kernel_path.c`; slash- and
+case-blind). Game files taken from mods are listed in `<save folder>/mods-cache.txt`: once a mod is gone, the
+game's own file is put back over its cached copy at the next start (the game never checks its cache again).
+The quick menu's icons read `spr.afs` the same way. The log names each file taken (`[MODS]`).
 
 In the game's menus (main menu, Options, the pause menu and its tabs, message boxes) the mouse
 points: the game's own cursor follows it onto the item under it (a press of the pad at a time,

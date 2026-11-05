@@ -172,7 +172,7 @@ of the pause menu. Changes apply at once and are saved.
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
   anisotropic), anti-aliasing (MSAA), shadow resolution, Smoother Glow (a softer, fainter glow on
   bright lights; off is the console's look), Lower Detail Under Load, Multithreaded Renderer (drawing on a
-  thread of its own, for slower CPUs; off unless chosen, may have bugs)
+  thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC)
 - **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9, 32:9), window size, windowed / fullscreen /
   borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, skip the
   warnings and intro movies
@@ -331,8 +331,8 @@ and test rules, also for coding agents: [AGENTS.md](AGENTS.md).
   [Xbox-XBERecomp](https://github.com/TGP482/Xbox-XBERecomp): the renderer's shader, vertex and
   texture code, and the sound mixer's model (MIT)
 - Fonts: EB Garamond and Liberation Serif (SIL Open Font License)
-- Keyboard, mouse and controller prompts, and the touch controls' buttons: Xelu's Free Controller & Key
-  Prompts (CC0)
+- Keyboard, mouse and controller prompts (the Xbox, PlayStation and Nintendo Switch buttons), and the
+  touch controls' buttons: Xelu's [Free Controller & Key Prompts](https://thoseawesomeguys.com/prompts/) (CC0)
 - The touch controls' sticks and d-pad: Kenney's [Mobile Controls](https://kenney.nl/assets/mobile-controls) (CC0)
 - Banner lettering: Chakra Petch by Cadson Demak (SIL Open Font License)
 
