@@ -607,8 +607,10 @@ void Start() {
     std::fprintf(stderr, "[D3D] renderer on (%s)\n", g_mirror ? "mirroring the NV2A emulation" : "drawing to the window");
 }
 
-// NGB_D3D_TAKE=name,name...: those calls end here, their library body skipped (stage B, testing): what the body
-// would add to the push buffer only feeds the NV2A emulation, which draws nothing while this renderer draws.
+// Calls that end here, their library body skipped (stage B): what the body would add to the push buffer only feeds
+// the NV2A emulation, which draws nothing while this renderer draws. Both below by default since 0.9.57 (8% less
+// CPU on a desktop, the pictures as they were in five chapters and the shaders' scenes); NGB_D3D_TAKE=name,name...
+// only those, NGB_D3D_TAKE=none none.
 // Only these can be taken, each checked in the library's code: its arguments' bytes (its ret n), and why
 // skipping it leaves nothing the title or the rest of the library reads
 struct Takeable { int fn; uint32_t ret; };
@@ -624,9 +626,10 @@ bool g_take[D3DF_COUNT];
 
 void TakeInit() {
     const char* e = std::getenv("NGB_D3D_TAKE");
+    if (!e) e = "CDevice_SetStateVB,D3DDevice_SetRenderState_Simple";
     // (the Multithreaded Renderer too: the library's resource stamps, which its waits read, are SetTexture's,
     // SetPalette's and SetStreamSource's, and the fences SetFence's and the draws'; none of them taken)
-    if (!e || g_mirror) return;
+    if (g_mirror || !std::strcmp(e, "none")) return;
     for (const Takeable& t : kTakeable) {
         const char* n = d3d_funcs[t.fn].name;
         size_t len = std::strlen(n);
