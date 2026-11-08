@@ -324,7 +324,7 @@ and test rules, also for coding agents: [AGENTS.md](AGENTS.md).
 
 ## Support
 
-If you'd like to support the project: [ko-fi.com/gamboozino](https://ko-fi.com/gamboozino)
+If you'd like to support the project: [GitHub Sponsors](https://github.com/sponsors/gamboozino) or [ko-fi.com/gamboozino](https://ko-fi.com/gamboozino)
 
 ## Credits
 
