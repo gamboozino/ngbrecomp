@@ -29,7 +29,7 @@ abi=arm64-v8a
 api=29   # thread-local guest registers need the ELF TLS that Android 10 brought
 sdl=2.32.10
 glslang=16.0.0
-mesa=26.2.6
+mesa=26.3.0
 adrenotools=8fae8ce   # (github.com/bylaws/libadrenotools)
 
 [ -f "$ndk/build/cmake/android.toolchain.cmake" ] || { echo "No Android NDK: set ANDROID_NDK_HOME." >&2; exit 1; }
