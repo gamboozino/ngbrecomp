@@ -97,6 +97,61 @@ int ngb_fps_picture(uint32_t *out, size_t max, int *w, int *h, unsigned *serial)
     return changed;
 }
 
+/* ---- The port's version in the main menu's bottom right corner (#207) ----
+ * Lettered the same way, once (and again when the picture's height changes), while the main menu's list is drawn
+ * (src/main_menu.c, sub_0017A010, stamps ngb_version_seen each frame it draws it); the renderer shows it while the
+ * stamp is fresh. */
+#ifndef NGB_VERSION
+#define NGB_VERSION "dev"
+#endif
+static pthread_mutex_t s_ver_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t s_ver_px[MAX_W * MAX_H];
+static int s_ver_w, s_ver_h;
+static unsigned s_ver_serial;
+static volatile unsigned s_ver_seen;                      /* frames since the main menu was last drawn, counting down */
+
+void ngb_version_seen(void) { s_ver_seen = 3; }
+
+void ngb_version_tick(void)
+{
+    static int last_cap;
+    static uint32_t px[MAX_W * MAX_H];
+    if (s_ver_seen)
+        s_ver_seen--;
+    int cap = ngb_fps_cap(ngb_fps_target_h > 0 ? ngb_fps_target_h : 720, NULL);
+    if (!s_ver_seen || cap == last_cap)
+        return;
+    int w, ph;
+    if (!ngb_game_text_picture("v" NGB_VERSION, (float)cap, px, MAX_W, MAX_H, &w, &ph))
+        return;                                           /* the font not loaded yet: next frame */
+    last_cap = cap;
+    pthread_mutex_lock(&s_ver_lock);
+    memcpy(s_ver_px, px, sizeof *px * (size_t)w * ph);
+    s_ver_w = w;
+    s_ver_h = ph;
+    s_ver_serial++;
+    pthread_mutex_unlock(&s_ver_lock);
+}
+
+/* Whether the main menu is up (the version to be shown). */
+int ngb_version_shown(void) { return s_ver_seen != 0 && s_ver_w > 0; }
+
+/* As ngb_fps_picture, for the version's picture. */
+int ngb_version_picture(uint32_t *out, size_t max, int *w, int *h, unsigned *serial)
+{
+    int changed = 0;
+    pthread_mutex_lock(&s_ver_lock);
+    if (*serial != s_ver_serial && (size_t)s_ver_w * s_ver_h <= max) {
+        memcpy(out, s_ver_px, sizeof *out * (size_t)s_ver_w * s_ver_h);
+        *w = s_ver_w;
+        *h = s_ver_h;
+        *serial = s_ver_serial;
+        changed = 1;
+    }
+    pthread_mutex_unlock(&s_ver_lock);
+    return changed;
+}
+
 /* The presenter's corner copy (another renderer drawing): the picture over a dark strip, opaque. */
 bool nv2a_fps_render(const char *text, uint32_t line_px, uint32_t *px, uint32_t maxw, uint32_t maxh,
                      uint32_t *ow, uint32_t *oh)

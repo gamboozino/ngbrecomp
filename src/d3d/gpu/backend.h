@@ -34,6 +34,9 @@ struct QuickPeek {
     bool fps = false;              // the frame counter shown (src/fps_text.c)
     std::vector<uint32_t> fps_px;  // its picture when it changed this frame (kFpsWidth x kFpsHeight), else empty
     bool fps_lettered = false;     // that picture has the text (not yet: the font not loaded)
+    bool version = false;          // the port's version shown (the main menu up, src/fps_text.c)
+    std::vector<uint32_t> version_px;   // its picture when it changed (kFpsWidth x kFpsHeight), else empty
+    int version_w = 0, version_h = 0;   // the text's size in it
 };
 
 class Backend {

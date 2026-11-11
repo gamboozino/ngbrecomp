@@ -134,6 +134,8 @@ void sub_0017A010(void)
         extern void ngb_main_menu_seen(void);          /* src/ingame_menu.c */
         ngb_recomp_menu_tick();                        /* back from RECOMP SETTINGS */
         ngb_main_menu_seen();                          /* (after Return to Main Menu) */
+        extern void ngb_version_seen(void);            /* src/fps_text.c: the version in the corner (#207) */
+        ngb_version_seen();
     }
     if (ENV_ONCE("NGB_MENU_LOG") && n < 32) {
         static unsigned k;

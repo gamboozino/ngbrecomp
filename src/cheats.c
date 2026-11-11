@@ -1329,6 +1329,7 @@ void ngb_frame_tick(void)
     { extern void ngb_ut_charge_frame(void); ngb_ut_charge_frame(); }   /* src/ut_charge.c: Essence-Only Charging */
     { extern void ngb_responsive_frame(void); ngb_responsive_frame(); }   /* src/responsive.c: Responsive Menus */
     { extern void ngb_fps_tick(void); ngb_fps_tick(); }   /* src/fps_text.c: the frame counter's lettering */
+    { extern void ngb_version_tick(void); ngb_version_tick(); }   /* src/fps_text.c: the version in the main menu */
 #ifdef __ANDROID__
     { extern void ngb_android_frame(void); ngb_android_frame(); }   /* src/android_main.c: the clocks' hint */
 #endif
