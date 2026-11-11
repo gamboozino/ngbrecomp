@@ -244,7 +244,7 @@ the title screen; turn off **Start+Back Reset** (Controls) if another program us
 With the **Quick Menu** on (RECOMP SETTINGS → Gameplay), Up and Down on the d-pad (or the Up / Down
 arrows, 1 / 2) open it on the melee weapons or the items, and Left and Right on the previous or next
 melee weapon; Up and Down then change category, Left and Right choose, A / Enter equips or uses, B /
-Escape closes. Its keys are in Controls.
+Escape closes. With Quick Menu Pause on, using an item leaves it open, so several can be used in a row. Its keys are in Controls.
 
 In the menus the mouse points and clicks, Esc goes back and Q / E switch the pause menu's tabs.
 With Skip Any Cutscene (Gameplay), movies and in-game cutscenes can be skipped with Start (or

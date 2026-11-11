@@ -13,7 +13,8 @@ one at once (held, they keep stepping, as inside the menu); in play the game
 does nothing with the d-pad. Once open, Up/Down changes
 category and Left/Right the card, a press going round; held, Up goes to Melee
 Weapons and Down to Consumables, and Left/Right step on to the first or last card
-and stop there; A confirms and B cancels. Each category opens on the card it
+and stop there; A confirms and B cancels. A weapon or Ninpo confirmed closes the menu; a
+consumable used with Quick Menu Pause on leaves it open, so several can be used in a row (#200). Each category opens on the card it
 was last left on, else on the equipped weapon or the last item used. Keyboard defaults are Up/Down (also 1/2), Left/Right, Enter and
 Escape/Backspace. The six actions are rebindable in Controls. Existing
 profiles keep their original four bindings; new confirm/cancel actions get

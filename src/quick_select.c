@@ -628,7 +628,12 @@ static void quick_step(void)
     int ready = can_pause();
     if (ngb_quick_take_command(&item, &category) && ready)
     {
-        ngb_quick_close();
+        /* With the game paused (Quick Menu Pause), a restorative leaves the menu open, so several can be used
+         * in a row (#200); its count is rebuilt below, and one more than can help reads "Already full". Live,
+         * it closes as before: open, the menu keeps the controls while the fight goes on. A weapon or Ninpo
+         * closes it either way: equipping one reloads the world. */
+        if (category != NGB_QUICK_ITEMS || !ngb_quick_frozen())
+            ngb_quick_close();
         dispatch_command(item, category);
     }
     if (!ngb_quick_wanted()) pause_menu(0);
