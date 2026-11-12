@@ -338,22 +338,28 @@ static void picture(NgbQuickEntry *e)
         art = "smokebom";
         name = "Smoke Bomb";
         break;
+    /* The bows look nearly alike: each also shows, small in a corner, the arrows it shoots (the HUD's pictures
+     * of them, #173) */
     case 0x27:
     case 0x29:
         art = "bow01";
         name = "Bow";
+        snprintf(e->badge, sizeof e->badge, "core");
         break;
     case 0x8D:
         art = "bow02";
         name = "Bow";
+        snprintf(e->badge, sizeof e->badge, "plain");
         break;
     case 0xE2:
         art = "bow03";
         name = "Bow";
+        snprintf(e->badge, sizeof e->badge, "fire");
         break;
     case 0xF8:
         art = "bow04";
         name = "Strongbow";
+        snprintf(e->badge, sizeof e->badge, "plain");
         break;
     case 0x98:
         art = "sgun";

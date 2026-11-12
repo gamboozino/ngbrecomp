@@ -367,8 +367,14 @@ static Icon *icon(const char *name)
 {
     if (!*name)
         return NULL;
-    char filename[32];
-    snprintf(filename, sizeof filename, "%s", name);
+    /* "archive/file#sprite": another archive than spr.afs (the HUD's game.spr is in demo.afs) */
+    char archive[16] = "spr.afs", filename[32];
+    const char *slash = strchr(name, '/');
+    if (slash && slash - name < (int)sizeof archive) {
+        snprintf(archive, sizeof archive, "%.*s", (int)(slash - name), name);
+        snprintf(filename, sizeof filename, "%s", slash + 1);
+    } else
+        snprintf(filename, sizeof filename, "%s", name);
     char *part = strchr(filename, '#');
     unsigned sprite = part ? (unsigned)strtoul(part + 1, NULL, 10) : 0;
     if (part)
@@ -381,10 +387,10 @@ static Icon *icon(const char *name)
     Icon *it = &s_icons[s_icon_count++];
     snprintf(it->name, sizeof it->name, "%s", name);
     char path[4200];
-    FILE *f = xbox_mod_file("spr.afs", path, sizeof path) ? fopen(path, "rb") : NULL;   /* (a mod's, as the game
-                                                                                           * reads it: #179) */
+    FILE *f = xbox_mod_file(archive, path, sizeof path) ? fopen(path, "rb") : NULL;   /* (a mod's, as the game
+                                                                                         * reads it: #179) */
     if (!f) {
-        snprintf(path, sizeof path, "%s/spr.afs", s_game_dir);
+        snprintf(path, sizeof path, "%s/%s", s_game_dir, archive);
         f = fopen(path, "rb");
     }
     if (!f)
@@ -567,6 +573,18 @@ static void art_fit(Icon *it, float cx, float cy, float width, float height, uns
     float bw = (float)(it->x1 - it->x0), bh = (float)(it->y1 - it->y0);
     float sx = width / bw, sy = height / bh;
     art(it, cx, cy, (sx < sy ? sx : sy) * (bw > bh ? bw : bh), alpha);
+}
+/* A bow's arrows (#173), as the HUD shows them when the bow is out: its arrow
+ * from game.spr (sprite 80, the dark-fletched 81 for explosive arrows) with the glow at the head that tells them
+ * apart -- the orange one (85) for explosive arrows, the blue streak (83) for APFSDS cores. kind: e->badge. */
+static void badge(const char *kind, float cx, float cy, int size, unsigned alpha)
+{
+    float s = (float)size, head = s * 0.28f;   /* the arrow's head is at the bottom left */
+    if (!strcmp(kind, "fire"))
+        art_fit(icon("demo.afs/game.spr#85"), cx - head, cy + head, s * 0.75f, s * 0.75f, alpha);
+    art_fit(icon(!strcmp(kind, "fire") ? "demo.afs/game.spr#81" : "demo.afs/game.spr#80"), cx, cy, s, s, alpha);
+    if (!strcmp(kind, "core"))
+        art_fit(icon("demo.afs/game.spr#83"), cx - head * 0.6f, cy + head * 0.6f, s * 0.7f, s * 0.7f, alpha);
 }
 static void panel(float cx, float cy, int width, int height, unsigned alpha)
 {
@@ -816,6 +834,9 @@ int ngb_quick_layer(uint32_t *pixels)
             float x = cx + relative * 89, y = cy;
             panel(x, y, relative ? 66 : 96, relative ? 66 : 96, relative ? 150 : 235);
             art_fit(icon(e->art), x, y, relative ? 52 : 82, relative ? 52 : 82, relative ? 180 : 255);
+            if (e->badge[0])   /* a bow's arrows, at the top left of the card (#173; its count is bottom right) */
+                badge(e->badge, x - (relative ? 16 : 24), y - (relative ? 16 : 24), relative ? 26 : 38,
+                      relative ? 180 : 255);
             if (e->quantity)
             {
                 char qty[12];
