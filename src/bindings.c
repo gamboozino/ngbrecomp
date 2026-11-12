@@ -172,6 +172,18 @@ static int game_slot(const Action *t, const unsigned char tab[10])
     return -1;
 }
 
+/* The controller button (0-7: A, B, X, Y, Black, White, LT, RT) the game's Button Settings give an action, -1
+ * none (or only a pair) */
+int ngb_game_button_for(int action)
+{
+    unsigned char b[10];
+    game_buttons(b);
+    for (int i = 0; i < 8; i++)
+        if (b[i] == action)
+            return i;
+    return -1;
+}
+
 static int game_buttons_default(void)
 {
     unsigned char tab[10];

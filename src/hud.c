@@ -37,7 +37,40 @@ void sub_001FA210(void)
         esp += 4;
         return;
     }
-    if (ngb_pc_setting(24)) {
+    /* Back on in play (not under the pause menu, which would take the presses) after a fight it missed -- the
+     * battle's counts (karma, combo, kills, time: 0x8DB6D8 on) changed while it was off, or in the ten seconds
+     * before it went off (hidden as the fight ended, in the tally): the karma window turned off and on again, as
+     * its button does, so what it had on screen from that tally goes (#214). Off and on outside a fight, the
+     * window is left alone. The setting is read once: the Toggle HUD key changes it from another thread. */
+    int on = ngb_pc_setting(24);
+    static int shown = 1, recent;
+    static unsigned frame, changed_at;
+    static uint8_t battle[0x68], last[0x68];
+    frame++;
+    for (uint32_t i = 0; i < sizeof last; i++)
+        if (last[i] != MEM8(0x8DB6D8 + i)) {
+            last[i] = MEM8(0x8DB6D8 + i);
+            changed_at = frame;
+        }
+    if (on && !shown && !MEM8(0xDB9AD5)) {
+        int changed = recent;
+        for (uint32_t i = 0; i < sizeof battle && !changed; i++)
+            changed = battle[i] != MEM8(0x8DB6D8 + i);
+        if (changed) {
+            extern void ngb_karma_window_refresh(void);   /* src/ingame_menu.c */
+            ngb_karma_window_refresh();
+        }
+    }
+    if (!on && shown) {
+        for (uint32_t i = 0; i < sizeof battle; i++)
+            battle[i] = MEM8(0x8DB6D8 + i);
+        recent = frame - changed_at < 600;
+    }
+    if (on && !MEM8(0xDB9AD5))
+        shown = 1;
+    else if (!on)
+        shown = 0;
+    if (on) {
         eax = MEM16(0x58A56C);
         ecx = MEM16(0x58A56E);
         edx = MEM16(0x58A564);
