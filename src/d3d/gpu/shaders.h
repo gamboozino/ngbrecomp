@@ -33,7 +33,7 @@ struct PixelKey {
     // fixed function stages: colorop, arg1, arg2, arg0, alphaop, arg1, arg2, arg0, result
     uint32_t ff[4][9] = {};
     TexInfo tex[4];
-    uint32_t alphakill = 0;  // bit per stage
+    uint32_t alphakill = 0;  // bit per stage; bits 4-7: the stage's 2D read left out past 0..1 (the heat haze, #55)
     uint32_t flat = 0, two_sided = 0;
     uint32_t proj = 0;       // fixed function: bit per stage sampled at coordinates divided by w
     // a screen quad (QuadHlsl); a point sprite, stage 3 at the point's own coordinates after the stages before it

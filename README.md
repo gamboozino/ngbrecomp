@@ -347,7 +347,8 @@ Code:
 
 - [akirahayabusa](https://github.com/akirahayabusa): the freeze in scenes with the sun (#40), folders
   with non-ASCII names on Windows (#41), the Difficulty Selection highlight (#42); and the Hurricane
-  patch (vb-zh x2.1), whose Intercept switch showed where Black had left the mechanic out (#109, #132)
+  patch (vb-zh x2.1), whose Intercept switch showed where Black had left the mechanic out (#109, #132);
+  his native port (ngb-pc-native-port) showed where the heat haze reads past its picture (#55)
 - [ManemanFTW](https://github.com/ManemanFTW) (Manuel Flores): the Windows start-up hang (#9) and the
   audio crackling on Windows (#34)
 - [HammerD72](https://github.com/HammerD72): the audio timing fix (#32); the two spots where the game

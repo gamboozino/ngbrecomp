@@ -2862,6 +2862,24 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     if (noshadow && (info[0].shadow || info[1].shadow || info[2].shadow || info[3].shadow)) return;
     PixelKey pk = MakePixelKey(s, info);
     pk.quad = quad;
+    // The heat haze over lava -- fixed-function sprites blended by their alpha, reading a 512x256 copy of the
+    // screen on stage 0 at projected coordinates, clamped -- reads a little past the copy's right edge; clamped there,
+    // the last column ran down the right of the screen as a streaky band, the console's too (#55). Near the copy's
+    // edges the haze's move toward the edge fades out (the shader, TexFetch's caller): it is drawn up to the edge,
+    // less moved, and never reads past the picture (left out there instead, as akirahayabusa's ngb-pc-native-port
+    // does, the strip had no haze; mirrored, it showed the picture's mirror). The draws are found as his are:
+    // fixed-function stages reading a colour target at projected, clamped coordinates. NGB_D3D_HAZE_CLAMP=1: as the
+    // console.
+    static const bool haze_clamp = std::getenv("NGB_D3D_HAZE_CLAMP") != nullptr;
+    if (!haze_clamp && !pk.programmable && SimpleState(s, kMBlendEnable) && SimpleState(s, kMSrcBlend) == 0x302 &&
+        SimpleState(s, kMDestBlend) == 0x303)
+        for (int i = 0; i < 4; i++)
+            if (from_target[i] && !info[i].shadow && info[i].kind == kTex2D && ((pk.proj >> i) & 1) &&
+                s.tss[size_t(i)][kTssAddressU] == 3 && s.tss[size_t(i)][kTssAddressV] == 3) {
+                pk.alphakill |= 1u << (4 + i);
+                static bool told;
+                if (!told) { told = true; std::fprintf(stderr, "[D3D] heat haze: its move faded out at the picture's edges\n"); }
+            }
     if (sprite && !pk.programmable) {   // stage 3 alone, whatever the stages before it hold (PixelHlsl)
         const auto& t = s.tss[3];
         uint32_t v[9] = {t[kTssColorOp], t[kTssColorArg1], t[kTssColorArg2], t[kTssColorArg0], t[kTssAlphaOp],
