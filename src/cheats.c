@@ -897,8 +897,9 @@ static void scarab_tick(void)
  *
  * All Armlets and All Technique Scrolls are the same for the armlets and bands (class 4 in their records) and
  * the technique scrolls (category 11: the moves go by the scroll in the bag); each list goes by its own cheat
- * (group: 6 + it). A scroll the cheat holds would make the game refuse the story's own ("can only carry one",
- * #167): scrolls_carry lets two be carried meanwhile, and the story's goes in as the player's (scroll_given).
+ * (group: 6 + it). A scroll or armlet the cheat holds would make the game refuse the story's own ("can only
+ * carry one": the scroll from chapter 2's bridge boss, #167; the Armlet of Celerity in chapter 10, #212):
+ * scrolls_carry lets two be carried meanwhile, and the story's goes in as the player's (scroll_given).
  * The game gives them through sub_00154300 like any
  * pickup (its script's give, sub_002D4590, checks nothing held first), so one found with the cheat on is the
  * player's and stays. A worn armlet taken back is taken off too (+4 of the player's block, 0xFFFF none). The
@@ -1067,20 +1068,44 @@ static void weapons_restore(void)
     }
 }
 
-/* A technique scroll All Scrolls gave in an earlier session, kept by a save made while it was on: its slot still
- * carries that session's mark (any mark but this record's), and the player never had it otherwise -- before
- * scrolls_carry, the story's own was refused while it was held ("can only carry one", #167, the bridge boss of
- * chapter 2), and the game waits on that pickup. Taken back (the cheat, if on, gives its own again). Weapons and
- * armlets a save kept stay: nothing the story gives waits on them. */
+/* A technique scroll or armlet All Scrolls / All Armlets gave in an earlier session, kept by a save made while it
+ * was on: its slot still carries that session's mark (any mark but this record's). Only where the game waits on
+ * the story's own, which a held one made it refuse ("can only carry one"): every technique scroll (the bridge boss
+ * of chapter 2, #167) and the Armlet of Celerity, whose pedestal is the switch out of the wall-run room in chapter
+ * 10 (#212). With its cheat on it is this session's now (marked again, the player's own state "none", so turning
+ * the cheat off takes it; a worn one stays on); with the cheat off it is taken back, off Ryu's arm if he wears it.
+ * Other armlets and the weapons a save kept stay the player's, as the cheat says: nothing the story gives waits on
+ * them, and one the story gave under an older build with the cheat on would carry the mark too. A mark
+ * left in a slot the game emptied is cleared, so an item the game puts there later is not taken for the cheat's. */
 static void scrolls_left_over(void)
 {
+    for (uint32_t a = 0x5891D0; a < 0x5891D0 + 4 * 0x80; a += 4)
+        if ((!MEM8(a + 2) || MEM16(a) == 0xFFFF) && MEM8(a + 3)) {
+            MEM8(a + 3) = 0;
+            cheat_wrote();
+        }
     for (size_t i = 0; i < N_WEAPONS; i++) {
-        if (s_weapons[i].group != 2)
+        if (!s_weapons[i].group)
             continue;
         uint32_t slot = inventory_slot(s_weapons[i].item);
         uint8_t mark = slot ? MEM8(slot + 3) : 0;
         if (!slot || !(mark & 0x80) || (s_had[i].wrote && mark == s_mark))
             continue;
+        if (s_weapons[i].group == 1 && s_weapons[i].item != 0x166)
+            continue;                                  /* (left as it was: the player's, cheat on or off) */
+        if (s_cheat[6 + s_weapons[i].group]) {
+            if (!s_had[i].seen) {
+                s_had[i].seen = 1;
+                s_had[i].item = 0xFFFF;
+                s_had[i].count = 0;
+            }
+            weapons_mark(i, slot);
+            weapons_log("left over from an earlier session, this session's now", MEM16(slot), MEM8(slot + 2));
+            continue;
+        }
+        uint32_t worn = 0x58A570 + MEM8(0x4B7640) * 0x210u + 4;
+        if (s_weapons[i].group == 1 && MEM16(worn) == MEM16(slot))
+            MEM16(worn) = 0xFFFF;
         weapons_log("left over from an earlier session, taken back", MEM16(slot), MEM8(slot + 2));
         MEM8(slot + 2) = 0;
         MEM8(slot + 3) = 0;
@@ -1089,14 +1114,15 @@ static void scrolls_left_over(void)
     }
 }
 
-/* A technique scroll the game itself gives (a pickup, a chest, the story) into a slot the cheat had marked: the
- * player's now, one again, the mark gone -- so neither turning the cheat off nor scrolls_left_over takes it */
+/* A technique scroll or armlet the game itself gives (a pickup, a chest, the story) into a slot the cheat had
+ * marked: the player's now, one again, the mark gone -- so neither turning the cheat off nor scrolls_left_over
+ * takes it */
 static void scroll_given(uint16_t item, int change)
 {
     if (change <= 0)
         return;
     for (size_t i = 0; i < N_WEAPONS; i++)
-        if (s_weapons[i].group == 2 && s_weapons[i].item == item) {
+        if (s_weapons[i].group && s_weapons[i].item == item) {
             uint32_t slot = inventory_slot(item);
             if (slot && MEM8(slot + 3)) {
                 MEM8(slot + 3) = 0;
@@ -1107,13 +1133,13 @@ static void scroll_given(uint16_t item, int change)
         }
 }
 
-/* While All Scrolls' own copy of a scroll is in the bag, its record says two can be carried (+0x24), so the game
- * takes the story's scroll instead of refusing it; back to the game's own limit otherwise. */
+/* While All Scrolls' or All Armlets' own copy of a scroll or armlet is in the bag, its record says two can be
+ * carried (+0x24), so the game takes the story's instead of refusing it; back to the game's own limit otherwise. */
 static void scrolls_carry(void)
 {
     static uint8_t own[N_WEAPONS];   /* the game's limit, as first seen */
     for (size_t i = 0; i < N_WEAPONS; i++) {
-        if (s_weapons[i].group != 2)
+        if (!s_weapons[i].group)
             continue;
         uint32_t r = item_record(s_weapons[i].item), slot = inventory_slot(s_weapons[i].item);
         if (!r)
@@ -1148,15 +1174,16 @@ static void weapons_tick(void)
     }
     if (MEM8(0xDB9AD5))                                /* under the pause menu: its lists stay true */
         return;
+    if (!seen && (s_cheat[6] || s_cheat[7] || s_cheat[8])) {   /* a new record, a new mark (before
+                                                                  * scrolls_left_over adopts with it) */
+        static unsigned n;
+        s_mark = (uint8_t)(0x80 | ((unsigned)time(NULL) + 37u * ++n) % 0x7F);
+    }
     weapons_restore();
     scrolls_left_over();
     scrolls_carry();
     if (!s_cheat[6] && !s_cheat[7] && !s_cheat[8])
         return;
-    if (!seen) {                                       /* a new record, a new mark */
-        static unsigned n;
-        s_mark = (uint8_t)(0x80 | ((unsigned)time(NULL) + 37u * ++n) % 0x7F);
-    }
     for (size_t i = 0; i < N_WEAPONS; i++) {
         uint16_t item = s_weapons[i].item;
         uint32_t slot = family_slot(i);
