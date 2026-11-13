@@ -457,6 +457,7 @@ private:
     struct HudElem { float x0, x1, y0, y1, ax, ay; uint32_t seen; bool gauge; };
     std::vector<HudBox> hud_boxes_;
     std::vector<HudBox> hud_gauge_boxes_;   // the frame before's pieces of tall side gauges (hud_gauge_piece)
+    std::vector<HudBox> hud_picture_boxes_;   // the frame before's pictures about the middle (hud_picture)
     std::vector<HudElem> hud_elems_, hud_memory_;   // the frame before's; and those of the last half minute
     // the frame's last 3D draw into the back buffer (its number): the HUD is drawn after it, what is drawn in
     // screen space before it is the 3D's (mist, spray) -- not grouped as the HUD (a draw cannot know it as it
@@ -4026,7 +4027,16 @@ static void hud_side(float x0, float x1, float y0, float y1, float w, float h, f
     float cx = (x0 + x1) / 2;
     ax = std::fabs(cx - w / 2) < w * 0.12f ? w / 2 : cx < w / 2 ? 0.0f : w;
     bool top = y0 < h * 0.25f, bottom = y1 > h * 0.75f;
+    // along the top, by the edge it starts from: the health bar grown long (its middle near the screen's, #219)
+    // still the left's -- near one edge, much farther from the other (what is about the middle is as far from both)
+    float gl = std::max(x0, 0.0f), gr = std::max(w - x1, 0.0f);   // (what reaches past both sides: about the middle)
+    if (ax == w / 2 && top && !bottom) ax = gl < w * 0.15f && gl * 2 < gr ? 0.0f : gr < w * 0.15f && gr * 2 < gl ? w : ax;
     ay = top && !bottom ? 0.0f : bottom && !top ? h : h / 2;
+}
+
+// A picture over play (HudPlace): not a tall gauge, taller than 30% of the height
+static bool hud_picture(float x0, float x1, float y0, float y1, float w, float h) {
+    return y1 - y0 > h * 0.3f && x1 - x0 >= w * 0.1f;
 }
 
 // A tall gauge at a side (the breath bar under water), or a piece in its column (its caps, its fill however
@@ -4051,6 +4061,20 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
         ay = h / 2;
         return;
     }
+    // a picture over play, taller than the HUD's pieces (the karma window's, the tallest, 134): the Talisman of
+    // Rebirth's, about the middle and breaking to the corners (#219) -- as drawn, never an element's
+    if (hud_picture(x0, x1, y0, y1, w, h)) {
+        ax = w / 2;
+        ay = h / 2;
+        return;
+    }
+    // and what is on such a picture about the middle (a window's words) with it
+    for (const HudBox& p : hud_picture_boxes_)
+        if (cx >= p.x0 && cx <= p.x1 && cy >= p.y0 && cy <= p.y1) {
+            ax = w / 2;
+            ay = h / 2;
+            return;
+        }
     // what is inside a panel screen's panel (its labels and figures, wherever in it) about the middle with it;
     // the HUD around it (the health bar, karma, prompts) where it is
     if (hud_panel_ && cx >= hud_panel_box_.x0 - 8 && cx <= hud_panel_box_.x1 + 8 && cy >= hud_panel_box_.y0 - 8 &&
@@ -4132,6 +4156,11 @@ void VulkanBackend::HudGroup(float w, float h) {
                 gauge[i] = 1;
         }
     hud_gauge_boxes_.clear();
+    hud_picture_boxes_.clear();
+    for (const HudBox& b : hud_boxes_)
+        if (hud_picture(b.x0, b.x1, b.y0, b.y1, w, h) && std::fabs((b.x0 + b.x1) / 2 - w / 2) < w * 0.12f &&
+            hud_picture_boxes_.size() < 16)
+            hud_picture_boxes_.push_back(b);
     for (size_t i = 0; i < n; i++)
         if (gauge[i]) hud_gauge_boxes_.push_back(hud_boxes_[i]);
     for (size_t i = 0; i < n; i++)
@@ -4140,7 +4169,13 @@ void VulkanBackend::HudGroup(float w, float h) {
             // a line of text's words (letters of one height, side by side) together across a space of up to
             // 0.6 letter heights (an item's name, "Great Spirit Elixir", was split in two at a 10-pixel gap)
             float g = std::fabs(a.y0 - b.y0) <= 2 && std::fabs(a.y1 - b.y1) <= 2 ? std::max(gx, (a.y1 - a.y0) * 0.6f) : gx;
-            if (gauge[i] == gauge[j] && a.x0 - g <= b.x1 && b.x0 - g <= a.x1 && a.y0 - gy <= b.y1 &&
+            // what starts in the upper 40% of the height (the health bar, the karma window -- its picture reaching
+            // far below its words) never with what starts lower (an area's name, #219: the HUD went about the middle
+            // with it); one line, so nothing between joins them either
+            // and a picture (HudPlace) only with pictures: never with the HUD, though a panel's pieces together
+            bool apart = (a.y0 < h * 0.4f) != (b.y0 < h * 0.4f) ||
+                         hud_picture(a.x0, a.x1, a.y0, a.y1, w, h) != hud_picture(b.x0, b.x1, b.y0, b.y1, w, h);
+            if (gauge[i] == gauge[j] && !apart && a.x0 - g <= b.x1 && b.x0 - g <= a.x1 && a.y0 - gy <= b.y1 &&
                 b.y0 - gy <= a.y1)
                 up[size_t(root(int(i)))] = root(int(j));
         }
