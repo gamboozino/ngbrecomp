@@ -479,6 +479,7 @@ private:
     int hud_panel_count_ = 0;
     HudBox hud_panel_box_{}, hud_panel_seen_{};   // the panel's box (the union of the frames it was seen in)
     void HudPlace(float x0, float x1, float y0, float y1, float w, float h, float& ax, float& ay);
+    bool hud_known_ = false;   // HudPlace's last piece: part of an element of the frames before (the HUD's)
     void HudGroup(float w, float h);
     int gauges_now_ = 0;
     uint32_t offscreen3d_ = 0;   // this frame's 3D draws into smaller targets (shadows, reflections, effects)
@@ -3361,6 +3362,12 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     }
                 }
             }
+            // HUD Style Compact (#121): in play only -- the frame's 3D drawn, not a menu -- and only the HUD's pieces: a
+            // piece of an element of the frames before (HudPlace: the 3D's screen-space pieces, mist and spray, are never
+            // grouped), or a new one after the frame before's last 3D draw (draw counts change frame to frame, so the
+            // known elements do not go by the count, or the health bar went big and small)
+            const bool compact = ngb_pc_setting(41) && threed_ >= 30;
+            auto hud_piece = [&] { return hud_known_ || (last3d_prev_ && st_.drawn >= last3d_prev_); };
             if (pk_.stretched) {
                 // The game's 2D in its widescreen mode, the console's 16:9 look, kept 16:9: on a wider screen
                 // (21:9) narrowed to the middle 16:9 (kx), on a narrower one (16:10) shortened to it (ky);
@@ -3374,6 +3381,9 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 if (!ScreenFrame(threed_) && (rt_tex || (x1 - x0 >= w * 0.85f && y1 - y0 >= h * 0.75f))) spans = true;
                 static int centred = -1;
                 if (centred < 0) centred = std::getenv("NGB_HUD_CENTER") != nullptr;
+                // HUD Style Compact: in play the elements kept to a side or a corner drawn smaller toward it, so nearer
+                // the screen's edges; those about the middle across (subtitles, a message box) as they are
+                const float small = compact ? 0.8f : 1.0f;
                 if (n && ky < 0.999f && !paused && !spans) {
                     float ax = w / 2, ay = h / 2;
                     if (!ScreenFrame(threed_) && !centred) {
@@ -3381,9 +3391,10 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         if (x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
                     }
-                    c.ext[0] = 1;
-                    c.ext[1] = w / 2;
-                    c.ext[2] = ky;
+                    bool cornered = !ScreenFrame(threed_) && !centred && ax != w / 2 && hud_piece();
+                    c.ext[0] = cornered && small < 1 ? small : 1;
+                    c.ext[1] = cornered && small < 1 ? ax : w / 2;
+                    c.ext[2] = ky * (cornered ? small : 1);
                     c.ext[3] = ay;
                     if (ax == w / 2 && ay == h / 2) {
                         hud_clipy0 = h / 2 * (1 - ky);
@@ -3398,12 +3409,29 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         float ax = w / 2, ay = h / 2;
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                         c.ext[1] = ax;
+                        if (small < 1 && ax != w / 2 && hud_piece()) {
+                            c.ext[0] = km * small;
+                            c.ext[2] = small;
+                            c.ext[3] = ay;
+                        }
                         if (x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
                     }
                     if (c.ext[1] == w / 2) {   // (a corner's piece is on the screen as narrowed: not clipped)
                         hud_clip0 = w / 2 * (1 - km);
                         hud_clip1 = w / 2 * (1 + km);
+                    }
+                } else if (n && small < 1 && !paused && !spans && !centred && !ScreenFrame(threed_)) {
+                    // 16:9: nothing to narrow, the HUD's elements only smaller toward their sides
+                    float ax = w / 2, ay = h / 2;
+                    HudPlace(x0, x1, y0, y1, w, h, ax, ay);
+                    if (x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                        hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
+                    if (ax != w / 2 && hud_piece()) {
+                        c.ext[0] = small;
+                        c.ext[1] = ax;
+                        c.ext[2] = small;
+                        c.ext[3] = ay;
                     }
                 }
             } else if (n && k < 0.999f && !paused &&
@@ -3435,6 +3463,27 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         gauge = true;
                 c.ext[1] = y1 < h * 0.3f ? (x0 < w * 0.7f ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
+                // HUD Style Compact (#121): what keeps to a side smaller toward it, and toward the top along the top
+                if (compact && c.ext[1] != w / 2) {
+                    c.ext[0] = k * 0.8f;
+                    c.ext[2] = 0.8f;
+                    c.ext[3] = y1 < h * 0.3f ? 0.0f : h / 2;
+                }
+            } else if (n && compact && !rt_tex && !paused && !ScreenFrame(threed_) && x1 - x0 < w * 0.89f &&
+                       x1 > 0 && x0 < w) {
+                // HUD Style Compact (#121) on the game's own 4:3 screen, nothing narrowed: the HUD's elements (as
+                // HudPlace groups them, the karma window whole) kept to a side or a corner smaller toward it; those
+                // about the middle (words, subtitles) as drawn
+                float ax = w / 2, ay = h / 2;
+                HudPlace(x0, x1, y0, y1, w, h, ax, ay);
+                if (y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                    hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
+                if (ax != w / 2 && hud_piece()) {
+                    c.ext[0] = 0.8f;
+                    c.ext[1] = ax;
+                    c.ext[2] = 0.8f;
+                    c.ext[3] = ay;
+                }
             }
         }
     }
@@ -3984,6 +4033,7 @@ static bool hud_gauge_piece(float x0, float x1, float y0, float y1, float w, flo
 // its middle); a piece new this frame, along the top by its own box (the health bar as it appears), else
 // about the middle until the next frame groups it.
 void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, float h, float& ax, float& ay) {
+    hud_known_ = false;
     // a screen of panels drawn over the game (a chapter's clear, an item's picture) whole, about the middle, as
     // a 2D screen
     float cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, best = 1e30f;
@@ -4033,6 +4083,7 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
     if (hit) {
         ax = hit->ax;
         ay = hit->ay;
+        hud_known_ = true;
         return;
     }
     hud_side(x0, x1, y0, y1, w, h, ax, ay);

@@ -66,6 +66,7 @@ enum { ROW_SCREEN, ROW_MOVIE, ROW_PC, ROW_DEFAULT, ROW_EXIT,
        ROW_GLOW, ROW_QUICKFREEZE, ROW_QUICKSCALE, ROW_INFITEMS, ROW_INFAMMO, ROW_POSAUDIO, ROW_HUD, ROW_AUDIOOUT,
        ROW_MISSIONS, ROW_ARCADE, ROW_MOVIES, ROW_UNLOCKS, ROW_LOADDETAIL, ROW_RTHREAD, ROW_INTERCEPT,
        ROW_ALLWEAP, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_ALLARM, ROW_ALLSCROLL, ROW_ONEHIT,
+       ROW_HUDSTYLE,
 };
 
 static int is_ours(int page) { return page >= PAGE_GFX && page < PAGE_GFX + N_OURS; }
@@ -78,7 +79,7 @@ static const uint8_t s_rows_ws[] = { ROW_SCREEN, ROW_MOVIE, ROW_DEFAULT, ROW_EXI
 static const uint8_t s_rows_std[] = { ROW_SCREEN, ROW_EXIT };
 static const uint8_t s_rows_gfx[] = { ROW_RENDER, ROW_TEXTURE, ROW_MSAA, ROW_SHADOW, ROW_GLOW, ROW_LOADDETAIL,
                                       ROW_RTHREAD, ROW_BACK };
-static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_SKIP,
+static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_SKIP,
                                        ROW_BACK };
 static const uint8_t s_rows_sound[] = { ROW_POSAUDIO, ROW_AUDIOOUT, ROW_BACK };
 static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_INTERCEPT, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_BACK };
@@ -117,6 +118,10 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_POSMIX   0x201FB            /* Positional Audio's Mixed (#126) */
 #define T_HUD      0x201CB            /* the HUD on or off (src/hud.c, #80) */
 #define D_HUD      0x201CC
+#define T_HUDSTYLE 0x201FC            /* HUD Style (src/d3d/vk/backend.cpp, #121) and its values */
+#define D_HUDSTYLE 0x201FD
+#define T_ORIGINAL 0x201FE
+#define T_COMPACT  0x201FF
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -224,6 +229,10 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_POSPAN, "Clear" },
     { T_POSMIX, "Mixed" },
     { T_HUD, "HUD" },
+    { T_HUDSTYLE, "HUD Style" },
+    { D_HUDSTYLE, "Compact: the health bar, weapon and karma window smaller and nearer the screen's corners." },
+    { T_ORIGINAL, "Original" },
+    { T_COMPACT, "Compact" },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
     { D_AUDIOOUT, "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game." },
@@ -408,7 +417,7 @@ static uint32_t make_labels(const uint8_t *kinds, int n)
                                    T_GLOW, T_QUICKFREEZE, T_QUICKSCALE, T_INFITEMS, T_INFAMMO, T_POSAUDIO, T_HUD,
                                    T_AUDIOOUT, T_MISSIONS, T_ARCADE, T_MOVIES, T_UNLOCKS, T_LOADDETAIL, T_RTHREAD,
                                    T_INTERCEPT, T_ALLWEAP, T_ESSCHARGE, T_CUTSKIP, T_RESPONSIVE, T_ALLARM,
-                                   T_ALLSCROLL, T_ONEHIT };
+                                   T_ALLSCROLL, T_ONEHIT, T_HUDSTYLE };
     uint32_t va = xbox_HeapAlloc(4 * n, 4);
     for (int i = 0; i < n; i++)
         MEM32(va + 4 * i) = id[kinds[i]];
@@ -812,6 +821,7 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
     case ROW_POSAUDIO: return ngb_pc_setting(23) == 3 ? T_POSMIX : ngb_pc_setting(23) == 2 ? T_POSPAN
                             : ngb_pc_setting(23) ? T_POSCONSOLE : T_OFF;
     case ROW_HUD:     return ngb_pc_setting(24) ? T_ON : T_OFF;
+    case ROW_HUDSTYLE: return ngb_pc_setting(41) ? T_COMPACT : T_ORIGINAL;
     case ROW_AUDIOOUT: return ngb_pc_setting(25) == 2 ? T_SURROUND : ngb_pc_setting(25) ? T_STEREO : T_AUTO;
     case ROW_QUICKSCALE: {
         int v = ngb_pc_setting(20);
@@ -881,6 +891,7 @@ static int pc_value_change(int row, int delta)
     case ROW_QUICKFREEZE: ngb_pc_set_setting(19, !ngb_pc_setting(19)); break;
     case ROW_POSAUDIO: ngb_pc_set_setting(23, ngb_positional_step(ngb_pc_setting(23), step)); break;
     case ROW_HUD: ngb_pc_set_setting(24, !ngb_pc_setting(24)); break;
+    case ROW_HUDSTYLE: ngb_pc_set_setting(41, !ngb_pc_setting(41)); break;
     case ROW_AUDIOOUT: ngb_pc_set_setting(25, (ngb_pc_setting(25) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_QUICKSCALE: ngb_pc_set_setting(20, ngb_quick_scale_step(ngb_pc_setting(20), step)); break;
     case ROW_RENDER: {
@@ -2062,7 +2073,7 @@ void sub_00220870(void)
                                            D_LOADDETAIL & 0xFFFF, D_RTHREAD & 0xFFFF, D_INTERCEPT & 0xFFFF,
                                            D_ALLWEAP & 0xFFFF, D_ESSCHARGE & 0xFFFF, D_CUTSKIP & 0xFFFF,
                                            D_RESPONSIVE & 0xFFFF, D_ALLARM & 0xFFFF, D_ALLSCROLL & 0xFFFF,
-                                           D_ONEHIT & 0xFFFF };
+                                           D_ONEHIT & 0xFFFF, D_HUDSTYLE & 0xFFFF };
     RECOMP_ENTRY(0x00220870u);
     uint32_t out = ecx;
     uint32_t level = MEM16(0x8DE430), tab = MEM16(0x8DE4CC), row = MEM16(0x8DE468);

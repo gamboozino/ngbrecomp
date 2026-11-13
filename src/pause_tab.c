@@ -81,6 +81,7 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_MISSIONS, S_ARCADE, S_MOVIES, S_LOADDETAIL, S_RTHREAD, S_INTERCEPT, S_ALLWEAP,
        S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
+       S_HUDSTYLE,
        S_COUNT };
 
 static const char *const s_label[S_COUNT] = {
@@ -93,7 +94,7 @@ static const char *const s_label[S_COUNT] = {
     "Audio Output", "Missions", "Arcade Ninja Gaiden", "Movie Theater", "Lower Detail Under Load",
     "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
     "Responsive Menus", "All Armlets", "All Scrolls",
-    "One Hit Kill", "Unlocks",
+    "One Hit Kill", "Unlocks", "HUD Style",
 };
 static const char *const s_help[S_COUNT] = {
     "Draws the game at a multiple of the console's resolution.",
@@ -137,6 +138,7 @@ static const char *const s_help[S_COUNT] = {
     "The Izuna Drop, Counter Attack and Guillotine Throw scrolls. Turned off, they are taken back.",
     "Any hit that hurts an enemy or a boss kills it. For this session only.",
     "Difficulties, costumes and the main menu's extras (saved); weapons, armlets and scrolls (this session).",
+    "Compact: the health bar, weapon and karma window smaller and nearer the screen's corners.",
 };
 
 /* The categories: the strip's words, their rows. */
@@ -149,7 +151,7 @@ static const char *const s_help[S_COUNT] = {
 static const char *const s_cat_name[CATS] = { "Graphics", "Display", "Sound", "Gameplay", "Cheats", "Controls" };
 static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, -1 },   /* -1 ends a page shorter than CAT_ROWS */
-    { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_SKIP, -1 },
+    { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_SKIP, -1 },
     { S_POSAUDIO, S_AUDIOOUT, -1 },
     { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, -1 },
     { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
@@ -229,6 +231,7 @@ static void value_text(int row, char *out, size_t n)
     case S_POSAUDIO: snprintf(out, n, "%s", v == 3 ? "Mixed" : v == 2 ? "Clear" : v ? "Console" : "Off"); break;
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
     case S_INTERCEPT: snprintf(out, n, "%s", v == 2 ? "Hurricane" : v ? "Black" : "Off"); break;
+    case S_HUDSTYLE: snprintf(out, n, "%s", v ? "Compact" : "Original"); break;
     case S_UNLOCKS: snprintf(out, n, "%s", ""); break;
     case S_SKIP:
     case S_ALLDIFF:

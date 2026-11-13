@@ -28,6 +28,7 @@ typedef struct NgbSettings {
     int movie_43;           /* the game's Movie Display Ratio 4:3 (kept here: src/pc_menu.c) */
     int positional_audio;   /* 3D sounds placed left and right (#30): 0 off, 1 the HRTF filters, 2 panning only (#86), 3 both mixed (#126) */
     int show_hud;           /* the in-play HUD (src/hud.c, #80) */
+    int hud_style;          /* Display > HUD Style: 0 as the game draws it, 1 Compact (src/d3d/vk/backend.cpp, #121) */
     int audio_output;       /* 0 auto (5.1 on a 5.1 or 7.1 device), 1 stereo, 2 5.1 (src/audio/dsound_hle.cpp) */
     int smooth_glow;        /* the glow's continuous filtering (src/d3d/vk/glow_filter.h, #64) */
     int detail_under_load;  /* the game's own detail lowering when the GPU looks busy (src/d3d/d3d.c, #50, #114) */
