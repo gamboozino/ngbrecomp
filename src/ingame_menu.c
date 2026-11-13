@@ -459,17 +459,13 @@ void ngb_pause_resume(void)
     pulse_push(XBOX_GAMEPAD_START);
 }
 
-/* The karma window off and on again, as its button twice does (#214): src/hud.c, when the HUD comes back on in
- * play. The window kept what it had on screen when the HUD went off in the middle of the tally after a fight
- * (the HUD's drawing, skipped while off, is also what runs that tally); the game's own toggle starts it over. */
-void ngb_karma_window_refresh(void)
+/* The karma window's button pressed once (src/hud.c, #214: off as the HUD goes off, on as it comes back) */
+void ngb_karma_window_press(void)
 {
     extern int ngb_game_button_for(int action);   /* src/bindings.c */
     int b = ngb_game_button_for(10);                /* Karma Window */
-    if (b < 0)
-        return;
-    pulse_push(0x100 | (1u << b));
-    pulse_push(0x100 | (1u << b));
+    if (b >= 0)
+        pulse_push(0x100 | (1u << b));
 }
 
 /* Exit to Desktop: as closing the window does. */

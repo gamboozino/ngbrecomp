@@ -37,39 +37,30 @@ void sub_001FA210(void)
         esp += 4;
         return;
     }
-    /* Back on in play (not under the pause menu, which would take the presses) after a fight it missed -- the
-     * battle's counts (karma, combo, kills, time: 0x8DB6D8 on) changed while it was off, or in the ten seconds
-     * before it went off (hidden as the fight ended, in the tally): the karma window turned off and on again, as
-     * its button does, so what it had on screen from that tally goes (#214). Off and on outside a fight, the
-     * window is left alone. The setting is read once: the Toggle HUD key changes it from another thread. */
+    /* The karma window turned off as the HUD goes off and on again as it comes back, by its button, as the player
+     * would (#214): skipped while the HUD is off, the window's tally after a fight froze, and its Combo, Kill and
+     * Time stayed on screen once the HUD was back; turned on again, it starts over. Pressed only as needed, by the
+     * window's own state (0x8DB6DC, its state machine sub_00207760: 0 hidden, 1 sliding in, 7 sliding out -- its
+     * place, 0x8DB6D8, reads 0xFF06 both hidden and as it starts in): off only if it shows, on again
+     * only if it showed and is hidden -- a press the game missed (two at once, the game took the first only; one
+     * as the pause menu closes, a button still held) leaves it as it is rather than the other way round. In play
+     * only, not under the pause menu (which would take the press): a change made there is pressed when play goes
+     * on. The setting is read once: the Toggle HUD key changes it from another thread. */
     int on = ngb_pc_setting(24);
-    static int shown = 1, recent;
-    static unsigned frame, changed_at;
-    static uint8_t battle[0x68], last[0x68];
-    frame++;
-    for (uint32_t i = 0; i < sizeof last; i++)
-        if (last[i] != MEM8(0x8DB6D8 + i)) {
-            last[i] = MEM8(0x8DB6D8 + i);
-            changed_at = frame;
-        }
-    if (on && !shown && !MEM8(0xDB9AD5)) {
-        int changed = recent;
-        for (uint32_t i = 0; i < sizeof battle && !changed; i++)
-            changed = battle[i] != MEM8(0x8DB6D8 + i);
-        if (changed) {
-            extern void ngb_karma_window_refresh(void);   /* src/ingame_menu.c */
-            ngb_karma_window_refresh();
+    static int hidden_for = -1;   /* the HUD off: whether the window showed then (-1: the HUD is on) */
+    if (!MEM8(0xDB9AD5)) {
+        extern void ngb_karma_window_press(void);   /* src/ingame_menu.c */
+        int shows = MEM16(0x8DB6DC) != 0 && MEM16(0x8DB6DC) != 7;
+        if (!on && hidden_for < 0) {
+            hidden_for = shows;
+            if (shows)
+                ngb_karma_window_press();
+        } else if (on && hidden_for >= 0) {
+            if (hidden_for && !shows)
+                ngb_karma_window_press();
+            hidden_for = -1;
         }
     }
-    if (!on && shown) {
-        for (uint32_t i = 0; i < sizeof battle; i++)
-            battle[i] = MEM8(0x8DB6D8 + i);
-        recent = frame - changed_at < 600;
-    }
-    if (on && !MEM8(0xDB9AD5))
-        shown = 1;
-    else if (!on)
-        shown = 0;
     if (on) {
         eax = MEM16(0x58A56C);
         ecx = MEM16(0x58A56E);
