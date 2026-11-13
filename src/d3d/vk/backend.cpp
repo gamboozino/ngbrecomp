@@ -235,6 +235,7 @@ extern "C" int ngb_pc_setting(int which);
 extern "C" int nv2a_dirty_stamp(const void* host, size_t len, uint64_t* stamp);   // xboxrecomp nv2a_dirty.c
 extern "C" float ngb_hud_shape(void);   // src/pc_menu.c: the menus' and HUD's narrowing
 extern "C" int ngb_2d_stretched(void);
+static bool hud_picture(float x0, float x1, float y0, float y1, float w, float h);   // (below, HudPlace)
 extern "C" [[noreturn]] void ngb_renderer_fatal(const char* detail);  // src/ingame_menu.c  // src/pc_menu.c: the game in its widescreen mode, its 2D as drawn
 extern "C" int ngb_2d_screen_flags(void);   // src/pc_menu.c: ngb_2d_screen_frame's parts, for gpu::Peek
 extern "C" int ngb_2d_screen_frame(int threed);   // src/pc_menu.c: a 2D screen (a menu, the title, a chapter
@@ -3471,13 +3472,19 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 for (int g = 0; g < 4 && !gauge; g++)
                     if (x1 - x0 < w * 0.1f && y0 > h * 0.25f && x1 > gauge_prev_[g][0] - 4 && x0 < gauge_prev_[g][1] + 4)
                         gauge = true;
+                // what starts along the top and reaches lower (#219: the explosive arrows' fire at the icon's tip,
+                // the hit counter's flash as a combo ends) to the corner its middle is nearer -- about the middle
+                // they were drawn away from what they belong to; a picture over play (hud_picture) as drawn
+                const bool reach = y1 >= h * 0.3f && y0 < h * 0.3f && !gauge && !hud_picture(x0, x1, y0, y1, w, h) &&
+                                   std::fabs((x0 + x1) / 2 - w / 2) >= w * 0.12f;   // (what is about the middle, there)
                 c.ext[1] = y1 < h * 0.3f ? (x0 < w * 0.7f ? 0.0f : w)
+                         : reach ? ((x0 + x1) / 2 < w / 2 ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
                 // HUD Style Compact (#121): what keeps to a side smaller toward it, and toward the top along the top
                 if (compact && c.ext[1] != w / 2) {
                     c.ext[0] = k * 0.8f;
                     c.ext[2] = 0.8f;
-                    c.ext[3] = y1 < h * 0.3f ? 0.0f : h / 2;
+                    c.ext[3] = y1 < h * 0.3f || reach ? 0.0f : h / 2;   // (what reaches lower with its corner: #219)
                 }
             } else if (n && compact && !rt_tex && !paused && !ScreenFrame(threed_) && x1 - x0 < w * 0.89f &&
                        x1 > 0 && x0 < w) {
