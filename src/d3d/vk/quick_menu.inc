@@ -127,7 +127,7 @@ void VulkanBackend::QuickMenu(Image& dst) {
     if (!pipe || !quick_sampler_) return;
     // Apply the background effect before the crisp menu. Waiting for an
     // action and Quick Menu Pause Off both bypass this pass entirely.
-    if (qk_.frozen) QuickMenuBackground(dst);
+    if (qk_.frozen && !quick_blurred_) QuickMenuBackground(dst);   // (blurred under the HUD already: Draw, #217)
     Barrier(quick_layer_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};

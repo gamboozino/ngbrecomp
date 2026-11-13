@@ -462,6 +462,9 @@ private:
     // screen space before it is the 3D's (mist, spray) -- not grouped as the HUD (a draw cannot know it as it
     // is made: how many 3D draws a frame has changes from frame to frame)
     uint32_t last3d_now_ = 0;
+    uint32_t last3d_prev_ = 0;   // the frame before's (the quick menu's blur under the HUD, #217)
+    bool quick_blurred_ = false; // this frame's picture blurred for the quick menu before its HUD
+    uint32_t fronts_[4] = {};    // the targets last presented (guest addresses: the game turns two or three in turn)
     float hud_box_cover_ = 0;
     // a menu over the paused game (the save statue's): the paused picture drawn this frame, and how much of
     // the screen the 2D drawn over it covers -- little, and the game shows across the screen instead of bars
@@ -3146,6 +3149,22 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             ngb_renderer_fatal("Could not create the glow softening pass.");
         views[0]=glow_soft_[1].view;
     }
+    // The quick menu with the game paused (Quick Menu Pause): the picture blurred and dimmed before the HUD is drawn
+    // over it -- at the first draw into the back buffer after the frame before's last 3D draw (the paused game draws
+    // the same frame each time) -- so the health, Ninpo, karma and the projectile's count stay sharp (#217). A frame
+    // that never gets there is blurred whole at the present, as before. NGB_QUICK_BLUR_ALL=1: always whole.
+    static const bool blur_all = std::getenv("NGB_QUICK_BLUR_ALL") != nullptr;
+    // (the menu still open now -- the frame after it closes is not blurred; and into the target presented)
+    if (!blur_all && qk_.frozen && !quick_blurred_ && rt && rt->gw >= 640 &&
+        (s.rt.data == fronts_[0] || s.rt.data == fronts_[1] || s.rt.data == fronts_[2] || s.rt.data == fronts_[3]) &&
+        last3d_prev_ && st_.drawn >= last3d_prev_ && ngb_quick_frozen()) {
+        EndRendering();
+        QuickMenuBackground(rt->img);
+        if (rt->samples > 1) rt->ms_stale = true;
+        quick_blurred_ = true;
+        static bool told;
+        if (!told) { told = true; std::fprintf(stderr, "[QUICK] background blurred before the HUD (draw %u)\n", st_.drawn); }
+    }
     st_.drawn++;
 
     // constants
@@ -4023,6 +4042,7 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
 // Each frame's end: this frame's HUD pieces into elements -- pieces within a few pixels of each other (the
 // letters of a word, a gauge, its caps and the words under it), together -- each with its side.
 void VulkanBackend::HudGroup(float w, float h) {
+    last3d_prev_ = last3d_now_;
     // only what was drawn after the 3D: the HUD (the 3D's screen-space pieces are not the HUD's)
     if (last3d_now_)
         hud_boxes_.erase(std::remove_if(hud_boxes_.begin(), hud_boxes_.end(),
@@ -4316,6 +4336,11 @@ void VulkanBackend::Present(const Surface& front) {
         }
     }
     if (show) QuickMenu(*show);
+    quick_blurred_ = false;
+    if (front.data != fronts_[0] && front.data != fronts_[1] && front.data != fronts_[2] && front.data != fronts_[3]) {
+        std::memmove(fronts_ + 1, fronts_, sizeof fronts_ - sizeof fronts_[0]);
+        fronts_[0] = front.data;
+    }
     if (!qk_.fps_px.empty()) {
         fps_pending_.swap(qk_.fps_px);
         fps_lettered_ = qk_.fps_lettered;
