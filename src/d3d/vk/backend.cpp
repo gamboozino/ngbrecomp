@@ -3004,7 +3004,13 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         }
         if (a.topology == Topology::Triangles && SimpleState(s, kMSolidOffsetEnable)) {
             k.zbias = int32_t(std::lround(Bits(SimpleState(s, kMDepthOffset)) * 16777215.0f / s.zscale));
-            k.zslope = Bits(SimpleState(s, kMSlopeScale));
+            // The slope part is in the console's pixels: depth changes per pixel as the triangle is drawn, at the
+            // render scale a fraction of what it is per console pixel, so the bias at it the same fraction -- the
+            // lava light laid over the cave walls (blended, depth test LEQUAL) fell back onto the walls above 1x and
+            // fought them in a flicker of specks (#213). At the target's scale, as the pull below.
+            const Target* zt = rt ? rt : ds;   // (a depth-only pass: its depth target's scale)
+            float zs = zt ? float(zt->img.w) / float(std::max<uint32_t>(zt->gw, 1)) : 1.0f;
+            k.zslope = Bits(SimpleState(s, kMSlopeScale)) * std::max(zs, 1.0f);
         }
         if (SectionPull() > 0 && a.topology == Topology::Triangles && k.zen && k.has_ds) {   // a pull of 0 turns it off
             // by the vertex buffer (its header in the towers' chunk), not the texture: every pass over the same mesh -- the
