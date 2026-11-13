@@ -2838,6 +2838,38 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     draw_rt_ = rt;
     for (int i = 0; i < 4; i++) views[i] = BindTexture(s, i, info[i], from_target[i]);
     draw_rt_ = nullptr;
+    // A picture drawn at the render scale shrunk into a target at a smaller one -- the glow's chain: its 256x128 at
+    // the render scale into its 128x128 at 1x -- was read once per pixel, a few texels of the many under it: above
+    // 1x bright spots came and went as the camera moved (#213). Such a read now averages the texels under the pixel
+    // (spreadtap: as many taps per axis as the one scale is to the other, at most 8), as the console's sizes would
+    // have it; akirahayabusa's ngb-pc-native-port averages its glow chain the same way. NGB_D3D_NO_WIDE=1: one read.
+    float wide[4][4] = {};
+    {
+        static const bool no_wide = std::getenv("NGB_D3D_NO_WIDE") != nullptr;
+        float dst = rt && rt->gw ? float(rt->img.w) / float(rt->gw) : 1.0f;
+        for (int i = 0; i < 4 && !no_wide; i++) {
+            TextureDesc d;
+            if (!from_target[i] || info[i].shadow || info[i].kind != kTex2D || !s.textures[size_t(i)] ||
+                !Describe(s.textures[size_t(i)], d))
+                continue;
+            auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1);
+            if (tit == targets_.end() || !tit->second.gw || &tit->second == rt)
+                continue;
+            const Target& src = tit->second;
+            float ratio = float(src.img.w) / float(src.gw) / dst;
+            if (ratio < 1.75f || !rt || src.gw <= rt->gw)
+                continue;   // (a shrink only: the glow drawn back over the screen, from its smaller target, is not)
+            float n = std::min(8.0f, std::round(ratio));
+            info[i].flags |= kTexWide;
+            wide[i][0] = 1.0f / float(src.img.w);
+            wide[i][1] = 1.0f / float(src.img.h);
+            wide[i][2] = n;
+            static int told;
+            if (told++ < 4)
+                std::fprintf(stderr, "[D3D] %ux%u at %.0fx read into %ux%u at %.0fx: %.0fx%.0f taps\n", src.gw, src.gh,
+                             float(src.img.w) / float(src.gw), rt ? rt->gw : 0, rt ? rt->gh : 0, dst, n, n);
+        }
+    }
     for (int i = 0; i < 4 && quad; i++)   // a screen quad's linearly filtered textures (QuadSnap's alpha weighting)
         if (info[i].kind == kTex2D && !info[i].shadow && (s.tss[size_t(i)][kTssMagFilter] >= 2 || aniso_level_ > 0))
             info[i].flags |= kTexLinear;
@@ -3168,6 +3200,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 c.texsize[i][3] = -0.5f / float(d.height);
             }
         }
+        std::memcpy(c.spread[i], wide[i], sizeof(wide[i]));
         const auto& t = s.tss[size_t(i)];
         c.bump[i][0] = Bits(t[kTssBumpEnvMat00]);
         c.bump[i][1] = Bits(t[kTssBumpEnvMat01]);
