@@ -1348,6 +1348,7 @@ void ngb_aspect_frame_end(void);   /* src/pc_menu.c */
 
 void ngb_frame_tick(void)
 {
+    { extern void ngb_menu_frame(void); ngb_menu_frame(); }   /* src/menu_mouse.c: the frames, for the controls */
     { extern void ngb_camera_frame(void); ngb_camera_frame(); }   /* src/camera.c: which view the stick turns */
     { extern void ngb_quick_tick(void); ngb_quick_tick(); }
     { extern void ngb_render_list_frame(void); ngb_render_list_frame(); }   /* src/render_list.c: its nodes back */

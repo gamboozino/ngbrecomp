@@ -709,6 +709,7 @@ static void to_menu_tick(void)
 /* ---------- the mouse in the game's own menus ---------- */
 
 int ngb_menu_up(void);                              /* src/menu_mouse.c */
+int ngb_menu_up_controls(void);   /* src/menu_mouse.c: by the frames (#218) */
 int ngb_pause_tab_hit(float x, float y, int *zone); /* src/pause_tab.c */
 int ngb_pause_exit_hit(float x, float y);
 int ngb_pause_tab_page(void);
@@ -1163,7 +1164,7 @@ static bool game_mouse(const SDL_Event *ev)
         s_move_seq++;
         s_move_ms = mono_ms();
     }
-    if (s_open || !ngb_menu_up())
+    if (s_open || !ngb_menu_up_controls())   /* (by the frames, as the keys and pad: #218) */
         return false;
     if (tab_shown()) {                    /* the pause menu's Options page */
         float gx, gy;
@@ -1314,7 +1315,7 @@ void nv2a_window_event_hook(const void *sdl_event)
     if (game_mouse(ev))
         return;
     if (ev->type == SDL_KEYDOWN && !ev->key.repeat && ev->key.keysym.sym == SDLK_ESCAPE &&
-        !s_open && ngb_menu_up() && !(tab_shown() && s_tab_focus)) {
+        !s_open && ngb_menu_up_controls() && !(tab_shown() && s_tab_focus)) {
         pulse_push(0x100 | 0x02);                     /* Esc: B, back */
         return;
     }

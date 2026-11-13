@@ -18,8 +18,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* When a menu last ran, in ms of CLOCK_MONOTONIC. */
+/* When a menu last ran, in ms of CLOCK_MONOTONIC; and the game's frame it ran in (ngb_menu_frame) */
 volatile uint64_t ngb_menu_ran_ms;
+static volatile uint32_t s_frames, s_menu_frame, s_menu_seen;
 
 static void menu_runner(void);
 static void menu_text(void);
@@ -33,6 +34,14 @@ void ngb_menu_mark(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ngb_menu_ran_ms = (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+    s_menu_frame = s_frames;
+    s_menu_seen = 1;
+}
+
+/* Each frame the game draws (Swap, src/cheats.c's ngb_frame_tick) */
+void ngb_menu_frame(void)
+{
+    s_frames++;
 }
 
 static uint64_t now_ms(void);
@@ -274,6 +283,16 @@ int ngb_menu_up(void)
     clock_gettime(CLOCK_MONOTONIC, &ts);
     uint64_t now = (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
     return now - ngb_menu_ran_ms < 150;
+}
+
+/* For the controls (the bindings, the keyboard, Esc): one ran in this frame or the two before, by the game's
+ * frames -- not 150 ms, after a message box (an item from a chest) the pad went to the game as it is that long
+ * and a rebound button did its default (L1 bound to Block opened the map, #218); and not by time, a slow frame
+ * inside a menu (a shader built, a save written) does not give the menu play's controls */
+int ngb_menu_up_controls(void)
+{
+    uint32_t at = s_menu_frame;   /* (first: Esc asks from the window's thread, as Swap runs) */
+    return s_menu_seen && (int32_t)(s_frames - at) <= 2;
 }
 
 /**

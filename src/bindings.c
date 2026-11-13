@@ -25,6 +25,7 @@
 int ngb_quick_controls_active(void);
 int ngb_quick_frozen(void);
 int ngb_menu_up(void);   /* src/menu_mouse.c */
+int ngb_menu_up_controls(void);
 
 /* What an action presses on the game's pad. */
 enum { T_BTN, T_AN, T_AN2, T_AXIS, T_HOST };
@@ -939,6 +940,31 @@ static void hold_back_reset(DWORD port)   /* (the remap stepped aside: none of i
     memset(s_hb_back[i], 0, sizeof s_hb_back[i]);
 }
 
+/* What closes a menu (A, B, Start, Back), held as the menu gives way to play: nothing in play until let go,
+ * or A closing a chest's message box and still down did A's play action (#218). The rest goes on (Block held). */
+static uint8_t s_menu_held[5];   /* bits: 1 A, 2 B, 4 Start, 8 Back */
+static void menu_held_note(const XBOX_INPUT_STATE *st, DWORD port)
+{
+    const XBOX_GAMEPAD *g = &st->Gamepad;
+    s_menu_held[port < 5 ? port : 4] = (g->bAnalogButtons[XBOX_BUTTON_A] > 40 ? 1 : 0) |
+                                       (g->bAnalogButtons[XBOX_BUTTON_B] > 40 ? 2 : 0) |
+                                       (g->wButtons & XBOX_GAMEPAD_START ? 4 : 0) |
+                                       (g->wButtons & XBOX_GAMEPAD_BACK ? 8 : 0);
+}
+static void menu_held_drop(XBOX_INPUT_STATE *st, DWORD port)
+{
+    uint8_t *h = &s_menu_held[port < 5 ? port : 4];
+    XBOX_GAMEPAD *g = &st->Gamepad;
+    if ((*h & 1) && g->bAnalogButtons[XBOX_BUTTON_A] <= 40) *h &= ~1;
+    if ((*h & 2) && g->bAnalogButtons[XBOX_BUTTON_B] <= 40) *h &= ~2;
+    if ((*h & 4) && !(g->wButtons & XBOX_GAMEPAD_START)) *h &= ~4;
+    if ((*h & 8) && !(g->wButtons & XBOX_GAMEPAD_BACK)) *h &= ~8;
+    if (*h & 1) g->bAnalogButtons[XBOX_BUTTON_A] = 0;
+    if (*h & 2) g->bAnalogButtons[XBOX_BUTTON_B] = 0;
+    if (*h & 4) g->wButtons &= ~XBOX_GAMEPAD_START;
+    if (*h & 8) g->wButtons &= ~XBOX_GAMEPAD_BACK;
+}
+
 void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port)
 {
     if (ngb_quick_frozen()) {
@@ -947,8 +973,19 @@ void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port)
         return;
     }
     ensure();
-    if (ngb_menu_up()) {
+    int menu = ngb_menu_up_controls();
+    {   /* NGB_MENU_UP_LOG=1: when the pad changes between the menus (as it is) and play (as bound) */
+        static int last = -1;
+        static const char *log = (const char *)1;
+        if (log == (const char *)1) log = getenv("NGB_MENU_UP_LOG");
+        if (log && port == 0 && menu != last) {
+            fprintf(stderr, "[PADMODE] %s at %llu ms\n", menu ? "menu (as it is)" : "play (as bound)", (unsigned long long)SDL_GetTicks64());
+            last = menu;
+        }
+    }
+    if (menu) {
         hold_back_reset(port);
+        menu_held_note(st, port);
         return;
     }
     apply_invert(st);
@@ -956,8 +993,10 @@ void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port)
     /* The controller as it is when nothing is rebound -- here or in the game's own Button Settings. */
     if (!quick && ((s_pad_identity && game_buttons_default()) || getenv("NGB_NO_PAD_REMAP"))) {
         hold_back_reset(port);
+        s_menu_held[port < 5 ? port : 4] = 0;   /* (as it is: the same button in play, nothing to hold back) */
         return;
     }
+    menu_held_drop(st, port);
     int v[P_COUNT], axes[4] = { 0 };
     pad_inputs(st, v);
     if (quick)

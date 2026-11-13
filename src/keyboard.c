@@ -29,6 +29,7 @@
 #include "input/xinput_xbox.h"
 
 int ngb_menu_up(void);   /* src/menu_mouse.c */
+int ngb_menu_up_controls(void);
 
 static SHORT axis(const Uint8 *k, int neg, int pos)
 {
@@ -62,7 +63,7 @@ static int mouse_look(int v)
 
 static int keyboard_map(const Uint8 *k, Uint32 mouse, XBOX_INPUT_STATE *st)
 {
-    int menu = ngb_menu_up();
+    int menu = ngb_menu_up_controls();   /* (a few frames: #218) */
     {   /* NGB_MENU_UP_LOG=1: when the keys change between the bindings (play) and the menus' layout */
         static int last = -1;
         static const char *log = (const char *)1;
@@ -75,7 +76,26 @@ static int keyboard_map(const Uint8 *k, Uint32 mouse, XBOX_INPUT_STATE *st)
     static int fixed_keys = -1;
     if (fixed_keys < 0)
         fixed_keys = getenv("NGB_FIXED_KEYS") != NULL;
+    /* what closes a menu (Enter, Space, Esc, a click), held as the menu gives way to play, does nothing in play
+     * until let go: else the click that closed a message box became an attack (#218); the rest (walking) goes on */
+    static const SDL_Scancode closers[] = { SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER, SDL_SCANCODE_SPACE,
+                                            SDL_SCANCODE_ESCAPE };
+    static Uint8 held[4];
+    static Uint32 mheld;
+    if (menu) {
+        for (int i = 0; i < 4; i++) held[i] = k[closers[i]];
+        mheld = mouse;
+    }
     if (!menu && !fixed_keys) {   /* in play: as bound (src/bindings.c, the Controls page) */
+        static Uint8 kk[SDL_NUM_SCANCODES];
+        memcpy(kk, k, sizeof kk);
+        for (int i = 0; i < 4; i++) {
+            if (!k[closers[i]]) held[i] = 0;
+            if (held[i]) kk[closers[i]] = 0;
+        }
+        mheld &= mouse;
+        mouse &= ~mheld;
+        k = kk;
         SHORT mx = 0, my = 0;
         if (SDL_GetRelativeMouseMode()) {
             xbox_InputMouseStick(900.0f, &mx, &my);
@@ -169,7 +189,7 @@ void nv2a_window_tick(void)
     static int no_capture = -1;
     if (no_capture < 0)
         no_capture = getenv("NGB_NO_MOUSE_CAPTURE") != NULL;
-    int want = w && xbox_InputKeyboardActive() && !ngb_menu_up() && !no_capture;
+    int want = w && xbox_InputKeyboardActive() && !ngb_menu_up_controls() && !no_capture;
     if (want != captured) {
         captured = want;
         s_capture_changed = SDL_GetTicks64();
@@ -178,7 +198,7 @@ void nv2a_window_tick(void)
     /* The pointer shows only where it points at something: in the game's
      * menus, with the keyboard and mouse in use. */
     static int shown = -1;
-    int show = xbox_InputKeyboardActive() && ngb_menu_up();
+    int show = xbox_InputKeyboardActive() && ngb_menu_up_controls();
     if (show != shown) {
         shown = show;
         SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
