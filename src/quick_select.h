@@ -12,12 +12,14 @@ typedef struct
 {
     uint16_t id;
     uint8_t count, usable, quantity, level;
+    uint8_t other_slot;   /* listed with the melee weapons but equipped in another slot (the Spear Gun) */
     char art[24], name[64];
     char badge[8];   /* a bow's arrows, drawn in the card's corner: "plain", "fire", "core"; else empty */
 } NgbQuickEntry;
 typedef struct
 {
     int category, freeze, count, index;
+    uint16_t equipped;   /* the equipped weapon or Ninpo, the last item used: index's when made; 0xFFFF none */
     NgbQuickEntry entries[NGB_QUICK_CAP];
 } NgbQuickView;
 typedef struct

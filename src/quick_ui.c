@@ -32,6 +32,10 @@ static int s_request_step;      /* opened by Left / Right: a card that way at on
 static uint64_t s_repeat_at;
 /* The card last on in each category, where the menu opens next (0xFFFF none yet) */
 static uint16_t s_remember[NGB_QUICK_CATEGORIES] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
+/* what was equipped (NgbQuickView.equipped) when each card was remembered: a remembered card counts only while that
+ * is still so -- equipped otherwise (a save loaded, a death, the pause menu's Weapons), the menu opens on what is
+ * equipped (#199) */
+static uint16_t s_remember_eq[NGB_QUICK_CATEGORIES] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
 static uint32_t s_repeat;
 static char s_game_dir[4096];
 static char s_message[64];
@@ -218,6 +222,11 @@ void ngb_quick_open(const NgbQuickMenu *menu)
     s_block = 1;
     for (int c = 0; c < NGB_QUICK_CATEGORIES; c++) {   /* each category on the card it was left on */
         NgbQuickView *v = &s_menu.views[c];
+        if (s_remember[c] != 0xFFFF && s_remember_eq[c] != v->equipped) {
+            fprintf(stderr, "[QUICK] category %d: %04X equipped since, not %04X; %04X forgotten\n", c + 1, v->equipped,
+                    s_remember_eq[c], s_remember[c]);
+            s_remember[c] = 0xFFFF;
+        }
         for (int i = 0; i < v->count; i++)
             if (v->entries[i].id == s_remember[c])
                 v->index = i;
@@ -228,6 +237,7 @@ void ngb_quick_open(const NgbQuickMenu *menu)
     if (step && opened->count > 1) {                  /* opened by Left / Right: that card at once, */
         opened->index = (opened->index + step + opened->count) % opened->count;
         s_remember[s_menu.category - 1] = opened->entries[opened->index].id;
+        s_remember_eq[s_menu.category - 1] = opened->equipped;
         s_navigation++;                                /* its sound, */
         s_repeat = step < 0 ? Q_LEFT : Q_RIGHT;        /* and held, on as inside the menu */
         s_repeat_at = SDL_GetTicks64() + 380;
@@ -755,6 +765,7 @@ int ngb_quick_layer(uint32_t *pixels)
             {
                 view->index = i;
                 s_remember[view->category - 1] = view->entries[view->index].id;
+                s_remember_eq[view->category - 1] = view->equipped;
                 s_navigation++;
                 s_revision++;
                 s_message[0] = 0;
@@ -780,6 +791,8 @@ int ngb_quick_layer(uint32_t *pixels)
         {
             s_command_item = e->id;
             s_command_category = view->category;
+            s_remember[view->category - 1] = e->id;       /* equipped or used now: what it opens on next */
+            s_remember_eq[view->category - 1] = e->id;
             s_command = 1;
             /* The guest acknowledges this only after rechecking the action
              * gate. A live-mode race must leave the menu open and waiting. */

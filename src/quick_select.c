@@ -427,6 +427,7 @@ static void make_view(NgbQuickView *v, int category)
 {
     memset(v, 0, sizeof *v);
     v->category = category;
+    v->equipped = 0xFFFF;
     v->freeze = ngb_pc_setting(19);
     uint32_t player = MEM8(0x4B7640) * 0x210u;
     for (uint32_t p = 0x5891D0; p < 0x5893D0 && v->count < NGB_QUICK_CAP; p += 4)
@@ -472,7 +473,15 @@ static void make_view(NgbQuickView *v, int category)
         unsigned cls = MEM8(r + 0xD);
         if ((category != NGB_QUICK_ITEMS && item == MEM16(0x58A570 + player + (cls - 1) * 2)) ||
             (category == NGB_QUICK_ITEMS && item == s_last_heal))
-            v->index = v->count;
+        {
+            /* the melee view's: its own slot's (the Spear Gun, listed there, has the ranged slot) */
+            if (category != NGB_QUICK_MELEE || cls == 1 || v->equipped == 0xFFFF)
+            {
+                v->index = v->count;
+                v->equipped = item;
+            }
+        }
+        e->other_slot = category == NGB_QUICK_MELEE && cls != 1;
         v->count++;
     }
 }
