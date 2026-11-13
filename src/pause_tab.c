@@ -81,7 +81,7 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_MISSIONS, S_ARCADE, S_MOVIES, S_LOADDETAIL, S_RTHREAD, S_INTERCEPT, S_ALLWEAP,
        S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
-       S_HUDSTYLE,
+       S_HUDSTYLE, S_HUDASPECT, S_TALISMAN,
        S_COUNT };
 
 static const char *const s_label[S_COUNT] = {
@@ -94,7 +94,7 @@ static const char *const s_label[S_COUNT] = {
     "Audio Output", "Missions", "Arcade Ninja Gaiden", "Movie Theater", "Lower Detail Under Load",
     "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
     "Responsive Menus", "All Armlets", "All Scrolls",
-    "One Hit Kill", "Unlocks", "HUD Style",
+    "One Hit Kill", "Unlocks", "HUD Style", "HUD Aspect", "Talisman of Rebirth",
 };
 static const char *const s_help[S_COUNT] = {
     "Draws the game at a multiple of the console's resolution.",
@@ -139,6 +139,8 @@ static const char *const s_help[S_COUNT] = {
     "Any hit that hurts an enemy or a boss kills it. For this session only.",
     "Difficulties, costumes and the main menu's extras (saved); weapons, armlets and scrolls (this session).",
     "Compact: the health bar, weapon and karma window smaller and nearer the screen's corners.",
+    "Corrected: the HUD in its own shape on a wide screen, not stretched across it.",
+    "Off: a Talisman of Rebirth is never used; at no health Ryu dies, the talismans kept.",
 };
 
 /* The categories: the strip's words, their rows. */
@@ -151,9 +153,9 @@ static const char *const s_help[S_COUNT] = {
 static const char *const s_cat_name[CATS] = { "Graphics", "Display", "Sound", "Gameplay", "Cheats", "Controls" };
 static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, -1 },   /* -1 ends a page shorter than CAT_ROWS */
-    { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_SKIP, -1 },
+    { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_HUDASPECT, S_SKIP },   /* (a full page) */
     { S_POSAUDIO, S_AUDIOOUT, -1 },
-    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, -1 },
+    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_TALISMAN, -1 },
     { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
     { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },
@@ -232,6 +234,7 @@ static void value_text(int row, char *out, size_t n)
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
     case S_INTERCEPT: snprintf(out, n, "%s", v == 2 ? "Hurricane" : v ? "Black" : "Off"); break;
     case S_HUDSTYLE: snprintf(out, n, "%s", v ? "Compact" : "Original"); break;
+    case S_HUDASPECT: snprintf(out, n, "%s", v ? "Corrected" : "Stretched"); break;
     case S_UNLOCKS: snprintf(out, n, "%s", ""); break;
     case S_SKIP:
     case S_ALLDIFF:
@@ -810,7 +813,9 @@ static void page_text(uint32_t *px, uint8_t *m, const char *s, float x, float ba
 #define ROW_Y0 50
 #define ROW_H  27
 #define SET_ROW_H 24                    /* the settings' rows: eight in the room of seven */
-#define SET_HELP_Y (ROW_Y0 + 217)       /* their help, clear of the prompts below */
+#define SET_HELP_Y (ROW_Y0 + 217)       /* their help, clear of the prompts below (a full page's 4 lower) */
+/* a full page (nine rows, Display's) a little closer: its last row clear of the help */
+static int set_row_h(int n) { return n > 8 ? SET_ROW_H - 1 : SET_ROW_H; }
 #define STRIP_Y 6                 /* the categories' strip */
 #define STRIP_H 26
 #define STRIP_X0 14               /* where its first word starts, and the gap */
@@ -1018,12 +1023,12 @@ static void draw_page(int focused, int cat, int row)
     int n = cat_count(cat);
     for (int i = 0; i < n; i++) {
         int set = s_cat_rows[cat][i];
-        float y = ROW_Y0 + i * SET_ROW_H;
+        float y = ROW_Y0 + i * set_row_h(n);
         int sel = focused && i == row;
         char val[48];
         if (sel) {
-            page_fill(px, 0, y + 2, 10, SET_ROW_H - 4, 0xE6E4FF, 0.95f, 0.85f);
-            page_fill(px, 10, y + 2, 440, SET_ROW_H - 4, 0x6E64DC, 0.85f, 0.05f);
+            page_fill(px, 0, y + 2, 10, set_row_h(n) - 4, 0xE6E4FF, 0.95f, 0.85f);
+            page_fill(px, 10, y + 2, 440, set_row_h(n) - 4, 0x6E64DC, 0.85f, 0.05f);
         }
         value_text(set, val, sizeof val);
         page_text(px, m, s_label[set], 20, y + 18, 19,
@@ -1039,14 +1044,15 @@ static void draw_page(int focused, int cat, int row)
     if (focused && row >= 0 && row < n)
         {   /* a help of two lines: split at its \n */
             const char *h = s_help[s_cat_rows[cat][row]], *nl = strchr(h, '\n');
+            const int hy = n > 8 ? 4 : 0;
             char first[160];
             if (nl && (size_t)(nl - h) < sizeof first) {
                 memcpy(first, h, (size_t)(nl - h));
                 first[nl - h] = 0;
-                page_text_fit(px, m, first, 445, SET_HELP_Y, 15, 0xFFFFFF, 2, 440);
-                page_text_fit(px, m, nl + 1, 445, SET_HELP_Y + 18, 15, 0xFFFFFF, 2, 440);
+                page_text_fit(px, m, first, 445, SET_HELP_Y + hy, 15, 0xFFFFFF, 2, 440);
+                page_text_fit(px, m, nl + 1, 445, SET_HELP_Y + hy + 18, 15, 0xFFFFFF, 2, 440);
             } else {
-                page_text_fit(px, m, h, 445, SET_HELP_Y, 15, 0xFFFFFF, 2, 440);
+                page_text_fit(px, m, h, 445, SET_HELP_Y + hy, 15, 0xFFFFFF, 2, 440);
             }
         }
 
@@ -2085,11 +2091,12 @@ int ngb_pause_tab_hit(float x, float y, int *zone)
     }
     if (s_cat == CAT_CTL)
         return ctl_hit(x, y);
-    if (x < 0 || x >= PAGE_W || y < ROW_Y0 || y >= ROW_Y0 + cat_count(s_cat) * SET_ROW_H)
+    int rh = set_row_h(cat_count(s_cat));
+    if (x < 0 || x >= PAGE_W || y < ROW_Y0 || y >= ROW_Y0 + cat_count(s_cat) * rh)
         return -1;
     if (x >= 262)
         *zone = x < 350 ? -1 : 1;
-    return (int)((y - ROW_Y0) / SET_ROW_H);
+    return (int)((y - ROW_Y0) / rh);
 }
 
 /* A key on Controls' list (row its row); strip: up from the first row and down

@@ -66,7 +66,7 @@ enum { ROW_SCREEN, ROW_MOVIE, ROW_PC, ROW_DEFAULT, ROW_EXIT,
        ROW_GLOW, ROW_QUICKFREEZE, ROW_QUICKSCALE, ROW_INFITEMS, ROW_INFAMMO, ROW_POSAUDIO, ROW_HUD, ROW_AUDIOOUT,
        ROW_MISSIONS, ROW_ARCADE, ROW_MOVIES, ROW_UNLOCKS, ROW_LOADDETAIL, ROW_RTHREAD, ROW_INTERCEPT,
        ROW_ALLWEAP, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_ALLARM, ROW_ALLSCROLL, ROW_ONEHIT,
-       ROW_HUDSTYLE,
+       ROW_HUDSTYLE, ROW_HUDASPECT, ROW_TALISMAN,
 };
 
 static int is_ours(int page) { return page >= PAGE_GFX && page < PAGE_GFX + N_OURS; }
@@ -79,10 +79,10 @@ static const uint8_t s_rows_ws[] = { ROW_SCREEN, ROW_MOVIE, ROW_DEFAULT, ROW_EXI
 static const uint8_t s_rows_std[] = { ROW_SCREEN, ROW_EXIT };
 static const uint8_t s_rows_gfx[] = { ROW_RENDER, ROW_TEXTURE, ROW_MSAA, ROW_SHADOW, ROW_GLOW, ROW_LOADDETAIL,
                                       ROW_RTHREAD, ROW_BACK };
-static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_SKIP,
+static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_HUDASPECT, ROW_SKIP,
                                        ROW_BACK };
 static const uint8_t s_rows_sound[] = { ROW_POSAUDIO, ROW_AUDIOOUT, ROW_BACK };
-static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_INTERCEPT, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_BACK };
+static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_INTERCEPT, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_TALISMAN, ROW_BACK };
 static const uint8_t s_rows_cheat[] = { ROW_HEALTH, ROW_NINPO, ROW_ESSENCE, ROW_SCARABS, ROW_INFITEMS, ROW_INFAMMO,
                                         ROW_ONEHIT, ROW_UNLOCKS, ROW_BACK };
 static const uint8_t s_rows_ctrl[] = { ROW_BACK };
@@ -120,8 +120,13 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define D_HUD      0x201CC
 #define T_HUDSTYLE 0x201FC            /* HUD Style (src/d3d/vk/backend.cpp, #121) and its values */
 #define D_HUDSTYLE 0x201FD
-#define T_ORIGINAL 0x201FE
 #define T_COMPACT  0x201FF
+#define T_HUDASPECT 0x20200           /* HUD Aspect (#220) and its values */
+#define D_HUDASPECT 0x20201
+#define T_STRETCHED 0x20202
+#define T_CORRECTED 0x20203
+#define T_TALISMAN  0x20204           /* Talisman of Rebirth (src/cheats.c, sub_002FD3E0) */
+#define D_TALISMAN  0x20205
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -231,8 +236,13 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_HUD, "HUD" },
     { T_HUDSTYLE, "HUD Style" },
     { D_HUDSTYLE, "Compact: the health bar, weapon and karma window smaller and nearer the screen's corners." },
-    { T_ORIGINAL, "Original" },
     { T_COMPACT, "Compact" },
+    { T_HUDASPECT, "HUD Aspect" },
+    { D_HUDASPECT, "Corrected: the HUD in its own shape on a wide screen, not stretched across it." },
+    { T_STRETCHED, "Stretched" },
+    { T_CORRECTED, "Corrected" },
+    { T_TALISMAN, "Talisman of Rebirth" },
+    { D_TALISMAN, "Off: a Talisman of Rebirth is never used; at no health Ryu dies, the talismans kept." },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
     { D_AUDIOOUT, "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game." },
@@ -417,7 +427,7 @@ static uint32_t make_labels(const uint8_t *kinds, int n)
                                    T_GLOW, T_QUICKFREEZE, T_QUICKSCALE, T_INFITEMS, T_INFAMMO, T_POSAUDIO, T_HUD,
                                    T_AUDIOOUT, T_MISSIONS, T_ARCADE, T_MOVIES, T_UNLOCKS, T_LOADDETAIL, T_RTHREAD,
                                    T_INTERCEPT, T_ALLWEAP, T_ESSCHARGE, T_CUTSKIP, T_RESPONSIVE, T_ALLARM,
-                                   T_ALLSCROLL, T_ONEHIT, T_HUDSTYLE };
+                                   T_ALLSCROLL, T_ONEHIT, T_HUDSTYLE, T_HUDASPECT, T_TALISMAN };
     uint32_t va = xbox_HeapAlloc(4 * n, 4);
     for (int i = 0; i < n; i++)
         MEM32(va + 4 * i) = id[kinds[i]];
@@ -704,11 +714,13 @@ void ngb_aspect_tick(void)
          * across the screen or 4:3 with bars at the sides (its 4:3 mode as well narrowed that to 9/16, #28) */
         int movie = s_movie_ms && now_ms() - s_movie_ms < 200;
         /* On a wide screen the game's widescreen mode throughout -- its own 16:9 look, every screen as it
-         * draws it (src/d3d/vk/backend.cpp stretches its 2D, no wider than 16:9). NGB_HUD_FIXED=1: the earlier way, play in the 4:3 mode with the HUD
-         * drawn in its own shape and the 16:9 mode for the menus it can tell. */
-        static int hud_fixed = -1;
-        if (hud_fixed < 0)
-            hud_fixed = getenv("NGB_HUD_FIXED") != NULL;
+         * draws it (src/d3d/vk/backend.cpp stretches its 2D, no wider than 16:9). HUD Aspect Corrected (setting 42,
+         * #220; NGB_HUD_FIXED=1 too): play in the 4:3 mode with the HUD drawn in its own shape, and the 16:9 mode
+         * for the menus it can tell. */
+        static int hud_env = -1;
+        if (hud_env < 0)
+            hud_env = getenv("NGB_HUD_FIXED") != NULL;
+        int hud_fixed = hud_env || ngb_pc_setting(42);
         int two_d = hud_fixed ? !menus_43() && (s_menu_now || s_menu_last || s_screen_2d) : !menus_43();
         int want = s_flags_wide || (s_screen_wide && (s_boot || movie || two_d));
         if ((MEM32(0x9776A8) >> 4 & 1) != (uint32_t)want || (MEM32(0xD21748) & 1) != (uint32_t)want)
@@ -822,6 +834,8 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
                             : ngb_pc_setting(23) ? T_POSCONSOLE : T_OFF;
     case ROW_HUD:     return ngb_pc_setting(24) ? T_ON : T_OFF;
     case ROW_HUDSTYLE: return ngb_pc_setting(41) ? T_COMPACT : T_ORIGINAL;
+    case ROW_HUDASPECT: return ngb_pc_setting(42) ? T_CORRECTED : T_STRETCHED;
+    case ROW_TALISMAN: return ngb_pc_setting(43) ? T_ON : T_OFF;
     case ROW_AUDIOOUT: return ngb_pc_setting(25) == 2 ? T_SURROUND : ngb_pc_setting(25) ? T_STEREO : T_AUTO;
     case ROW_QUICKSCALE: {
         int v = ngb_pc_setting(20);
@@ -892,6 +906,8 @@ static int pc_value_change(int row, int delta)
     case ROW_POSAUDIO: ngb_pc_set_setting(23, ngb_positional_step(ngb_pc_setting(23), step)); break;
     case ROW_HUD: ngb_pc_set_setting(24, !ngb_pc_setting(24)); break;
     case ROW_HUDSTYLE: ngb_pc_set_setting(41, !ngb_pc_setting(41)); break;
+    case ROW_HUDASPECT: ngb_pc_set_setting(42, !ngb_pc_setting(42)); break;
+    case ROW_TALISMAN: ngb_pc_set_setting(43, !ngb_pc_setting(43)); break;
     case ROW_AUDIOOUT: ngb_pc_set_setting(25, (ngb_pc_setting(25) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_QUICKSCALE: ngb_pc_set_setting(20, ngb_quick_scale_step(ngb_pc_setting(20), step)); break;
     case ROW_RENDER: {
@@ -2073,7 +2089,8 @@ void sub_00220870(void)
                                            D_LOADDETAIL & 0xFFFF, D_RTHREAD & 0xFFFF, D_INTERCEPT & 0xFFFF,
                                            D_ALLWEAP & 0xFFFF, D_ESSCHARGE & 0xFFFF, D_CUTSKIP & 0xFFFF,
                                            D_RESPONSIVE & 0xFFFF, D_ALLARM & 0xFFFF, D_ALLSCROLL & 0xFFFF,
-                                           D_ONEHIT & 0xFFFF, D_HUDSTYLE & 0xFFFF };
+                                           D_ONEHIT & 0xFFFF, D_HUDSTYLE & 0xFFFF,
+                                           D_HUDASPECT & 0xFFFF, D_TALISMAN & 0xFFFF };
     RECOMP_ENTRY(0x00220870u);
     uint32_t out = ecx;
     uint32_t level = MEM16(0x8DE430), tab = MEM16(0x8DE4CC), row = MEM16(0x8DE468);
