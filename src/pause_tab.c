@@ -1533,7 +1533,7 @@ static int kc_make(uint32_t fmt_low)
 /* The tab row's first and last plates as last drawn (x0 y0 x1 y1, the
  * menu's 720x480), for the L and R plates' keys (kc_tab_keys). */
 static float s_tab_first[4], s_tab_last[4];
-static float s_tab_bright = 1, s_tab_alpha = 1;   /* the L plate's (sprite 0x11A): dimmed as an item is used (#215) */
+static float s_tab_bright = 1, s_tab_alpha = 1;   /* the L plate's (sprite 0x16F): dimmed as an item is used (#215) */
 static void kc_tab_seen(uint32_t id, float x0, float y0, float x1, float y1, float bright, float alpha)
 {
     float *r = id == 0x17B ? s_tab_first : s_tab_last;
@@ -5306,7 +5306,7 @@ void sub_002216B0(void)
             return;
         }
     }
-    if ((MEM32(p) & 0xFFFF) == 0x11A) {               /* the L plate: how bright, for the keys over it (#215) */
+    if ((MEM32(p) & 0xFFFF) == 0x16F) {               /* the L plate: how bright, for the keys over it (#215) */
         s_tab_bright = MEMF(p + 0x1C);
         s_tab_alpha = MEMF(p + 0x20);
     }
