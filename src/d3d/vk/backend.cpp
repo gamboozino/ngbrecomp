@@ -4190,8 +4190,9 @@ void VulkanBackend::HudGroup(float w, float h) {
             // what starts in the upper 40% of the height (the health bar, the karma window -- its picture reaching
             // far below its words) never with what starts lower (an area's name, #219: the HUD went about the middle
             // with it); one line, so nothing between joins them either
-            // and a picture (HudPlace) only with pictures: never with the HUD, though a panel's pieces together
-            bool apart = (a.y0 < h * 0.4f) != (b.y0 < h * 0.4f) ||
+            // and a picture (HudPlace) only with pictures: never with the HUD, though a panel's pieces together;
+            // a gauge's pieces whole across that line (the breath gauge's cap and tube: Compact drew them apart)
+            bool apart = (!(gauge[i] && gauge[j]) && (a.y0 < h * 0.4f) != (b.y0 < h * 0.4f)) ||
                          hud_picture(a.x0, a.x1, a.y0, a.y1, w, h) != hud_picture(b.x0, b.x1, b.y0, b.y1, w, h);
             if (gauge[i] == gauge[j] && !apart && a.x0 - g <= b.x1 && b.x0 - g <= a.x1 && a.y0 - gy <= b.y1 &&
                 b.y0 - gy <= a.y1)
