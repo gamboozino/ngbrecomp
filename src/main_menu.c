@@ -1709,6 +1709,20 @@ static uint8_t mission_bits(uint32_t mission)
     return (uint8_t)(MEM8(0xDB95AC + mission) | (ngb_unlock(0) ? 1 : 0));
 }
 
+/* And each mission's difficulties (#204): 0xDB9610 + its number, the hardest offered (1 Normal .. 4 Master
+ * Ninja; a clear at it offers the next, sub_001DAEA0), as sub_001DB8A0 reads it -- with the unlock on, all of
+ * them, up to Master Ninja (nothing written: a clear still raises the save's own as the game does) */
+static uint8_t mission_top_difficulty(uint32_t mission)
+{
+    extern int ngb_unlock(int which);
+    if (mission >= 100)
+        return 1;
+    if (ngb_unlock(0))
+        return 4;
+    uint8_t d = MEM8(0xDB9610 + mission);
+    return d < 1 ? 1 : d > 4 ? 4 : d;
+}
+
 /**
  * sub_001764F0
  * Original: 0x001764F0 - 0x00176833 (835 bytes, 201 insns)
@@ -2477,7 +2491,7 @@ loc_00176EDA: ;
     if (CMP_GE(_fas, _fbs)) goto loc_00176F04; /* jge: greater or equal (signed >=) */
 
 loc_00176EF0: ;
-    SET_LO8(eax, MEM8(ecx + 0xDB9610));
+    SET_LO8(eax, mission_top_difficulty(ecx));   /* Missions: the difficulties (#204) */
     _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(1) & 0xFFu;
     _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 1 (8-bit) */
     if (CMP_AE(_fa, _fb)) goto loc_00176EFE; /* jae: above or equal (unsigned >=) */
@@ -2581,7 +2595,7 @@ loc_00176FB2: ;
     ecx = ZX8(MEM8(0x589758));
     g_ebp = ebp; /* frame stays current across calls */
     g_seh_ebp = ebp;
-    PUSH32(esp, 0x00176FD5u); RECOMP_ABI_CALL(0x001DB8A0u, sub_001DB8A0); /* call 0x001DB8A0 */
+    SET_LO8(eax, mission_top_difficulty(ecx));   /* Missions: the difficulties (sub_001DB8A0's, #204) */
 
 loc_00176FD5: ;
     SET_LO8(eax, LO8(eax) + 1);
