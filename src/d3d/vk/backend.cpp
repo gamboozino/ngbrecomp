@@ -3446,15 +3446,23 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     }
                 }
             } else if (n && k < 0.999f && !paused &&
-                       (ScreenFrame(threed_) || ((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30))) {
+                       (ScreenFrame(threed_) || ((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30) ||
+                        (covered_now_ && !rt_tex && !(!s.textures[0] && x0 <= 1 && x1 >= w - 1)))) {
+                // (and an item's or a tip's screen over play, drawn over an opaque cover: its tiles together, not
+                // each to a corner as the HUD's -- they parted, a seam down it, with HUD Aspect Corrected; the cover
+                // itself, a fade's black, across the screen as drawn)
                 // A 2D screen in the game's 4:3 mode (Menus 4:3; or the first frame of one, before the game
                 // switches): the console's 4:3 picture, all of it narrowed alike about the middle and clipped
                 // there, black beyond (its pieces -- tiles, scrolling layers reaching off the screen -- only
                 // line up drawn alike)
-                c.ext[0] = k;
+                // An item's or a tip's screen over play (the cover's, not a menu's): as with HUD Aspect
+                // Stretched, across the screen no wider than 16:9 -- not a 4:3 box with the bars beside it
+                const bool over_play = !ScreenFrame(threed_) && !((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30);
+                const float kk = over_play ? std::min(1.0f, k * 4.0f / 3.0f) : k;
+                c.ext[0] = kk;
                 c.ext[1] = w / 2;
-                hud_clip0 = w / 2 * (1 - k);
-                hud_clip1 = w / 2 * (1 + k);
+                hud_clip0 = w / 2 * (1 - kk);
+                hud_clip1 = w / 2 * (1 + kk);
             } else if (n && k < 0.999f && !rt_tex && x1 - x0 < w * 0.89f && x1 > 0 && x0 < w) {
                 // the HUD along the top (the health bar, ninpo, the projectile icon under them) keeps to
                 // its corner as on a 4:3 screen: narrowed toward the left edge, or the right edge for
@@ -3472,13 +3480,16 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 for (int g = 0; g < 4 && !gauge; g++)
                     if (x1 - x0 < w * 0.1f && y0 > h * 0.25f && x1 > gauge_prev_[g][0] - 4 && x0 < gauge_prev_[g][1] + 4)
                         gauge = true;
-                // what starts along the top and reaches lower (#219: the explosive arrows' fire at the icon's tip,
-                // the hit counter's flash as a combo ends) to the corner its middle is nearer -- about the middle
-                // they were drawn away from what they belong to; a picture over play (hud_picture) as drawn
-                const bool reach = y1 >= h * 0.3f && y0 < h * 0.3f && !gauge && !hud_picture(x0, x1, y0, y1, w, h) &&
-                                   std::fabs((x0 + x1) / 2 - w / 2) >= w * 0.12f;   // (what is about the middle, there)
+                // what has its middle in a side's outer 30%, starts above 45% of the height and reaches below 30%
+                // (#219): the explosive arrows' fire at the icon's tip, the hit counter's flash as a combo ends,
+                // Missions' Kill and Time panel (its frames, words and figures alike) -- to that side's corner with
+                // what is above it; about the middle the fire and the flash were drawn away from their icon. Not a
+                // gauge or a picture over play; what is lower (an area's name) or further in as before
+                const float cxm = (x0 + x1) / 2;
+                const bool reach = y1 >= h * 0.3f && y0 < h * 0.45f && (cxm < w * 0.3f || cxm > w * 0.7f) && !gauge &&
+                                   !hud_picture(x0, x1, y0, y1, w, h);
                 c.ext[1] = y1 < h * 0.3f ? (x0 < w * 0.7f ? 0.0f : w)
-                         : reach ? ((x0 + x1) / 2 < w / 2 ? 0.0f : w)
+                         : reach ? (cxm < w / 2 ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
                 // HUD Style Compact (#121): what keeps to a side smaller toward it, and toward the top along the top
                 if (compact && c.ext[1] != w / 2) {
