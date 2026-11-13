@@ -118,7 +118,7 @@ static const char *const s_help[S_COUNT] = {
     "A softer, fainter glow on bright lights. Off: the console's.",
     "The game pauses while the quick menu is open (once Ryu's action ends).",
     "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size.",
-    "Healing items, the Talisman of Rebirth and the jewels (Demon Seal, Life of the Gods, Spirit of the Devils...)\nare not used up. For this session only.",
+    "Healing items, talismans and jewels are not used up. For this session only.",
     "Shuriken, smoke bombs, arrows and spears are not used up. For this session only.",
     "Sounds placed left and right. Clear: by level only. Console: as the Xbox, duller. Mixed: between the two.",
     "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen.",
@@ -1533,14 +1533,16 @@ static int kc_make(uint32_t fmt_low)
 /* The tab row's first and last plates as last drawn (x0 y0 x1 y1, the
  * menu's 720x480), for the L and R plates' keys (kc_tab_keys). */
 static float s_tab_first[4], s_tab_last[4];
-static void kc_tab_seen(uint32_t id, float x0, float y0, float x1, float y1)
+static float s_tab_bright = 1, s_tab_alpha = 1;   /* the L plate's (sprite 0x11A): dimmed as an item is used (#215) */
+static void kc_tab_seen(uint32_t id, float x0, float y0, float x1, float y1, float bright, float alpha)
 {
     float *r = id == 0x17B ? s_tab_first : s_tab_last;
     r[0] = x0; r[1] = y0; r[2] = x1; r[3] = y1;
+    (void)bright; (void)alpha;
     if (getenv("NGB_TAB_LOG")) {
         static int n;
         if (n++ % 120 == 0)
-            fprintf(stderr, "[TAB] %X at %.1f,%.1f-%.1f,%.1f\n", id, x0, y0, x1, y1);
+            fprintf(stderr, "[TAB] %X at %.1f,%.1f-%.1f,%.1f bright %.2f alpha %.2f\n", id, x0, y0, x1, y1, bright, alpha);
     }
 }
 
@@ -1631,8 +1633,9 @@ static void kc_tab_keys(void)
         if (n++ % 120 == 0)
             fprintf(stderr, "[TAB] keys at y %d\n", y);
     }
-    sprite(TK_SPRITE, 52, y - 1, 0x1F0, 0, 34.0f / 21, 34.0f / 23, 1.0f, 1.0f);   /* on the 32 x 32 plate */
-    sprite(TK_SPRITE + 1, 636, y - 1, 0x1F0, 0, 34.0f / 21, 34.0f / 23, 1.0f, 1.0f);
+    /* as bright as the row's plates: dimmed with them as an item is used (#215) */
+    sprite(TK_SPRITE, 52, y - 1, 0x1F0, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, s_tab_alpha);   /* on the 32 x 32 plate */
+    sprite(TK_SPRITE + 1, 636, y - 1, 0x1F0, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, s_tab_alpha);
 }
 
 /* Each button icon the game queues: the texture for the device in use. */
@@ -5303,8 +5306,13 @@ void sub_002216B0(void)
             return;
         }
     }
+    if ((MEM32(p) & 0xFFFF) == 0x11A) {               /* the L plate: how bright, for the keys over it (#215) */
+        s_tab_bright = MEMF(p + 0x1C);
+        s_tab_alpha = MEMF(p + 0x20);
+    }
     if ((MEM32(p) & 0xFFFF) == 0x17B || (MEM32(p) & 0xFFFF) == 0x177)   /* Weapon's and Exit's plates: where */
-        kc_tab_seen(MEM32(p) & 0xFFFF, MEMF(verts), MEMF(verts + 4), MEMF(verts + 7 * 4), MEMF(verts + 15 * 4));
+        kc_tab_seen(MEM32(p) & 0xFFFF, MEMF(verts), MEMF(verts + 4), MEMF(verts + 7 * 4), MEMF(verts + 15 * 4),
+                    MEMF(p + 0x1C), MEMF(p + 0x20));
     if (!def && ngb_recomp_menu_active()) {
         rp_check(MEM32(p) & 0xFFFF);                   /* RECOMP SETTINGS' header and words */
         if (rp_skip(MEM32(p) & 0xFFFF)) {              /* and four categories, not six */
