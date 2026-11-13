@@ -2,15 +2,21 @@ name: macOS runtime
 
 on:
   push:
+    branches: ['**']   # not tags: a release's tag is a commit master already ran
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# a newer push cancels a run still waiting for a runner
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   runtime:
-    runs-on: macos-26
+    runs-on: macos-15   # Apple Silicon; macos-26 runners were often not available
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
