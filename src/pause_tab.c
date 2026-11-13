@@ -1633,9 +1633,12 @@ static void kc_tab_keys(void)
         if (n++ % 120 == 0)
             fprintf(stderr, "[TAB] keys at y %d\n", y);
     }
-    /* as bright as the row's plates: dimmed with them as an item is used (#215) */
-    sprite(TK_SPRITE, 52, y - 1, 0x1F0, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, s_tab_alpha);   /* on the 32 x 32 plate */
-    sprite(TK_SPRITE + 1, 636, y - 1, 0x1F0, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, s_tab_alpha);
+    /* as bright as the row's plates, dimmed with them as an item is used (#215), and at their depth (0x1D6):
+     * under what the item's use draws over the menu, its red flash. Opaque, though: the plates rest at 0.85
+     * (their own L and R showed through), faded in and out with them. */
+    float a = s_tab_alpha >= 0.85f ? 1.0f : s_tab_alpha / 0.85f;
+    sprite(TK_SPRITE, 52, y - 1, 0x1D6, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, a);   /* on the 32 x 32 plate */
+    sprite(TK_SPRITE + 1, 636, y - 1, 0x1D6, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, a);
 }
 
 /* Each button icon the game queues: the texture for the device in use. */
