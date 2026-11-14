@@ -4242,6 +4242,46 @@ void VulkanBackend::HudGroup(float w, float h) {
             pbox.y0 = std::min(pbox.y0, e.y0); pbox.y1 = std::max(pbox.y1, e.y1);
         }
     }
+    // what sits in a side element's column, inside it or just under it (the Ultimate Technique's and Intercept's
+    // bonus under the karma window's Time, #219 -- apart from it at the upper band's line), keeps to its corner with
+    // it: about its own middle Compact drew it lower than the window, a gap between
+    // (lined up with it -- its near edge by the element's, so not an area name's first letters, which start
+    // further in -- not a picture, and only by an element at its corner of its own: no chain)
+    {
+        std::vector<char> pull(elems.size(), 0);
+        for (size_t i = 0; i < elems.size(); i++) {
+            const HudElem& e = elems[i];
+            if (e.gauge || e.ax == w / 2 || e.ay != h / 2 || hud_picture(e.x0, e.x1, e.y0, e.y1, w, h)) continue;
+            for (const HudElem& kq : elems) {
+                if (&kq == &e || kq.gauge || kq.ax != e.ax || kq.ay != 0.0f) continue;
+                if ((kq.x1 - kq.x0) * (kq.y1 - kq.y0) <= (e.x1 - e.x0) * (e.y1 - e.y0)) continue;
+                const bool lined = e.ax == 0.0f ? std::fabs(e.x0 - kq.x0) < w * 0.08f : std::fabs(e.x1 - kq.x1) < w * 0.08f;
+                if (lined && e.x0 >= kq.x0 - w * 0.03f && e.x1 <= kq.x1 + w * 0.05f && e.y0 >= kq.y0 &&
+                    e.y0 <= kq.y1 + 14) {
+                    pull[i] = 1;
+                    break;
+                }
+            }
+        }
+        // and what is beside or just under what moved, in the side's outer 35% (the bonus is in pieces: its words
+        // apart, "Techniques" past the window's column, its points under them)
+        for (int pass = 0; pass < 3; pass++)
+            for (size_t i = 0; i < elems.size(); i++) {
+                const HudElem& e = elems[i];
+                const float cx = (e.x0 + e.x1) / 2;
+                if (pull[i] || e.gauge || e.ax == w / 2 || e.ay != h / 2 || hud_picture(e.x0, e.x1, e.y0, e.y1, w, h) ||
+                    (e.ax == 0.0f ? cx > w * 0.35f : cx < w * 0.65f))
+                    continue;
+                for (size_t j = 0; j < elems.size() && !pull[i]; j++) {
+                    const HudElem& m = elems[j];
+                    if (pull[j] && m.ax == e.ax && e.x0 <= m.x1 + 10 && m.x0 <= e.x1 + 10 && e.y0 <= m.y1 + 14 &&
+                        m.y0 <= e.y1 + 14)
+                        pull[i] = 1;
+                }
+            }
+        for (size_t i = 0; i < elems.size(); i++)
+            if (pull[i]) elems[i].ay = 0.0f;
+    }
     if (panel) {   // the panel's reach while it is seen (it slides and grows in)
         if (!hud_panel_ && hud_panel_count_ == 0) hud_panel_seen_ = pbox;
         hud_panel_seen_.x0 = std::min(hud_panel_seen_.x0, pbox.x0); hud_panel_seen_.x1 = std::max(hud_panel_seen_.x1, pbox.x1);
