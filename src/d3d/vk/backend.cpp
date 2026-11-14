@@ -3050,13 +3050,14 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             const Target* zt = rt ? rt : ds;   // (a depth-only pass: its depth target's scale)
             float zs = zt ? float(zt->img.w) / float(std::max<uint32_t>(zt->gw, 1)) : 1.0f;
             k.zslope = Bits(SimpleState(s, kMSlopeScale)) * std::max(zs, 1.0f);
-            // and twice the game's slope part where nothing writes depth (#213): the lava light laid over the cave
-            // walls specked at grazing angles, its margin too small; what writes depth (shadow casters) as the game
+            // and three times the game's slope part where nothing writes depth (#213): the lava light laid over the
+            // cave walls specked at grazing angles, its margin too small (twice left a few in the Magma and Ice
+            // Caverns); what writes depth (shadow casters) as the game
             // sets it. NGB_D3D_ZSLOPE_X=<n>: n times instead (1: as the game sets it; kept within 1..8)
             static const float zslope_x = [] {
                 const char* e = std::getenv("NGB_D3D_ZSLOPE_X");
-                float x = e ? float(std::atof(e)) : 2.0f;
-                return x >= 1.0f && x <= 8.0f ? x : (e ? 1.0f : 2.0f);
+                float x = e ? float(std::atof(e)) : 3.0f;
+                return x >= 1.0f && x <= 8.0f ? x : (e ? 1.0f : 3.0f);
             }();
             if (!k.zwrite) k.zslope *= zslope_x;
         }
