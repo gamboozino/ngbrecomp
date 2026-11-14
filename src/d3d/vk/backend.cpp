@@ -3250,9 +3250,9 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     if (glow_pass) c.bump[3][2]=GlowStrength(); // unused by this single-texture draw
     // The 2D (screen-space draws into the back buffer) on a wider screen. The game's 2D screens -- menus,
     // the title, chapter cards (src/pc_menu.c says which) -- in its 16:9 look, stretched no wider than 16:9,
-    // or with Menus 4:3 the console's 4:3 picture in the middle. In play its HUD and words in their own
-    // shape (ngb_hud_shape: 4:3 over the screen's shape): the top of the screen's HUD keeps to its corners
-    // and everything else is narrowed alike about the middle (words and subtitles are drawn in pieces);
+    // or with Menus 4:3 the console's 4:3 picture in the middle. In play stretched alike, the HUD's elements
+    // to the screen's sides and corners (HudPlace); with HUD Aspect Corrected those elements in their own
+    // shape (ngb_hud_shape: 4:3 over the screen's shape), words and subtitles stretched as the menus;
     // what spans the screen (fades, letterbox bars) and what is off it as drawn.
     float hud_clip0 = -1, hud_clip1 = -1;   // a menu's 4:3 area (guest pixels), the draw clipped to it
     float hud_clipy0 = -1, hud_clipy1 = -1;   // (and its height, on a narrower screen)
@@ -3398,6 +3398,14 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 // HUD Style Compact: in play the elements kept to a side or a corner drawn smaller toward it, so nearer
                 // the screen's edges; those about the middle across (subtitles, a message box) as they are
                 const float small = compact ? 0.8f : 1.0f;
+                // HUD Aspect Corrected (#220, setting 42; NGB_HUD_FIXED=1 too): the game kept in its widescreen mode as
+                // with Stretched, every screen drawn alike -- only the HUD's elements, each about its side or corner, in
+                // their own 4:3 shape (k of the screen's width) and no taller. Play in the 4:3 mode, its screens in the
+                // widescreen mode, drew the messages, the letters and Game Over another size for a frame either way (#219)
+                static const bool hud_env = std::getenv("NGB_HUD_FIXED") != nullptr;
+                // (in play only, the frame's 3D drawn, as Compact: the first frame of a 2D screen, Game Over or a chapter's
+                // card, before it is known as one, is not narrowed where the HUD was)
+                const bool shaped = (hud_env || ngb_pc_setting(42)) && threed_ >= 30;
                 if (n && ky < 0.999f && !paused && !spans) {
                     float ax = w / 2, ay = h / 2;
                     if (!ScreenFrame(threed_) && !centred) {
@@ -3406,9 +3414,9 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
                     }
                     bool cornered = !ScreenFrame(threed_) && !centred && ax != w / 2 && hud_piece();
-                    c.ext[0] = cornered && small < 1 ? small : 1;
-                    c.ext[1] = cornered && small < 1 ? ax : w / 2;
-                    c.ext[2] = ky * (cornered ? small : 1);
+                    c.ext[0] = cornered && shaped ? k * small : cornered && small < 1 ? small : 1;
+                    c.ext[1] = cornered && (small < 1 || shaped) ? ax : w / 2;
+                    c.ext[2] = cornered && shaped ? small : ky * (cornered ? small : 1);
                     c.ext[3] = ay;
                     if (ax == w / 2 && ay == h / 2) {
                         hud_clipy0 = h / 2 * (1 - ky);
@@ -3423,8 +3431,8 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         float ax = w / 2, ay = h / 2;
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                         c.ext[1] = ax;
-                        if (small < 1 && ax != w / 2 && hud_piece()) {
-                            c.ext[0] = km * small;
+                        if ((small < 1 || shaped) && ax != w / 2 && hud_piece()) {
+                            c.ext[0] = (shaped ? k : km) * small;
                             c.ext[2] = small;
                             c.ext[3] = ay;
                         }
@@ -3435,14 +3443,14 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         hud_clip0 = w / 2 * (1 - km);
                         hud_clip1 = w / 2 * (1 + km);
                     }
-                } else if (n && small < 1 && !paused && !spans && !centred && !ScreenFrame(threed_)) {
-                    // 16:9: nothing to narrow, the HUD's elements only smaller toward their sides
+                } else if (n && (small < 1 || shaped) && !paused && !spans && !centred && !ScreenFrame(threed_)) {
+                    // 16:9: nothing to narrow, the HUD's elements only smaller toward their sides (and Corrected, narrower)
                     float ax = w / 2, ay = h / 2;
                     HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                     if (x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                         hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
                     if (ax != w / 2 && hud_piece()) {
-                        c.ext[0] = small;
+                        c.ext[0] = (shaped ? k : 1.0f) * small;
                         c.ext[1] = ax;
                         c.ext[2] = small;
                         c.ext[3] = ay;
@@ -3471,6 +3479,8 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     hud_clip1 = w / 2 * (1 + kk);
                 }
             } else if (n && k < 0.999f && !rt_tex && x1 - x0 < w * 0.89f && x1 > 0 && x0 < w) {
+                // (the game's 4:3 mode on a wide screen: since HUD Aspect Corrected keeps the widescreen mode (#219),
+                // only with NGB_MENUS_43=1 -- the notes below are of the Corrected that played in the 4:3 mode)
                 // the HUD along the top (the health bar, ninpo, the projectile icon under them) keeps to
                 // its corner as on a 4:3 screen: narrowed toward the left edge, or the right edge for
                 // what starts in the right part; everything lower (words, Game Over, subtitles, area

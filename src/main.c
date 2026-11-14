@@ -1356,11 +1356,11 @@ int main(int argc, char **argv)
     if (s_widescreen)
         xbox_XcVideoFlags |= XC_VIDEO_FLAGS_WIDESCREEN;
 #if defined(NGB_NV2A_VK)
-    if (s_widescreen) {   /* the 3D's shape: the game is kept in its 4:3 mode on a wide screen (src/pc_menu.c) */
+    if (s_widescreen) {   /* the 3D's shape: the game is kept in its widescreen mode on a wide screen (src/pc_menu.c) */
         extern void ngb_game_set_aspect_constant(double a);
         extern void ngb_game_aspect_init(int widescreen);
         ngb_game_set_aspect_constant(ngb_settings_aspect_ratio(&cfg));
-        ngb_game_aspect_init(1);   /* widescreen for the boot movie, 4:3 from the title (src/pc_menu.c) */
+        ngb_game_aspect_init(1);   /* the widescreen mode from the boot movie (src/pc_menu.c) */
     }
 #endif
 #if defined(NGB_NV2A_VK)

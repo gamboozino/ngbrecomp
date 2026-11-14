@@ -532,11 +532,11 @@ int ngb_general_no_flag(void);
  * (the D3D present flags' bit 4, 0x9776A8, and the video flags' bit 0, 0xD21748): in it, it takes
  * its 3D's shape from 0x414AF8 (16:9) instead of 0x414AF4 (4:3) -- kept in 0x977EF8 as it set it
  * up -- and draws some of its 2D narrower for a widescreen TV to stretch (the title's logo, the
- * items' pictures, some bars), others not (the letters, the menus' plates). The renderer draws the
- * 2D in its own 4:3 shape on a wider screen (ngb_hud_shape, src/d3d/vk/backend.cpp), alike for
- * every piece, which those already narrower would be twice: so on a wider screen the game is kept
- * in its 4:3 mode -- its 2D as for 4:3 -- with both constants the screen's shape, its 3D drawn for
- * it. NGB_GAME_WIDESCREEN=1 keeps the game's own widescreen mode instead. */
+ * items' pictures, some bars), others not (the letters, the menus' plates). On a wide screen the
+ * game is kept in its widescreen mode (ngb_aspect_tick), its 3D drawn for the screen's shape; the
+ * renderer stretches its 2D (src/d3d/vk/backend.cpp), and with HUD Aspect Corrected narrows only the
+ * HUD's elements to their own shape. NGB_GAME_WIDESCREEN=1 keeps the game's own widescreen mode
+ * instead. */
 extern uint32_t xbox_XcVideoFlags;
 
 /* The constants are in .rdata (read-only): written through /proc/self/mem, and tried again from the
@@ -581,14 +581,12 @@ void ngb_game_set_aspect_constant(double a)
     s_aspect_a = patch_constant(a) ? 0 : a;
 }
 
-/* The flags as wanted on a wide screen: in play the game's 4:3 mode (its HUD and words, drawn for 4:3,
- * are narrowed to their own shape by the renderer) -- but its widescreen mode, the console's 16:9
- * look, for its 2D screens: while a menu runs (marked as it runs, so from its first frame), when
- * the frame before drew next to no 3D (the title, chapter cards, loading screens), while a movie
- * plays and until the title (the boot movie: a wide one is chosen). There it draws its pictures
- * narrower for the screen to stretch, and the renderer draws them as they are, stretched
- * (ngb_2d_stretched) -- no wider than 16:9. NGB_GAME_WIDESCREEN=1: the widescreen mode throughout;
- * NGB_MENUS_43=1: the 4:3 mode on the 2D screens too, narrowed as the HUD. */
+/* The flags as wanted on a wide screen: the game's widescreen mode, the console's 16:9 look, throughout
+ * -- it draws its pictures narrower for the screen to stretch, and the renderer draws them as they
+ * are, stretched (ngb_2d_stretched), no wider than 16:9. The menus (marked as they run), frames of
+ * next to no 3D (the title, chapter cards, loading screens) and movies are still told apart, for the
+ * renderer and the controls. NGB_MENUS_43=1 (debugging): the 4:3 mode in play and on the 2D screens,
+ * narrowed by the renderer (the widescreen mode kept for movies and the boot). */
 static int s_flags_wide = -1, s_screen_wide, s_boot = 1, s_menu_now, s_menu_last, s_screen_2d;
 static uint64_t s_movie_ms;
 static uint64_t now_ms(void)
@@ -609,8 +607,8 @@ void ngb_movie_playing(int playing)
 int ngb_movie_active(void) { return s_movie_ms && now_ms() - s_movie_ms < 200; }
 void ngb_boot_over(void) { s_boot = 0; }   /* the title is up */
 
-/* NGB_MENUS_43=1: on a wide screen the 2D screens in the game's 4:3 mode too, the console's 4:3 picture
- * in the middle of the screen (debugging; they follow the aspect ratio otherwise). */
+/* NGB_MENUS_43=1: on a wide screen the game's 4:3 mode, play and the 2D screens, the console's 4:3 picture
+ * in the middle of the screen (debugging; the widescreen mode otherwise). */
 static int menus_43(void)
 {
     static int env = -1;
@@ -715,13 +713,9 @@ void ngb_aspect_tick(void)
         int movie = s_movie_ms && now_ms() - s_movie_ms < 200;
         /* On a wide screen the game's widescreen mode throughout -- its own 16:9 look, every screen as it
          * draws it (src/d3d/vk/backend.cpp stretches its 2D, no wider than 16:9). HUD Aspect Corrected (setting 42,
-         * #220; NGB_HUD_FIXED=1 too): play in the 4:3 mode with the HUD drawn in its own shape, and the 16:9 mode
-         * for the menus it can tell. */
-        static int hud_env = -1;
-        if (hud_env < 0)
-            hud_env = getenv("NGB_HUD_FIXED") != NULL;
-        int hud_fixed = hud_env || ngb_pc_setting(42);
-        int two_d = hud_fixed ? !menus_43() && (s_menu_now || s_menu_last || s_screen_2d) : !menus_43();
+         * #220) too: the renderer draws only the HUD's elements in their own shape (#219: play in the 4:3 mode drew
+         * the messages, the letters and Game Over another size for a frame as the mode changed). */
+        int two_d = !menus_43();
         int want = s_flags_wide || (s_screen_wide && (s_boot || movie || two_d));
         if ((MEM32(0x9776A8) >> 4 & 1) != (uint32_t)want || (MEM32(0xD21748) & 1) != (uint32_t)want)
         {
