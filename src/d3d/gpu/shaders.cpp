@@ -1144,6 +1144,21 @@ std::string QuadHlsl(std::string s) {
                      "        oT3.xy += float2(dot(uvg[3].xy, dq), dot(uvg[3].zw, dq));\n"
                      "        p.xy = sp;\n"
                      "    }\n");
+    // and again after it, on the target's own pixels (surf.w of them to the console's): narrowed off them, words
+    // drawn sliding or growing (the Ultimate Technique's bonus) shimmered. Pieces meeting before still meet: the
+    // same edge narrows to the same place. (On the console's coarser pixels a line a pixel wide could vanish.)
+    const std::string shift2 = "    p.xy += 0.5;\n";
+    at = s.find(shift2);
+    if (at != std::string::npos)
+        s.insert(at, "    if (qsnap.x > 0 && (ext.x > 0 || ext.z > 0)) {\n"
+                     "        float2 sp = ceil((p.xy + 0.5) * surf.w - 0.0001) / surf.w - 0.5;\n"
+                     "        float2 dq = (sp - p.xy) / float2(ext.x > 0 ? ext.x : 1, ext.z > 0 ? ext.z : 1);\n"
+                     "        oT0.xy += float2(dot(uvg[0].xy, dq), dot(uvg[0].zw, dq));\n"
+                     "        oT1.xy += float2(dot(uvg[1].xy, dq), dot(uvg[1].zw, dq));\n"
+                     "        oT2.xy += float2(dot(uvg[2].xy, dq), dot(uvg[2].zw, dq));\n"
+                     "        oT3.xy += float2(dot(uvg[3].xy, dq), dot(uvg[3].zw, dq));\n"
+                     "        p.xy = sp;\n"
+                     "    }\n");
     return s;
 }
 }  // namespace gpu
