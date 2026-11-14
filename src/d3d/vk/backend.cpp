@@ -3498,23 +3498,26 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 // and what continues such a line from the left, its letters drawn left to right (the Ultimate
                 // Technique's bonus: "Ultimate Techniq" kept to the corner, "ues" past 30% about the middle) -- this
                 // frame's line, or the frame before's own pieces only (what joined never holds itself there)
-                // (beside the line's end -- a letter or a word, not a box across the band -- and the HUD's, drawn
-                // after the frame's 3D: never its screen-space mist or spray)
-                const bool after3d = !last3d_prev_ || st_.drawn >= last3d_prev_;
+                // (beside the line's end, a letter or a word: not a box or the 3D's mist across the band. Not by
+                // the draw count against the frame before's 3D -- a frame with less 3D drew the HUD earlier, and the
+                // last letters went about the middle for it, a flicker)
+                // Only lines of words and the panel's lines (thin) say where the line ends: a mist sheet kept to the
+                // corner as before, but its far edge is no line's.
+                const bool thin = y1 - y0 < h * 0.08f;
                 const float line_end = std::max(mid_left_now_, mid_left_prev_);
-                const bool cont = !own && after3d && y1 >= h * 0.3f && y0 < h * 0.45f && x0 < w / 2 && !gauge &&
+                const bool cont = !own && thin && y1 >= h * 0.3f && y0 < h * 0.45f && x0 < w / 2 && !gauge &&
                                   x1 - x0 < w * 0.1f && x0 <= line_end + 4 && x0 >= line_end - w * 0.03f;
                 const bool reach = own || cont;
-                if (own && cxm < w / 2 && after3d) mid_left_own_ = std::max(mid_left_own_, x1);
-                if (((own && cxm < w / 2) || cont) && after3d) mid_left_now_ = std::max(mid_left_now_, x1);
+                if (own && thin && cxm < w / 2) mid_left_own_ = std::max(mid_left_own_, x1);
+                if ((own && thin && cxm < w / 2) || cont) mid_left_now_ = std::max(mid_left_now_, x1);
                 // (along the top, what continues the health bar from the left -- its end, with the longer bar of
                 // the Life of the Gods past 70% of the width -- stays with it, not alone in the right corner)
                 const bool top_left = y1 < h * 0.3f &&
                                       (x0 < w * 0.7f || x0 <= std::max(top_left_now_, top_left_prev_) + 4);
-                // (only the top-left HUD itself extends it -- starting in the left 30%, drawn after the frame's 3D, so
-                // not the 3D's screen-space mist and spray -- one step past it, never a chain: what joined would hold
-                // itself there)
-                if (y1 < h * 0.3f && x0 < w * 0.3f && (!last3d_prev_ || st_.drawn >= last3d_prev_))
+                // (only the top-left HUD itself extends it -- starting in the left 30%, a thin band as the bar, so not
+                // the 3D's screen-space mist and spray; not by the draw count against the frame before's 3D, which
+                // failed on frames with less 3D -- one step past it, never a chain: what joined would hold itself there)
+                if (y1 < h * 0.3f && x0 < w * 0.3f && y1 - y0 < h * 0.08f)
                     top_left_now_ = std::max(top_left_now_, x1);
                 c.ext[1] = y1 < h * 0.3f ? (top_left ? 0.0f : w)
                          : reach ? (cont || cxm < w / 2 ? 0.0f : w)
