@@ -3456,15 +3456,17 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 // switches): the console's 4:3 picture, all of it narrowed alike about the middle and clipped
                 // there, black beyond (its pieces -- tiles, scrolling layers reaching off the screen -- only
                 // line up drawn alike)
-                // An item's or a tip's screen over play (the cover's, not a menu's): as drawn, as with HUD Aspect
-                // Stretched -- its art to 16:9 and the game's own tiles beyond it to the sides on a wider screen
-                // (narrowed and clipped to 16:9 those were cut off, bars beside it)
+                // An item's or a tip's screen over play (the cover's, not a menu's): as with HUD Aspect Stretched
                 const bool over_play = !ScreenFrame(threed_) && !((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30);
-                if (!over_play) {
-                    c.ext[0] = k;
+                // (over play as with Stretched: what covers most of the screen, the background, across it; the
+                // rest -- the item, its name, the panel -- in the middle 16:9)
+                const bool fills = over_play && x1 - x0 >= w * 0.85f && y1 - y0 >= h * 0.75f;
+                const float kk = over_play ? std::min(1.0f, k * 4.0f / 3.0f) : k;
+                if (!fills && kk < 0.999f) {
+                    c.ext[0] = kk;
                     c.ext[1] = w / 2;
-                    hud_clip0 = w / 2 * (1 - k);
-                    hud_clip1 = w / 2 * (1 + k);
+                    hud_clip0 = w / 2 * (1 - kk);
+                    hud_clip1 = w / 2 * (1 + kk);
                 }
             } else if (n && k < 0.999f && !rt_tex && x1 - x0 < w * 0.89f && x1 > 0 && x0 < w) {
                 // the HUD along the top (the health bar, ninpo, the projectile icon under them) keeps to

@@ -1130,12 +1130,14 @@ std::string QuadHlsl(std::string s) {
     // texture coordinates move with them along their gradients. Shifted half a console pixel as everything is,
     // an edge at a whole coordinate left a strip of the target uncovered above 1x (the top and left of a full
     // screen fade, #83). At 1x the same pixels and coordinates as before.
-    const std::string shift = "    p.xy += 0.5;\n";
+    // Before the narrowing (ext): pieces meeting at an edge keep meeting -- snapped after it, two tiles of an item's
+    // screen at 21:9 rounded apart and a moving black line showed between them (#219).
+    const std::string shift = "    if (ext.x > 0) p.x = ext.y";
     size_t at = s.find(shift);
     if (at != std::string::npos)
         s.insert(at, "    if (qsnap.x > 0) {\n"
                      "        float2 sp = ceil(p.xy - 0.0001) - 0.5;\n"
-                     "        float2 dq = (sp - p.xy) / float2(ext.x > 0 ? ext.x : 1, ext.z > 0 ? ext.z : 1);\n"
+                     "        float2 dq = sp - p.xy;\n"
                      "        oT0.xy += float2(dot(uvg[0].xy, dq), dot(uvg[0].zw, dq));\n"
                      "        oT1.xy += float2(dot(uvg[1].xy, dq), dot(uvg[1].zw, dq));\n"
                      "        oT2.xy += float2(dot(uvg[2].xy, dq), dot(uvg[2].zw, dq));\n"
