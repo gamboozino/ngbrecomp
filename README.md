@@ -174,8 +174,9 @@ of the pause menu. Changes apply at once and are saved.
   bright lights; off is the console's look), Lower Detail Under Load, Multithreaded Renderer (drawing on a
   thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC)
 - **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9, 32:9), window size, windowed / fullscreen /
-  borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, skip the
-  warnings and intro movies
+  borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, HUD Style
+  (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the game's widescreen
+  mode, or Corrected: the HUD in its own 4:3 shape on a wide screen), skip the warnings and intro movies
 - **Sound**: Positional Audio (3D sounds placed left and right: Mixed, the default, half the sound chip's
   filters and half panned by direction, the easiest to place; Clear, by level only; Console, through the sound
   chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo

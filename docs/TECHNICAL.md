@@ -287,10 +287,17 @@ of panels drawn over the game (a chapter clear: an element about the middle of t
 of its width and nearly half its height, across its middle -- an area's name is not one -- for 4 frames
 running; over after 8 without) is kept whole in
 the middle, as a menu: what is inside the panel's box goes with it, the HUD around it stays where it is. At 4:3 the game is in its 4:3 mode and everything is its 4:3 picture.
-(Earlier versions kept the game in its 4:3 mode in play and narrowed its HUD to its 4:3 shape,
-switching modes for the menus; the screens it could not tell apart in time -- item pickups, chapter
-clears, leaving the save menu -- came out half one way and half the other. `NGB_HUD_FIXED=1` brings
-that back, for comparison.) Movies play in the widescreen mode too, where the game follows its own Movie Display
+Display > "HUD Aspect" Corrected (setting 42, `NGB_HUD_FIXED=1` too) keeps that same widescreen mode and
+only narrows the HUD's elements -- each about its side or corner, as "HUD Style" Compact makes them smaller
+-- to their own 4:3 shape; everything else (Game Over, item messages, Ayane's letters, subtitles) is drawn
+as with Stretched. (Up to 0.9.65 Corrected played in the game's 4:3 mode and switched to its widescreen
+mode for the menus a frame late, so those screens changed size as they came and went, #219.) What keeps
+to the bottom (the "Interact" prompt) stays as Stretched draws it: pressing Interact at Muramasa's shop,
+the game holds its last picture and draws a board where it put the prompt. Only frames that drew 3D (this
+one or the one before) count as play for Compact and Corrected; a piece drawn before the frame's 3D (the
+karma window's figures, during a Talisman of Rebirth's revival) only when it repeats a HUD piece of the
+frame before; and the karma window and health bar, kept to a top corner from the screen's edge, are never
+taken by a picture or panel about the middle (the talisman's picture and flash). Movies play in the widescreen mode too, where the game follows its own Movie Display
 Ratio (Options, Video Settings): 16:9 across the screen, or 4:3 with bars at the sides. (Switching to
 its 4:3 mode for a 4:3 movie narrowed it twice, #28.) The mouse is mapped to the menus the same way.
 `NGB_HUD_RATIO_LOG=1` logs the 2D draws not drawn texel for pixel; `NGB_MODE_LOG=1` the mode each
