@@ -453,6 +453,7 @@ private:
     bool hud_menu_ = false;    // the frame before was a full-screen menu (most of it 2D pictures)
     float gauge_x_[4][2] = {}, gauge_prev_[4][2] = {};   // tall HUD gauges' columns (this frame, the one before)
     float top_left_now_ = -1e30f, top_left_prev_ = -1e30f;   // how far the top-left HUD (the health bar) reaches
+    float mid_left_now_ = -1e30f, mid_left_own_ = -1e30f, mid_left_prev_ = -1e30f;   // and the line under the karma window
     // The HUD in play on a screen not 16:9 (HudPlace): this frame's pieces, and the elements -- pieces near
     // each other, together -- of the frame before, each with the side it keeps to
     struct HudBox { float x0, x1, y0, y1; uint32_t at; };   // (at: the draw's number in its frame)
@@ -3492,8 +3493,20 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 // what is above it; about the middle the fire and the flash were drawn away from their icon. Not a
                 // gauge or a picture over play; what is lower (an area's name) or further in as before
                 const float cxm = (x0 + x1) / 2;
-                const bool reach = y1 >= h * 0.3f && y0 < h * 0.45f && (cxm < w * 0.3f || cxm > w * 0.7f) && !gauge &&
-                                   !hud_picture(x0, x1, y0, y1, w, h);
+                const bool own = y1 >= h * 0.3f && y0 < h * 0.45f && (cxm < w * 0.3f || cxm > w * 0.7f) && !gauge &&
+                                 !hud_picture(x0, x1, y0, y1, w, h);
+                // and what continues such a line from the left, its letters drawn left to right (the Ultimate
+                // Technique's bonus: "Ultimate Techniq" kept to the corner, "ues" past 30% about the middle) -- this
+                // frame's line, or the frame before's own pieces only (what joined never holds itself there)
+                // (beside the line's end -- a letter or a word, not a box across the band -- and the HUD's, drawn
+                // after the frame's 3D: never its screen-space mist or spray)
+                const bool after3d = !last3d_prev_ || st_.drawn >= last3d_prev_;
+                const float line_end = std::max(mid_left_now_, mid_left_prev_);
+                const bool cont = !own && after3d && y1 >= h * 0.3f && y0 < h * 0.45f && x0 < w / 2 && !gauge &&
+                                  x1 - x0 < w * 0.1f && x0 <= line_end + 4 && x0 >= line_end - w * 0.03f;
+                const bool reach = own || cont;
+                if (own && cxm < w / 2 && after3d) mid_left_own_ = std::max(mid_left_own_, x1);
+                if (((own && cxm < w / 2) || cont) && after3d) mid_left_now_ = std::max(mid_left_now_, x1);
                 // (along the top, what continues the health bar from the left -- its end, with the longer bar of
                 // the Life of the Gods past 70% of the width -- stays with it, not alone in the right corner)
                 const bool top_left = y1 < h * 0.3f &&
@@ -3504,7 +3517,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 if (y1 < h * 0.3f && x0 < w * 0.3f && (!last3d_prev_ || st_.drawn >= last3d_prev_))
                     top_left_now_ = std::max(top_left_now_, x1);
                 c.ext[1] = y1 < h * 0.3f ? (top_left ? 0.0f : w)
-                         : reach ? (cxm < w / 2 ? 0.0f : w)
+                         : reach ? (cont || cxm < w / 2 ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
                 // HUD Style Compact (#121): what keeps to a side smaller toward it, and toward the top along the top
                 if (compact && c.ext[1] != w / 2) {
@@ -4529,6 +4542,8 @@ void VulkanBackend::Present(const Surface& front) {
     gauges_now_ = 0;
     top_left_prev_ = top_left_now_;
     top_left_now_ = -1e30f;
+    mid_left_prev_ = mid_left_own_;
+    mid_left_now_ = mid_left_own_ = -1e30f;
     threed_prev_ = threed_;
     threed_ = 0;
     paused_now_ = false;
