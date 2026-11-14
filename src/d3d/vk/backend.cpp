@@ -3498,8 +3498,11 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 // the Life of the Gods past 70% of the width -- stays with it, not alone in the right corner)
                 const bool top_left = y1 < h * 0.3f &&
                                       (x0 < w * 0.7f || x0 <= std::max(top_left_now_, top_left_prev_) + 4);
-                if (y1 < h * 0.3f && x0 < w * 0.7f)   // (only what is left on its own: one step past it, never a chain
-                    top_left_now_ = std::max(top_left_now_, x1);   // -- what joined would hold itself there)
+                // (only the top-left HUD itself extends it -- starting in the left 30%, drawn after the frame's 3D, so
+                // not the 3D's screen-space mist and spray -- one step past it, never a chain: what joined would hold
+                // itself there)
+                if (y1 < h * 0.3f && x0 < w * 0.3f && (!last3d_prev_ || st_.drawn >= last3d_prev_))
+                    top_left_now_ = std::max(top_left_now_, x1);
                 c.ext[1] = y1 < h * 0.3f ? (top_left ? 0.0f : w)
                          : reach ? (cxm < w / 2 ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
