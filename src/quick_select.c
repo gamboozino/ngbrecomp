@@ -397,6 +397,15 @@ static void picture(NgbQuickEntry *e)
         art = "re_mp_l";
         name = "Great Devil Elixir";
         break;
+    /* Ayane's rice balls (#224): their own pictures, the game's 0x0A and 0x0B after the Spirit Elixirs' */
+    case 0x172:
+        art = "omusubi";
+        name = "Ayane's Rations";
+        break;
+    case 0x180:
+        art = "omusu_ex";
+        name = "Ayane's Ration Bundle";
+        break;
     case 0x181:
         art = "re_mp_ex";
         name = "Fragrance of Dayflower";
