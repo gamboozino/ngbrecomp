@@ -452,6 +452,7 @@ private:
     float hud_cover_ = 0;      // this frame's 2D picture area, in screens
     bool hud_menu_ = false;    // the frame before was a full-screen menu (most of it 2D pictures)
     float gauge_x_[4][2] = {}, gauge_prev_[4][2] = {};   // tall HUD gauges' columns (this frame, the one before)
+    float top_left_now_ = -1e30f, top_left_prev_ = -1e30f;   // how far the top-left HUD (the health bar) reaches
     // The HUD in play on a screen not 16:9 (HudPlace): this frame's pieces, and the elements -- pieces near
     // each other, together -- of the frame before, each with the side it keeps to
     struct HudBox { float x0, x1, y0, y1; uint32_t at; };   // (at: the draw's number in its frame)
@@ -3490,7 +3491,13 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 const float cxm = (x0 + x1) / 2;
                 const bool reach = y1 >= h * 0.3f && y0 < h * 0.45f && (cxm < w * 0.3f || cxm > w * 0.7f) && !gauge &&
                                    !hud_picture(x0, x1, y0, y1, w, h);
-                c.ext[1] = y1 < h * 0.3f ? (x0 < w * 0.7f ? 0.0f : w)
+                // (along the top, what continues the health bar from the left -- its end, with the longer bar of
+                // the Life of the Gods past 70% of the width -- stays with it, not alone in the right corner)
+                const bool top_left = y1 < h * 0.3f &&
+                                      (x0 < w * 0.7f || x0 <= std::max(top_left_now_, top_left_prev_) + 4);
+                if (y1 < h * 0.3f && x0 < w * 0.7f)   // (only what is left on its own: one step past it, never a chain
+                    top_left_now_ = std::max(top_left_now_, x1);   // -- what joined would hold itself there)
+                c.ext[1] = y1 < h * 0.3f ? (top_left ? 0.0f : w)
                          : reach ? (cxm < w / 2 ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
                 // HUD Style Compact (#121): what keeps to a side smaller toward it, and toward the top along the top
@@ -4474,6 +4481,8 @@ void VulkanBackend::Present(const Surface& front) {
         gauge_prev_[g][1] = g < gauges_now_ ? gauge_x_[g][1] : -1e30f;
     }
     gauges_now_ = 0;
+    top_left_prev_ = top_left_now_;
+    top_left_now_ = -1e30f;
     threed_prev_ = threed_;
     threed_ = 0;
     paused_now_ = false;
