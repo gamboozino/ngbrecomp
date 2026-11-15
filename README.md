@@ -187,7 +187,8 @@ of the pause menu. Changes apply at once and are saved.
   Charging**, Ultimate Techniques charged only by absorbing essence, not by holding attack (#120); **Skip Any
   Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
-  ignores it for a while (#116)
+  ignores it for a while (#116); **Bow Crosshair**, a dot in the middle of the screen while aiming a bow in first
+  person, the game's own glow from an arrow's head (#228)
 - **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
   hit kill (any hit that hurts an enemy or a boss kills it).
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every

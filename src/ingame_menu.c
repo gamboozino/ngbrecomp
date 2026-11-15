@@ -152,6 +152,7 @@ int ngb_pc_setting(int which)
     case 41: return s_running.hud_style;
     case 42: return s_running.hud_aspect;
     case 43: return s_running.talisman;
+    case 44: return s_running.bow_crosshair;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 31: return s_running.intercept;
@@ -197,6 +198,7 @@ void ngb_pc_set_setting(int which, int value)
     case 41: s_running.hud_style = !!value; break;
     case 42: s_running.hud_aspect = !!value; break;
     case 43: s_running.talisman = !!value; break;
+    case 44: s_running.bow_crosshair = !!value; break;
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 31: s_running.intercept = value < 0 ? 0 : value > 2 ? 2 : value; break;

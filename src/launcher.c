@@ -204,6 +204,8 @@ void ngb_settings_load(NgbSettings *s)
             s->hud_style = atoi(val) != 0;
         } else if (!strcmp(key, "talisman_of_rebirth")) {
             s->talisman = atoi(val) != 0;
+        } else if (!strcmp(key, "bow_crosshair")) {
+            s->bow_crosshair = atoi(val) != 0;
         } else if (!strcmp(key, "hud_aspect")) {
             s->hud_aspect = atoi(val) != 0;
         } else if (!strcmp(key, "show_hud")) {
@@ -298,6 +300,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "hud_style = %d\n", s->hud_style);
     fprintf(f, "hud_aspect = %d\n", s->hud_aspect);
     fprintf(f, "talisman_of_rebirth = %d\n", s->talisman);
+    fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
     fprintf(f, "audio_output = %d\n", s->audio_output);
     fprintf(f, "quick_menu_freeze = %d\n", s->quick_menu_freeze);
     fprintf(f, "quick_menu_scale = %d\n", ngb_quick_scale_value(s->quick_menu_scale));

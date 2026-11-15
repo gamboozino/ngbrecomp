@@ -43,6 +43,7 @@ int ngb_quick_frozen(void);
 #define NGB_QUICK_HEIGHT 312
 /* A small transparent, premultiplied BGRA layer; no game-frame readback. */
 int ngb_quick_layer(uint32_t *pixels);
+int ngb_crosshair_picture(uint32_t *pixels, int size);   /* Bow Crosshair's picture (src/quick_ui.c) */
 int ngb_quick_take_command(uint16_t *item, int *category);
 int ngb_quick_take_navigation(void);
 void ngb_quick_tick(void);

@@ -307,6 +307,12 @@ window sizes 1720x720 to 5120x2160) and 32:9 (two 16:9 screens side by side, 256
 the 3D widened as for 16:10. The game's own choice of what to draw is left as it is; no object
 has been seen appearing late at the far edges.
 
+Bow Crosshair (Gameplay, #228): while a bow is the ranged weapon equipped (Ryu's slot `0x58A572`, by his health
+block) and the first-person view is up (its routine `0x0004F800` ran this frame or the last, src/camera.c), the
+renderer blends a dot over the middle of the presented picture, after the game's own drawing, as the frame counter
+is: game.spr's sprite 85 (`demo.afs`, the glow at an explosive arrow's head), about 2% of the height across and kept
+round at every aspect ratio. Off with the HUD.
+
 The boot "Warnings" screen is always skipped (`NGB_KEEP_WARNINGS=1` shows it).
 
 For glitches that only show in play: F7 records the next 300 frames to `~/ngb-trace-<n>/` -- a

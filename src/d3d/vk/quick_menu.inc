@@ -168,10 +168,19 @@ void VulkanBackend::QuickMenu(Image& dst) {
 // pending, when not empty, uploaded into layer first. draw false: the upload only. False when nothing was drawn.
 bool VulkanBackend::TextLayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, bool draw, float x,
                                   float y) {
+    float sx, up;
+    TextScale(dst, &sx, &up);
+    return LayerDraw(dst, layer, pending, kFpsWidth, kFpsHeight, draw, x, y, kFpsWidth * sx * up, kFpsHeight * up);
+}
+
+// A premultiplied lw x lh picture blended over dst into the vw x vh rectangle at x, y (pending, when not empty,
+// uploaded into layer first; draw false: the upload only). False when nothing was drawn.
+bool VulkanBackend::LayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, uint32_t lw, uint32_t lh,
+                              bool draw, float x, float y, float vw, float vh) {
     if (!layer.image) {
-        if (!CreateImage(layer, kColorFormat, kFpsWidth, kFpsHeight, 1, 1, false, false,
+        if (!CreateImage(layer, kColorFormat, lw, lh, 1, 1, false, false,
                          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return false;
-        if (pending.empty()) pending.assign(size_t(kFpsWidth) * kFpsHeight, 0);   // clear until lettered
+        if (pending.empty()) pending.assign(size_t(lw) * lh, 0);   // clear until made
     }
     if (!pending.empty()) {
         VkDeviceSize at = Upload(pending.data(), pending.size() * sizeof(uint32_t), 16);
@@ -179,7 +188,7 @@ bool VulkanBackend::TextLayerDraw(Image& dst, Image& layer, std::vector<uint32_t
         VkBufferImageCopy c{};
         c.bufferOffset = at;
         c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        c.imageExtent = {uint32_t(kFpsWidth), uint32_t(kFpsHeight), 1};
+        c.imageExtent = {lw, lh, 1};
         d_.vkCmdCopyBufferToImage(cmd_, ring_, layer.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
         pending.clear();
     }
@@ -215,9 +224,7 @@ bool VulkanBackend::TextLayerDraw(Image& dst, Image& layer, std::vector<uint32_t
     ri.renderArea = {{0, 0}, {dst.w, dst.h}}; ri.layerCount = 1;
     ri.colorAttachmentCount = 1; ri.pColorAttachments = &ca;
     d_.vkCmdBeginRendering(cmd_, &ri);
-    float sx, up;
-    TextScale(dst, &sx, &up);
-    VkViewport vp{x, y, kFpsWidth * sx * up, kFpsHeight * up, 0, 1};
+    VkViewport vp{x, y, vw, vh, 0, 1};
     VkRect2D sc{{0, 0}, {dst.w, dst.h}};
     d_.vkCmdSetViewport(cmd_, 0, 1, &vp); d_.vkCmdSetScissor(cmd_, 0, 1, &sc);
     d_.vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
@@ -269,4 +276,16 @@ void VulkanBackend::VersionLabel(Image& dst) {
     float x = dst.w - dst.h * 0.012f * sx - version_w_ * sx * up;
     float y = dst.h - dst.h * 0.012f - version_h_ * up;
     TextLayerDraw(dst, version_layer_, version_pending_, true, x, y);
+}
+
+// Bow Crosshair (#228): the game's glow at an arrow's head in the middle of the picture shown -- where the
+// first-person view aims, whatever the display's shape -- round (TextScale's sx undoes the picture's stretch to the
+// display's aspect) and about 2% of the height across, a small dot as NG2's.
+void VulkanBackend::Crosshair(Image& dst) {
+    if (!crosshair_made_) return;
+    float sx, up;   // (up: the text's, unused here)
+    TextScale(dst, &sx, &up);
+    float size = dst.h * 0.0275f;   // (the glow 80% of the picture: about 2.2% of the height)
+    LayerDraw(dst, crosshair_layer_, crosshair_pending_, kCrosshairSize, kCrosshairSize, true,
+              dst.w * 0.5f - size * sx * 0.5f, dst.h * 0.5f - size * 0.5f, size * sx, size);
 }

@@ -57,7 +57,9 @@ extern volatile int ngb_fps_target_h;
 int ngb_fps_cap(int h, float* scale);
 int ngb_version_shown(void);
 int ngb_version_picture(uint32_t* out, size_t max, int* w, int* h, unsigned* serial);
+int ngb_bow_aiming(void);   // src/camera.c: Bow Crosshair
 }
+constexpr int kCrosshairSize = 64;   // Bow Crosshair's picture (src/quick_ui.c ngb_crosshair_picture)
 constexpr int kFpsWidth = 1024, kFpsHeight = 128;   // the counter's picture, at most (src/fps_text.c's)
 int ngb_pc_setting(int which);
 }
@@ -410,12 +412,18 @@ private:
     Image version_layer_;   // the version in the main menu's corner (VersionLabel, quick_menu.inc)
     std::vector<uint32_t> version_pending_;
     int version_w_ = 0, version_h_ = 0;
+    Image crosshair_layer_;   // Bow Crosshair (Crosshair, quick_menu.inc)
+    std::vector<uint32_t> crosshair_pending_;
+    bool crosshair_made_ = false;
     Image quick_background_, quick_blur_, quick_full_;   // the quick menu's paused background: small, its blur's
                                                           // other half, and the frame blitted for it
     VkSampler quick_sampler_ = VK_NULL_HANDLE;
     void QuickMenu(Image& dst);
     void FpsCounter(Image& dst);
     void VersionLabel(Image& dst);
+    void Crosshair(Image& dst);
+    bool LayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, uint32_t lw, uint32_t lh, bool draw,
+                   float x, float y, float vw, float vh);
     bool TextLayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, bool draw, float x, float y);
     void TextScale(const Image& dst, float* sx, float* up);
     void QuickMenuBackground(Image& dst);
@@ -1028,6 +1036,7 @@ VulkanBackend::~VulkanBackend() {
         DestroyImage(quick_background_);
         DestroyImage(fps_layer_);
         DestroyImage(version_layer_);
+        DestroyImage(crosshair_layer_);
         DestroyImage(quick_blur_);
         DestroyImage(quick_full_);
         if (glow_soft_sampler_) d_.vkDestroySampler(dev_,glow_soft_sampler_,nullptr);
@@ -2727,6 +2736,14 @@ void VulkanBackend::CaptureQuick(QuickPeek& q) {
             for (int y = 0; y < q.version_h; y++)
                 std::memcpy(&q.version_px[size_t(y) * kFpsWidth], &px[size_t(y) * w], sizeof(uint32_t) * q.version_w);
         }
+    }
+    q.crosshair = ngb_bow_aiming();
+    q.crosshair_px.clear();
+    static bool crosshair_made;   // (the title's thread: made once, the game's files read)
+    if (q.crosshair && !crosshair_made) {
+        q.crosshair_px.resize(size_t(kCrosshairSize) * kCrosshairSize);
+        crosshair_made = ngb_crosshair_picture(q.crosshair_px.data(), kCrosshairSize) != 0;
+        if (!crosshair_made) q.crosshair_px.clear();
     }
     q.percent = ngb_pc_setting(20);
     q.frozen = 0;
@@ -4576,6 +4593,11 @@ void VulkanBackend::Present(const Surface& front) {
             }
         }
     }
+    if (!qk_.crosshair_px.empty()) {
+        crosshair_pending_.swap(qk_.crosshair_px);
+        crosshair_made_ = true;
+    }
+    if (show && qk_.crosshair) Crosshair(*show);   // (under the quick menu, which the game allows none of while aiming)
     if (show) QuickMenu(*show);
     quick_blurred_ = false;
     if (front.data != fronts_[0] && front.data != fronts_[1] && front.data != fronts_[2] && front.data != fronts_[3]) {

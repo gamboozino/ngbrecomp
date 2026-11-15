@@ -718,6 +718,21 @@ static void category_panel(int category, const NgbQuickEntry *entry, int cy, uns
             184, (float)cy, 76, 22, entry->art[0] ? alpha : alpha / 3);
 }
 
+/* Bow Crosshair (#228): the game's own glow at an arrow's head (game.spr, sprite 85: white at its middle, orange
+ * around), on a clear size x size picture, premultiplied as the quick menu's layer. 0 while the sprite is missing. */
+int ngb_crosshair_picture(uint32_t *pixels, int size)
+{
+    Icon *it = icon("demo.afs/game.spr#85");
+    if (!it || !it->px)
+        return 0;
+    memset(pixels, 0, (size_t)size * size * 4);
+    s_px = pixels;
+    s_w = size;
+    s_h = size;
+    art_fit(it, size * 0.5f, size * 0.5f, size * 0.8f, size * 0.8f, 255);   /* (room for the faint halo past its bounds) */
+    return 1;
+}
+
 int ngb_quick_layer(uint32_t *pixels)
 {
     if (!ngb_pc_setting(20)) return 0;
