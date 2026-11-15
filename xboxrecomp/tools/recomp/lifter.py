@@ -551,6 +551,22 @@ def _make_condition(jcc, flag_setter, flag_ops):
             return "!_cf", desc
         return None
 
+    # A join whose predecessors each published a result into _fa/_fas
+    # (translator._merge_result_snapshot): its zero and its sign.
+    if flag_setter == "__result_in_fa":
+        if flag_ops and jcc in ("je", "jz", "jne", "jnz"):
+            dest = _fmt_operand_read(flag_ops[0])   # (as the zero-flag merge words it)
+            return (f"({dest} == 0)" if jcc in ("je", "jz") else f"({dest} != 0)"), desc
+        if jcc in ("je", "jz"):
+            return "(_fa == 0)", desc
+        if jcc in ("jne", "jnz"):
+            return "(_fa != 0)", desc
+        if jcc == "js":
+            return "(_fas < 0)", desc
+        if jcc == "jns":
+            return "(_fas >= 0)", desc
+        return None
+
     if flag_setter == "__zf_from_dest" and flag_ops:
         dest = _fmt_operand_read(flag_ops[0])
         if jcc in ("je", "jz"):

@@ -63,6 +63,9 @@ def _merge_flag_states(states):
         if mixed:
             return ("__cmp_mixed_width", list(first[1])) if first[0] == "cmp" else None
         return first
+    res = _merge_result_snapshot(states)
+    if res is not None:
+        return res
     zf = _merge_zero_flag(states)
     if zf is not None:
         return zf
@@ -75,6 +78,40 @@ def _merge_flag_states(states):
            for st in states):
         return ("__cf_in_cf", [])
     return None
+
+
+def _merge_result_snapshot(states):
+    """Predecessors that each published their result into _fa/_fas.
+
+    Every setter in _RESULT_SNAPSHOT_SETTERS writes its result, masked and
+    sign-extended at its own width, into _fa/_fas next to the write. A join of
+    two of them -- `add eax, -12` on one edge and `add eax, -2` on the other --
+    is not one state (the operands differ), and the zero-flag merge below
+    answers only je/jne. But the zero and the sign of the result are in that
+    snapshot whichever predecessor ran, so a js or jns there is answerable too.
+
+    Ninja Gaiden Black's Techniques list picks a move's icon this way
+    (0x001EADC8): the icon's number less 2 or 12, and `js` past the draw when
+    there is none. Lifted to the never-taken fallback, every plain move drew
+    the sprite before the first icon.
+
+    Only ZF and SF: carry and overflow need the operands, which differ. The
+    common destination rides along so that je/jne keep the text the zero-flag
+    merge gave them.
+    """
+    from .lifter import _RESULT_SNAPSHOT_SETTERS
+    dests = set()
+    for setter, ops in states:
+        if setter not in _RESULT_SNAPSHOT_SETTERS or not ops:
+            return None
+        op = ops[0]
+        dests.add(op.reg if getattr(op, "type", None) == "reg" and op.reg else None)
+    # Only with one destination register for all: the joins the zero-flag
+    # merge below claimed already, so nothing that reached the carry merge or
+    # the per-predecessor plan (__joined) before is taken from them.
+    if len(dests) != 1 or None in dests:
+        return None
+    return ("__result_in_fa", [states[0][1][0]])
 
 
 def _merge_zero_flag(states):

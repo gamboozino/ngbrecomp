@@ -62,3 +62,29 @@ def test_sse_compares_with_different_operands_merge():
     b = [Operand(type='reg', reg='xmm7'), Operand(type='reg', reg='xmm5')]
     merged = _merge_flag_states([('comiss', a), ('ucomiss', b)])
     assert merged is not None and merged[0] in ('comiss', 'ucomiss')
+
+
+def test_result_setters_join_answers_sign_and_zero():
+    """Two adds reaching one js (Ninja Gaiden Black's 0x001EADC8, the Techniques
+    list's icon): each published its result into _fa/_fas, so the sign is
+    there whichever ran. It was the never-taken _flags fallback."""
+    # cmp eax,0xA; jl L1; add eax,-12; jmp J; L1: add eax,-2; J: js END; nop; END: ret
+    image = bytes.fromhex('83f80a7c0583c0f4eb0383c0fe78019 0c3'.replace(' ', ''))
+    config._install([config.Section('.text', BASE, len(image), 0, len(image), True)],
+                    entry_point=BASE, kernel_thunk_addr=BASE, origin='flag-join-test')
+    db = {BASE: {'start': hex(BASE), 'end': BASE + len(image), '_addr': BASE, 'size': len(image)}}
+    code = FunctionTranslator(image, db).translate_function(BASE, db[BASE])
+    assert '(_fas < 0)' in code, code
+    assert '_flags /* js' not in code, code
+
+
+def test_result_setters_join_needs_one_destination():
+    """Different destinations stay with the merges that had them (the carry in
+    _cf, the per-predecessor plan); the same one gets the result marker, and
+    dec with sub still the zero flag's."""
+    a = Operand(type='reg', reg='eax')
+    c = Operand(type='reg', reg='ecx')
+    i = Operand(type='imm', imm=1)
+    assert _merge_flag_states([('add', [a, i]), ('sub', [a, i])])[0] == '__result_in_fa'
+    assert _merge_flag_states([('add', [a, i]), ('add', [c, i])])[0] == '__cf_in_cf'
+    assert _merge_flag_states([('dec', [a]), ('sub', [a, c])])[0] == '__zf_from_dest'
