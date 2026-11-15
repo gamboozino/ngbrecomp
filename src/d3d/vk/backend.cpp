@@ -2737,7 +2737,7 @@ void VulkanBackend::CaptureQuick(QuickPeek& q) {
                 std::memcpy(&q.version_px[size_t(y) * kFpsWidth], &px[size_t(y) * w], sizeof(uint32_t) * q.version_w);
         }
     }
-    q.crosshair = ngb_bow_aiming();
+    q.crosshair = uint8_t(ngb_bow_aiming());
     q.crosshair_px.clear();
     static bool crosshair_made;   // (the title's thread: made once, the game's files read)
     if (q.crosshair && !crosshair_made) {

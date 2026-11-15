@@ -37,7 +37,7 @@ struct QuickPeek {
     bool version = false;          // the port's version shown (the main menu up, src/fps_text.c)
     std::vector<uint32_t> version_px;   // its picture when it changed (kFpsWidth x kFpsHeight), else empty
     int version_w = 0, version_h = 0;   // the text's size in it
-    bool crosshair = false;             // Bow Crosshair shown (src/camera.c ngb_bow_aiming)
+    uint8_t crosshair = 0;              // Bow Crosshair shown (src/camera.c ngb_bow_aiming): 1 a bow, 2 the Strongbow
     std::vector<uint32_t> crosshair_px; // its picture once made (kCrosshairSize square), else empty
 };
 

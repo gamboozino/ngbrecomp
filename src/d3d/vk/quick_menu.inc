@@ -287,8 +287,10 @@ void VulkanBackend::Crosshair(Image& dst) {
     TextScale(dst, &sx, &up);
     float size = dst.h * 0.0275f;   // (the glow 80% of the picture: about 2.2% of the height)
     // Where arrows land (#230): a user's shot into a wall stuck 17 px right and 17 px low of the middle at 2560x1440
-    // 16:9 = 1.2% of the height each way (kept in heights, so the same angle at other aspects).
-    float right = dst.h * 0.012f * sx, down = dst.h * 0.012f;
+    // 16:9 = 1.2% of the height each way (kept in heights, so the same angle at other aspects). The Strongbow's fly
+    // straight to the middle: the dot there.
+    const bool straight = qk_.crosshair == 2;
+    float right = straight ? 0.0f : dst.h * 0.012f * sx, down = straight ? 0.0f : dst.h * 0.012f;
     LayerDraw(dst, crosshair_layer_, crosshair_pending_, kCrosshairSize, kCrosshairSize, true,
               dst.w * 0.5f + right - size * sx * 0.5f, dst.h * 0.5f + down - size * 0.5f, size * sx, size);
 }

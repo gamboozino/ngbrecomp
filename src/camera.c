@@ -31,8 +31,8 @@ int ngb_camera_first_person(void)
 
 /* Bow Crosshair (Gameplay, setting 44, #228): a bow the ranged weapon equipped (Ryu's slot 0x58A572, by his health
  * block; the bows as the quick menu knows them, src/quick_select.c) and the first-person view up -- how a bow is
- * aimed -- with the HUD on. The renderer asks as each frame is presented (src/d3d/vk/backend.cpp), on the title's
- * thread. */
+ * aimed -- with the HUD on. 2 for the Strongbow, whose arrows fly straight to the middle (#230), 1 another bow. The
+ * renderer asks as each frame is presented (src/d3d/vk/backend.cpp), on the title's thread. */
 int ngb_pc_setting(int which);
 int ngb_bow_aiming(void)
 {
@@ -41,7 +41,9 @@ int ngb_bow_aiming(void)
     if (MEM8(0x4B7640) >= 0x20)   /* (no player block, as src/quick_select.c has it) */
         return 0;
     switch (MEM16(0x58A572 + MEM8(0x4B7640) * 0x210u)) {
-    case 0x27: case 0x29: case 0x8D: case 0xE2: case 0xF8:
+    case 0xF8:
+        return 2;
+    case 0x27: case 0x29: case 0x8D: case 0xE2:
         return 1;
     }
     return 0;
