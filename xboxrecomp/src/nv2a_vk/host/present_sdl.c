@@ -39,6 +39,16 @@ static double s_aspect = 4.0 / 3.0;
 static int s_vsync;                /* 0 off, 1 mailbox, 2 adaptive, 3 FIFO */
 static volatile bool s_resized;
 
+/* A display-mode change (windowed, fullscreen, borderless) is made on the window's thread while frames are
+ * presented from others. With V-Sync off, presenting immediately right through the change hard-froze a whole
+ * system (a GTX 1060 laptop on driver 581.80 with an external screen, ngb-recomp #227; with V-Sync on it never did).
+ * So the window's thread raises s_switching and waits (up to 200 ms) for a present or swapchain under way to finish
+ * (s_in_present), presents and swapchains wait until it is done, and the swapchains made in the second after it (the new size comes
+ * in a few events) are FIFO, which waits for the display; then the chosen mode is back. */
+static int s_switching, s_in_present;
+static int64_t s_fifo_until;   /* monotonic us: FIFO until then, V-Sync off (0: no hold) */
+static bool s_fifo_held;       /* the last swapchain asked for was FIFO for the hold, not by the setting */
+
 static VkInstance s_instance;
 #ifdef __APPLE__
 static int s_surface_pending;
@@ -799,6 +809,25 @@ __attribute__((weak)) void nv2a_window_tick(void) {}
 
 __attribute__((weak)) void xbox_InputHotplugPoll(void) {}
 
+/* Around a display-mode change, on the window's thread (s_switching above). */
+static void mode_switch_begin(void)
+{
+    __atomic_store_n(&s_switching, 1, __ATOMIC_SEQ_CST);
+    int i = 0;
+    for (; i < 200 && __atomic_load_n(&s_in_present, __ATOMIC_SEQ_CST); i++)
+        SDL_Delay(1);
+    if (i == 200)
+        fprintf(stderr, "nv2a: display mode change with a present still under way after 200 ms\n");
+    SDL_Delay(20);   /* (what is queued reaches the display) */
+}
+
+static void mode_switch_end(void)
+{
+    __atomic_store_n(&s_fifo_until, g_get_monotonic_time() + 1000000, __ATOMIC_RELEASE);
+    s_resized = true;
+    __atomic_store_n(&s_switching, 0, __ATOMIC_SEQ_CST);
+}
+
 bool nv2a_window_pump(void)
 {
 #ifdef __APPLE__
@@ -818,6 +847,7 @@ bool nv2a_window_pump(void)
 
     if (__atomic_exchange_n(&s_win_req, 0, __ATOMIC_ACQ_REL)) {
         bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
+        mode_switch_begin();
         if (s_win_fs != 1 && fs)
             SDL_SetWindowFullscreen(s_window, 0);
         if (s_win_fs != 2)
@@ -831,7 +861,7 @@ bool nv2a_window_pump(void)
             borderless_apply(s_window);
         if (s_win_fs == 1 && !fs)
             SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-        s_resized = true;
+        mode_switch_end();
     }
 
     while (SDL_PollEvent(&ev)) {
@@ -851,10 +881,12 @@ bool nv2a_window_pump(void)
                 (ev.key.keysym.sym == SDLK_RETURN &&
                  (ev.key.keysym.mod & KMOD_ALT))) {
                 bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
+                mode_switch_begin();
                 SDL_SetWindowFullscreen(s_window,
                                         fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
                 if (fs)
                     SDL_SetWindowBordered(s_window, SDL_TRUE);
+                mode_switch_end();
             }
             break;
         default:
@@ -1091,6 +1123,11 @@ static VkPresentModeKHR choose_present_mode(PGRAPHVkState *r)
         mailbox |= modes[i] == VK_PRESENT_MODE_MAILBOX_KHR;
         immediate |= modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR;
         relaxed |= modes[i] == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+    }
+    s_fifo_held = false;
+    if (s_vsync == 0 && g_get_monotonic_time() < __atomic_load_n(&s_fifo_until, __ATOMIC_ACQUIRE)) {
+        s_fifo_held = true;
+        return VK_PRESENT_MODE_FIFO_KHR;   /* just after a display-mode change */
     }
     if (s_vsync == 0 && immediate)
         return VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -1523,8 +1560,40 @@ static void fit_backdrop(const uint8_t *src, int sw, int sh, uint32_t *dst,
     }
 }
 
+/* A present's side of s_switching: false (the frame skipped) while the window changes mode. */
+static bool present_enter(void)
+{
+    __atomic_store_n(&s_in_present, 1, __ATOMIC_SEQ_CST);
+    if (!__atomic_load_n(&s_switching, __ATOMIC_SEQ_CST))
+        return true;
+    __atomic_store_n(&s_in_present, 0, __ATOMIC_SEQ_CST);
+    return false;
+}
+
+static void present_leave(void)
+{
+    __atomic_store_n(&s_in_present, 0, __ATOMIC_SEQ_CST);
+}
+
+/* The FIFO hold over: a swapchain in the chosen mode again. */
+static void fifo_hold_check(void)
+{
+    if (s_fifo_held && g_get_monotonic_time() >= __atomic_load_n(&s_fifo_until, __ATOMIC_ACQUIRE))
+        s_resized = true;
+}
+
+static void present_pixels_now(PGRAPHVkState *r, VkBuffer buf, int w, int h);
+
 /* Show a w x h host picture (0xAARRGGBB) in the window. */
 static void present_pixels(PGRAPHVkState *r, VkBuffer buf, int w, int h)
+{
+    if (!present_enter())
+        return;
+    present_pixels_now(r, buf, w, h);
+    present_leave();
+}
+
+static void present_pixels_now(PGRAPHVkState *r, VkBuffer buf, int w, int h)
 {
     unsigned f = s_frame++ % FRAMES_IN_FLIGHT;
     uint32_t idx;
@@ -1613,9 +1682,16 @@ static void overlay_run(PGRAPHState *pg)
             continue;
         }
 #endif
+        fifo_hold_check();
         if (s_resized || !s_swapchain) {
+            if (!present_enter()) {
+                g_usleep(16000);   /* (made once the window has changed) */
+                continue;
+            }
             s_resized = false;
-            if (!create_swapchain(r)) {
+            bool made = create_swapchain(r);
+            present_leave();
+            if (!made) {
                 g_usleep(16000);
                 continue;
             }
@@ -1767,7 +1843,17 @@ static bool present_external_now(void)
     return true;
 }
 
+static void present_frame(PGRAPHState *pg, bool on_pfifo);
+
 static void present_locked(PGRAPHState *pg, bool on_pfifo)
+{
+    if (!present_enter())
+        return;
+    present_frame(pg, on_pfifo);
+    present_leave();
+}
+
+static void present_frame(PGRAPHState *pg, bool on_pfifo)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
     VkCommandBuffer cmd;
@@ -1818,6 +1904,7 @@ static void present_locked(PGRAPHState *pg, bool on_pfifo)
         fps_init(r);
     }
     fps_track();
+    fifo_hold_check();
     if (s_resized || !s_swapchain) {
         s_resized = false;
         if (!create_swapchain(r))
@@ -1830,7 +1917,10 @@ static void present_locked(PGRAPHState *pg, bool on_pfifo)
                     __atomic_load_n(&s_ext_image, __ATOMIC_ACQUIRE) != VK_NULL_HANDLE)) {
         extern volatile int nv2a_vblank_hold;
         nv2a_vblank_hold = 1;
+        present_leave();   /* (overlay_run's presents and swapchains enter and leave on their own) */
         overlay_run(pg);
+        while (!present_enter())
+            g_usleep(1000);
         nv2a_vblank_hold = 0;
         if (s_resized || !s_swapchain) {
             s_resized = false;
