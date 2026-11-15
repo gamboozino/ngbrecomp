@@ -4242,7 +4242,7 @@ void VulkanBackend::HudGroup(float w, float h) {
     auto root = [&](int i) { while (up[size_t(i)] != i) i = up[size_t(i)] = up[size_t(up[size_t(i)])]; return i; };
     const float gx = 10, gy = 14;
     // the tall gauges, then the pieces in their columns drawn with them (hud_gauge_piece; a few draws
-    // apart -- not a window's letters sliding across): grouped only among themselves
+    // apart -- not a window's letters sliding across -- or the fill at the tube's foot): grouped only among themselves
     std::vector<char> gauge(n, 0);
     for (size_t i = 0; i < n; i++) {
         const HudBox& b = hud_boxes_[i];
@@ -4251,8 +4251,13 @@ void VulkanBackend::HudGroup(float w, float h) {
     for (size_t i = 0; i < n; i++)
         for (size_t j = 0; j < n && !gauge[i]; j++) {
             const HudBox &b = hud_boxes_[i], &g = hud_boxes_[j];
-            if (j != i && g.y1 - g.y0 > h * 0.15f && g.x1 - g.x0 < w * 0.1f && b.at + 6 >= g.at && g.at + 6 >= b.at &&
-                hud_gauge_piece(b.x0, b.x1, b.y0, b.y1, w, h, g.x0, g.x1, g.y0, g.y1))
+            if (j != i && g.y1 - g.y0 > h * 0.15f && g.x1 - g.x0 < w * 0.1f &&
+                hud_gauge_piece(b.x0, b.x1, b.y0, b.y1, w, h, g.x0, g.x1, g.y0, g.y1) &&
+                ((b.at + 6 >= g.at && g.at + 6 >= b.at) ||
+                 // or, drawn further apart, its fill: across the tube's inside and down to its foot -- the breath
+                 // bar's fill under 15% of the height was an element of its own about the middle, and Compact drew
+                 // it up the tube (#219); a window's letters sliding across are narrower or end elsewhere
+                 (b.x1 - b.x0 >= (g.x1 - g.x0) * 0.4f && std::fabs(b.y1 - g.y1) <= 16)))
                 gauge[i] = 1;
         }
     hud_gauge_boxes_.clear();
