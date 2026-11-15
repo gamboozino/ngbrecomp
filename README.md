@@ -172,7 +172,9 @@ of the pause menu. Changes apply at once and are saved.
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
   anisotropic), anti-aliasing (MSAA), shadow resolution, Smoother Glow (a softer, fainter glow on
   bright lights; off is the console's look), Lower Detail Under Load, Multithreaded Renderer (drawing on a
-  thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC)
+  thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC), Frame
+  Interpolation (experimental: pictures made between the game's 60 frames a second, for displays of 120 Hz
+  and up; Full Rate, Half Rate or 2x)
 - **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9, 32:9), window size, windowed / fullscreen /
   borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, HUD Style
   (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the game's widescreen
@@ -187,7 +189,7 @@ of the pause menu. Changes apply at once and are saved.
   Charging**, Ultimate Techniques charged only by absorbing essence, not by holding attack (#120); **Skip Any
   Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
-  ignores it for a while (#116); **Bow Crosshair**, a dot in the middle of the screen while aiming a bow in first
+  ignores it for a while (#116); **Bow Crosshair**, a dot where the arrow will land while aiming a bow in first
   person, the game's own glow from an arrow's head (#228)
 - **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
   hit kill (any hit that hurts an enemy or a boss kills it).

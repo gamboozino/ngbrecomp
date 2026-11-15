@@ -309,8 +309,9 @@ has been seen appearing late at the far edges.
 
 Bow Crosshair (Gameplay, #228): while a bow is the ranged weapon equipped (Ryu's slot `0x58A572`, by his health
 block) and the first-person view is up (its routine `0x0004F800` ran this frame or the last, src/camera.c), the
-renderer blends a dot over the middle of the presented picture, after the game's own drawing, as the frame counter
-is: game.spr's sprite 85 (`demo.afs`, the glow at an explosive arrow's head), about 2% of the height across and kept
+renderer blends a dot over the presented picture, after the game's own drawing, as the frame counter is. It sits
+where arrows land: 1.2% of the height right of and below the middle (they leave from the bow, not the camera;
+#230), and in the middle for the Strongbow, whose arrows fly straight there. The dot is game.spr's sprite 85 (`demo.afs`, the glow at an explosive arrow's head), about 2% of the height across and kept
 round at every aspect ratio. Off with the HUD.
 
 The boot "Warnings" screen is always skipped (`NGB_KEEP_WARNINGS=1` shows it).
@@ -466,6 +467,30 @@ sprites piling up until a quieter frame drew them all at once (#96). sub_00308BF
 insert, gives out 4096 more nodes of ours after the game's; `NGB_NODE_POOL=0` keeps the game's limit.
 The weapon-hit sparks are lines the game draws 2.7 to 3 pixels wide; `NGB_SPARK_WIDTH=0.5` (0.1 to 1)
 makes them thinner, never under a pixel (#117).
+
+The Techniques list (sub_001EAA10) draws a move's icon by its number less 2, or less 12, and jumps past the draw
+on a negative result (`js` at 0x001EADC8, reached from both subtractions). The lifter had no flag state for a
+jump reached from two different instructions and compiled it as never taken, so every plain move drew the
+sprite before the first icon (#231). A join of result-writing instructions on one register now answers its
+zero and sign from the result each published (xboxrecomp `tools/recomp/translator.py`,
+`_merge_result_snapshot`); 137 other jumps in the game's code still take that fallback.
+
+Graphics > Frame Interpolation (experimental, #226; setting 45, `frame_interpolation` in settings.ini: 0 off,
+1 Full Rate, 2 Half Rate, 3 2x; `NGB_INTERP=n` over it) shows pictures made between the game's 60 frames a
+second (src/d3d/gpu/threaded.cpp, on the Multithreaded Renderer's recording, which it turns on). Each frame's
+commands are kept; at its present every draw is paired with the last frame's draw of the same things (shaders,
+textures, vertex buffer, range, which of the frame's targets), several of one kind by nearness, and the
+commands are drawn again with each pair's matrices and shader constants part of the way: worlds number by
+number (turned along the arc past 60 degrees a frame, where the lerp would shrink them), the view's turn and
+the camera's place apart, texture scrolls and fades too. Meshes the game moves on the CPU (Ryu's cloth), whose
+two vertex buffers take turns, have their vertices kept and lerped. The replay has render targets of its own,
+so an effect building on its last picture (motion blur) steps once a frame in each. A camera cut (a turn over
+30 degrees or a move over 3 units in a frame), or a frame with under half its draws paired, gets none. Full
+Rate makes one picture each refresh (the refresh rate over 60, rounded down, four at most), Half Rate each
+second one, 2x one between frames; under 120 Hz none. The frame's own picture is held and the pictures are
+shown in turn by a pacer thread (present_sdl.c), which costs up to a frame less one picture's share of
+latency. `NGB_INTERP_LOG=1` logs the pairing, `NGB_INTERP_T=1.0` draws each replay as the frame was (a test:
+the two pictures must be the same).
 
 ## The renderer
 
