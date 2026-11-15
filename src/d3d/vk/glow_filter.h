@@ -83,7 +83,7 @@ int VulkanBackend::ContinuousGlowStage(const State& s,const Assembled& a,uint32_
     TextureDesc src{},dst{};
     if (!GlowQuad(a,count,w,h) || !Describe(s.rt.header,dst) || dst.format!=6 ||
         !Describe(s.textures[0],src)) return -1;
-    auto source=targets_.find(uint64_t(src.data&0x7FFFFFFFu)<<1);
+    auto source=targets_.find(uint64_t(src.data&0x7FFFFFFFu)<<1 | ReplayKey());
     if (source==targets_.end() || source->second.img.depth || !source->second.drawn) return -1;
     uint64_t fingerprint=1469598103934665603ull;
     const uint8_t* bytes=reinterpret_cast<const uint8_t*>(s.ps->def);
@@ -97,7 +97,7 @@ int VulkanBackend::ContinuousGlowStage(const State& s,const Assembled& a,uint32_
     if (stage<0) return -1;
     if (stage) {
         const auto& previous=continuous_record_[stage-1];
-        if (previous.frame!=presents_ || previous.data!=(src.data&0x7FFFFFFFu) ||
+        if (previous.frame!=frame_ || previous.data!=(src.data&0x7FFFFFFFu) ||
             s.rs[kRsPsTextureModes]!=0x8421) return -1;
     }
     // Match the coordinates, axis and offsets too. Similar-sized water,
@@ -200,7 +200,7 @@ bool VulkanBackend::ContinuousGlowPass(Image& input,Image& output,uint32_t w,uin
 void VulkanBackend::ApplyContinuousGlow(const State& s,const Assembled& a,uint32_t count,Target& rt,const DrawConstants& c) {
     int stage=ContinuousGlowStage(s,a,count);if (stage<0) return;
     TextureDesc desc{};Describe(s.textures[0],desc);
-    auto source=targets_.find(uint64_t(desc.data&0x7FFFFFFFu)<<1);
+    auto source=targets_.find(uint64_t(desc.data&0x7FFFFFFFu)<<1 | ReplayKey());
     Image& input=stage?continuous_glow_[stage-1]:source->second.img;
     // Two samples per native axis retain small highlights without running a
     // 160-tap blur on every pixel of a 10x intermediate.
@@ -221,7 +221,7 @@ void VulkanBackend::ApplyContinuousGlow(const State& s,const Assembled& a,uint32
     d_.vkCmdBlitImage(cmd_,filtered.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         rt.img.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_LINEAR);
     Barrier(filtered,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);Barrier(rt.img,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    rt.drawn=true;rt.ms_stale=rt.samples>1;continuous_record_[stage]={s.rt.data&0x7FFFFFFFu,presents_};
+    rt.drawn=true;rt.ms_stale=rt.samples>1;continuous_record_[stage]={s.rt.data&0x7FFFFFFFu,frame_};   // (frame_: an interpolated picture its own)
     if (++continuous_hits_[stage]<=4 || continuous_hits_[stage]%600==0) {
         std::fprintf(stderr,"[GLOW-CONTINUOUS] frame %u stage %d source %ux%u working %ux%u target %ux%u %s\n",
             presents_,stage,input.w,input.h,w,h,rt.img.w,rt.img.h,stage?"continuous box":"area-filtered bright extraction");

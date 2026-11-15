@@ -26,12 +26,15 @@
 extern "C" uint32_t xbox_HeapAlloc(uint32_t size, uint32_t align);
 extern "C" int ngb_render_threaded;  // src/pc_menu.c reads it: the Multithreaded Renderer is drawing
 extern "C" { int ngb_render_threaded = 0; }
+extern "C" int ngb_pc_setting(int which);   // src/ingame_menu.c
+extern "C" void ngb_pc_set_setting(int which, int value);
 
 using kernel::HostPtr;
 using kernel::R32;
 using kernel::W32;
 
 namespace {
+void InterpFollow();
 
 enum Reg { EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI };
 
@@ -509,6 +512,7 @@ bool Before(int fn, Call c) {
             if (n++ % 120 == 0) std::fprintf(stderr, "[ASPECT] projection m11 %.4f m22 %.4f aspect %.4f\n", m11, m22, m22 / m11);
         }
         if (g_backend) g_backend->Present(g_state.rt);
+        InterpFollow();
         break;
     case D3DF_D3DDevice_SetGammaRamp:
         if (g_backend) g_backend->SetGamma(static_cast<const uint8_t*>(HostPtr(c.a(1))));
@@ -524,6 +528,29 @@ bool Before(int fn, Call c) {
 }
 
 // after the recompiled body: what it made
+bool g_interp_env = false;   // NGB_INTERP given: over the setting, for the whole run
+
+// Graphics > Frame Interpolation, followed at each Swap (no restart): the recording (threaded.cpp) switches it at
+// its frame's end. Without the Multithreaded Renderer there is no recording to replay: one is made here, at the
+// frame's end, and kept for the run (turned off, the pictures between frames stop at once).
+void InterpFollow() {
+    if (g_interp_env) return;
+    static const char* flip = std::getenv("NGB_DEBUG_INTERP_FLIP");   // test: the setting flipped when <file> appears
+    if (flip && std::remove(flip) == 0) {
+        ngb_pc_set_setting(45, (ngb_pc_setting(45) + 1) % 4);   // (Off, Full Rate, Half Rate, 2x in turn)
+    }
+    int want = ngb_pc_setting(45);
+    if (want == gpu::g_interp.load(std::memory_order_relaxed)) return;
+    if (want != 0 && g_backend && !__atomic_load_n(&ngb_render_threaded, __ATOMIC_RELAXED)) {
+        const char* thread = std::getenv("NGB_D3D_THREAD");
+        if (thread && !std::strcmp(thread, "0")) return;   // (no recording asked for)
+        g_backend = gpu::CreateThreadedBackend(std::move(g_backend));
+        __atomic_store_n(&ngb_render_threaded, 1, __ATOMIC_RELAXED);
+        std::fprintf(stderr, "[D3D] drawing from a recording of the calls (for Frame Interpolation)\n");
+    }
+    gpu::g_interp.store(want, std::memory_order_relaxed);
+}
+
 void After(int fn, Call c) {
     switch (fn) {   // only these do anything: the rest skip g_lock
     case D3DF_D3DDevice_CreateVertexShader:
@@ -598,8 +625,12 @@ void Start() {
     }
     // Graphics > Multithreaded Renderer (off by default: for slower CPUs), or NGB_D3D_THREAD=1 or 0 over it; NGB_D3D_THREAD=capture: the
     // renderer draws from a recording of the calls on the title's thread (src/d3d/gpu/threaded.cpp)
+    // Graphics > Frame Interpolation (or NGB_INTERP=1 or 0 over it) needs the recording: it turns it on as well
     const char* thread = std::getenv("NGB_D3D_THREAD");
-    if (g_backend && (thread ? std::strcmp(thread, "0") != 0 : ngb_pc_setting(30) != 0)) {
+    const char* interp = std::getenv("NGB_INTERP");
+    gpu::g_interp = interp ? std::clamp(std::atoi(interp), 0, 3) : ngb_pc_setting(45);   // (NGB_INTERP=n: that mode)
+    g_interp_env = interp != nullptr;
+    if (g_backend && (thread ? std::strcmp(thread, "0") != 0 : ngb_pc_setting(30) != 0 || gpu::g_interp != 0)) {
         g_backend = gpu::CreateThreadedBackend(std::move(g_backend));
         __atomic_store_n(&ngb_render_threaded, 1, __ATOMIC_RELAXED);
         std::fprintf(stderr, "[D3D] drawing from a recording of the calls\n");
@@ -661,7 +692,7 @@ extern "C" int d3d_hle_call(int fn, uint32_t regs[8]) {
 }
 
 // after the Swap hook, out of g_lock and the host section (src/d3d/d3d.c): the frame wait (gpu::Backend::FrameWait).
-// g_backend is set once, at the first call, by this same thread.
+// g_backend is set at the first call, and wrapped for Frame Interpolation at a Swap (InterpFollow), by this same thread.
 extern "C" void d3d_hle_frame_wait(void) {
     if (g_backend) g_backend->FrameWait();
 }

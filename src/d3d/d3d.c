@@ -278,7 +278,9 @@ int d3d_hook(int fn)
     if (fn == D3DF_Direct3D_CreateDevice) {
         int ngb_pc_setting(int which);
         const char *thread = getenv("NGB_D3D_THREAD"), *k = getenv("NGB_D3D_KICKOFF_KB");
-        int threaded = thread ? strcmp(thread, "0") != 0 : ngb_pc_setting(30) != 0;   /* (as src/d3d/hle.cpp) */
+        const char *interp = getenv("NGB_INTERP");   /* Frame Interpolation starts the recording too (as src/d3d/hle.cpp; */
+        int interp_on = interp ? strcmp(interp, "0") != 0 : ngb_pc_setting(45) != 0;   /* turned on later, 32 KB) */
+        int threaded = thread ? strcmp(thread, "0") != 0 : ngb_pc_setting(30) != 0 || interp_on;
         unsigned kb = k ? (unsigned)atoi(k) : threaded && s_hle > 0 ? 256 : 0;   /* (only with the port's renderer) */
         if (kb >= 4 && kb <= 512 && kb * 1024u > MEM32(0x3D9588) && kb * 1024u * 4 <= MEM32(0x3D958C)) {
             fprintf(stderr, "[D3D] kick-off every %u KB (the title's %u)\n", kb, MEM32(0x3D9588) / 1024);

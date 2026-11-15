@@ -85,6 +85,17 @@ public:
     // (guest address) once known, as the GPU would
     virtual void VisibilityBegin() {}
     virtual void VisibilityEnd(uint32_t /*report_va*/) {}
+    // frame interpolation (threaded.cpp): the commands that follow draw a frame again, a picture between the last
+    // frame and this one; nothing goes back to the title (visibility counts) and its picture is shown at once
+    virtual void SetReplay(bool) {}
+    virtual void ReplaySkipped() {}   // a frame drawn without its replay (its targets fall behind)
+    virtual void ReplayShowAt(int64_t /*at_us*/) {}   // the next replay's picture shown then (0 at once)
+    virtual void ReplayIndex(int) {}   // which of the frame's replays (1-3) the next is: each its own render targets
+    virtual void Pictures(int) {}      // pictures a frame now (the game's and its replays')
+    // while set, each frame's own picture is held after its present until ShowHeld (when to show it, the
+    // presenter's microsecond clock; 0 at once)
+    virtual void SetHold(bool) {}
+    virtual void ShowHeld(int64_t /*at_us*/) {}
 
 private:
     uint32_t fence_ = 0;
@@ -95,6 +106,9 @@ std::unique_ptr<Backend> CreateBackend();
 inline bool g_init_retry = false;
 // the same backend driven from a thread of its own: calls return once recorded
 std::unique_ptr<Backend> CreateThreadedBackend(std::unique_ptr<Backend> inner);
+// Frame interpolation (Graphics > Frame Interpolation, NGB_INTERP): wanted or not, read by the recording at each
+// frame's end (src/d3d/hle.cpp sets it at each Swap)
+extern std::atomic<int> g_interp;   // 0 off, 1 Full Rate, 2 Half Rate, 3 2x
 
 // perf diagnostic: the title's thread recording for the render thread, and waiting on it
 inline std::atomic<uint64_t> g_perf_capture_ns{0}, g_perf_wait_ns{0}, g_perf_waits{0};

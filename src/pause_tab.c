@@ -81,7 +81,7 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_MISSIONS, S_ARCADE, S_MOVIES, S_LOADDETAIL, S_RTHREAD, S_INTERCEPT, S_ALLWEAP,
        S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
-       S_HUDSTYLE, S_HUDASPECT, S_TALISMAN, S_CROSSHAIR,
+       S_HUDSTYLE, S_HUDASPECT, S_TALISMAN, S_CROSSHAIR, S_INTERP,
        S_COUNT };
 
 static const char *const s_label[S_COUNT] = {
@@ -95,7 +95,7 @@ static const char *const s_label[S_COUNT] = {
     "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
     "Responsive Menus", "All Armlets", "All Scrolls",
     "One Hit Kill", "Unlocks", "HUD Style", "HUD Aspect", "Talisman of Rebirth",
-    "Bow Crosshair",
+    "Bow Crosshair", "Frame Interpolation",
 };
 static const char *const s_help[S_COUNT] = {
     "Draws the game at a multiple of the console's resolution.",
@@ -143,6 +143,7 @@ static const char *const s_help[S_COUNT] = {
     "Corrected: the HUD in its own shape on a wide screen, not stretched across it.",
     "Off: a Talisman of Rebirth is never used; at no health Ryu dies, the talismans kept.",
     "On: a dot in the middle of the screen while aiming a bow in first person.",
+    "Experimental. Pictures between the game's frames, on a 120 Hz or faster display.",
 };
 
 /* The categories: the strip's words, their rows. */
@@ -154,7 +155,7 @@ static const char *const s_help[S_COUNT] = {
 /* Gameplay: optional changes to how the game plays (off unless chosen; docs/quick-menu.md) */
 static const char *const s_cat_name[CATS] = { "Graphics", "Display", "Sound", "Gameplay", "Cheats", "Controls" };
 static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
-    { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, -1 },   /* -1 ends a page shorter than CAT_ROWS */
+    { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, S_INTERP, -1 },   /* -1 ends a page shorter than CAT_ROWS */
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_HUDASPECT, S_SKIP },   /* (a full page) */
     { S_POSAUDIO, S_AUDIOOUT, -1 },
     { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_TALISMAN, S_CROSSHAIR, -1 },
@@ -236,6 +237,7 @@ static void value_text(int row, char *out, size_t n)
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
     case S_INTERCEPT: snprintf(out, n, "%s", v == 2 ? "Hurricane" : v ? "Black" : "Off"); break;
     case S_HUDSTYLE: snprintf(out, n, "%s", v ? "Compact" : "Original"); break;
+    case S_INTERP: snprintf(out, n, "%s", v == 3 ? "2x" : v == 2 ? "Half Rate" : v ? "Full Rate" : "Off"); break;
     case S_HUDASPECT: snprintf(out, n, "%s", v ? "Corrected" : "Stretched"); break;
     case S_UNLOCKS: snprintf(out, n, "%s", ""); break;
     case S_SKIP:
@@ -296,6 +298,9 @@ static void change(int row, int step)
     case S_AUDIOOUT:
     case S_INTERCEPT:
         ngb_pc_set_setting(row, (v + (step > 0 ? 1 : 2)) % 3);
+        break;
+    case S_INTERP:
+        ngb_pc_set_setting(row, (v + (step > 0 ? 1 : 3)) % 4);
         break;
     case S_ASPECT:
         ngb_pc_set_setting(row, (v + (step > 0 ? 1 : ASPECT_COUNT - 1)) % ASPECT_COUNT);

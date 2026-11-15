@@ -30,6 +30,7 @@ typedef struct NgbSettings {
     int show_hud;           /* the in-play HUD (src/hud.c, #80) */
     int hud_style;          /* Display > HUD Style: 0 as the game draws it, 1 Compact (src/d3d/vk/backend.cpp, #121) */
     int talisman;           /* Gameplay > Talisman of Rebirth: 1 used as Ryu dies (the game's), 0 never (src/cheats.c) */
+    int frame_interp;       /* Graphics > Frame Interpolation (src/d3d/gpu/threaded.cpp, #226): 0 off, 1 Full Rate, 2 Half Rate, 3 2x */
     int bow_crosshair;      /* Gameplay > Bow Crosshair: a dot in the middle while aiming a bow in first person (src/camera.c, #228) */
     int hud_aspect;         /* Display > HUD Aspect: 0 stretched as the game's widescreen mode draws it, 1 its own shape (the renderer narrows only the HUD's elements: src/d3d/vk/backend.cpp, #220 #219) */
     int audio_output;       /* 0 auto (5.1 on a 5.1 or 7.1 device), 1 stereo, 2 5.1 (src/audio/dsound_hle.cpp) */

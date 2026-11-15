@@ -52,6 +52,13 @@ void nv2a_quality_get(int *render_scale, int *anisotropy, int *shadow_scale, int
  * a 2D BGRA colour image in TRANSFER_SRC_OPTIMAL, rows top down, left valid
  * until the next call. VK_NULL_HANDLE goes back to the renderer's picture. */
 void nv2a_present_set_external(VkImage image, uint32_t width, uint32_t height);
+/* Frame interpolation: this picture shown at at_us (g_get_monotonic_time's clock) by a pacer thread, after the
+ * pictures handed over before it (up to 8 held); a picture shown now (nv2a_present_set_external), or
+ * nv2a_present_flush_held, shows the held ones first. */
+void nv2a_present_set_external_at(VkImage image, uint32_t width, uint32_t height, int64_t at_us);
+void nv2a_present_flush_held(void);
+int64_t nv2a_present_now_us(void);   /* that clock */
+int nv2a_present_refresh_hz(void);   /* the window's display (0 not known yet) */
 
 #ifdef __cplusplus
 }

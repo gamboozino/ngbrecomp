@@ -87,7 +87,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
  * MOVIE THEATER unlocked (src/cheats.c, saved), 29 Lower Detail Under Load (src/d3d/d3d.c), 30 the render thread
- * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats), 41 HUD Style (#121). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
+ * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats), 41 HUD Style (#121), 42 HUD Aspect, 43 Talisman of Rebirth, 44 Bow Crosshair, 45 Frame Interpolation (src/d3d/gpu/threaded.cpp). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
  * cheats' not. */
 int ngb_cheat(int which);
 void ngb_cheat_set(int which, int on);
@@ -153,6 +153,7 @@ int ngb_pc_setting(int which)
     case 42: return s_running.hud_aspect;
     case 43: return s_running.talisman;
     case 44: return s_running.bow_crosshair;
+    case 45: return s_running.frame_interp;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 31: return s_running.intercept;
@@ -199,6 +200,7 @@ void ngb_pc_set_setting(int which, int value)
     case 42: s_running.hud_aspect = !!value; break;
     case 43: s_running.talisman = !!value; break;
     case 44: s_running.bow_crosshair = !!value; break;
+    case 45: s_running.frame_interp = value < 0 ? 0 : value > 3 ? 3 : value; break;   /* at the next frame (src/d3d/hle.cpp) */
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 31: s_running.intercept = value < 0 ? 0 : value > 2 ? 2 : value; break;

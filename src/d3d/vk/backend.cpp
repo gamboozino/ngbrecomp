@@ -365,7 +365,49 @@ public:
     void SyncLate(uint32_t) override {}
     void Flush() override { Submit(); }
     void SetGamma(const uint8_t* ramp) override;
-    void VisibilityBegin() override { vis_on_ = true; vis_test_++; }
+    void VisibilityBegin() override {
+        if (replay_) return;
+        vis_on_ = true;
+        vis_test_++;
+    }
+    void SetReplay(bool on) override {
+        replay_ = on;
+        if (on && (replay_stale_ >> replay_index_ & 1)) {
+            SyncReplayTargets();
+            replay_stale_ &= ~(1u << replay_index_);
+        }
+    }
+    void ReplaySkipped() override { replay_stale_ = ~0u; }
+    void ReplayIndex(int i) override { replay_index_ = std::clamp(i, 1, 3); }
+    void Pictures(int k) override {
+        if (std::max(k, 1) != pictures_) replay_stale_ = ~0u;   // (a replay index unused meanwhile fell behind)
+        pictures_ = std::max(k, 1);
+    }
+    void SetHold(bool on) override {
+        if (hold_ && !on) FreeReplayTargets();   // (switched off: their memory back)
+        hold_ = on;
+    }
+    void FreeReplayTargets();
+    int replay_index_ = 1;   // which of a frame's replays (1-3): each its own targets
+    int pictures_ = 1;       // pictures a frame (the game's and its replays')
+    void ReplayShowAt(int64_t at_us) override { replay_at_ = at_us; }
+    int64_t replay_at_ = 0;   // when the replay's picture is shown (0 at once)
+    uint32_t replay_stale_ = ~0u;   // by replay index: a frame went without it, its targets behind the game's
+    void SyncReplayTargets();
+    void ShowHeld(int64_t at_us) override {
+        if (held_ && at_us > 0) nv2a_present_set_external_at(held_->image, held_->w, held_->h, at_us);
+        else if (held_) nv2a_present_set_external(held_->image, held_->w, held_->h);
+        held_ = nullptr;
+    }
+    bool replay_ = false;   // a frame drawn again (frame interpolation)
+    // the replay's render targets its own (targets_' key, bits 61-62): the game's keep what its frame drew (a
+    // motion blur building on the last picture builds on the last of its own kind)
+    // (each replay of a frame its own set, bits 61-62 its index: an effect building on its last picture steps once
+    // a frame in each, as in the game's)
+    static constexpr uint64_t kReplayBits = 3ull << 61;
+    uint64_t ReplayKey() const { return replay_ ? uint64_t(replay_index_) << 61 : 0; }
+    bool hold_ = false;     // the frame's picture kept for ShowHeld
+    Image* held_ = nullptr;
     void VisibilityEnd(uint32_t report_va) override;
     void CapturePeek(const State& s, Peek& p) override;
     void CaptureQuick(QuickPeek& q) override;
@@ -404,7 +446,7 @@ private:
     std::set<uint32_t> glow_targets_;
     void ClassifyGlowTarget(const State& s,const Assembled& a,uint32_t count);
 
-    Image display_[3];   // copies of the front buffer for the presenter, in turn
+    Image display_[8];   // copies of the front buffer for the presenter, in turn (up to four a frame interpolating)
     Image quick_layer_;
     Image fps_layer_;   // the frame counter (FpsCounter, quick_menu.inc)
     std::vector<uint32_t> fps_pending_;   // its picture still to upload (a frame without one to show keeps it)
@@ -1016,6 +1058,7 @@ VulkanBackend::~VulkanBackend() {
     CacheSavePipelines();
     if (shared_) {
         nv2a_vk_set_draws_off(false);
+        held_ = nullptr;
         nv2a_present_set_external(VK_NULL_HANDLE, 0, 0);
         nv2a_vk_queue_lock();
         d_.vkDeviceWaitIdle(dev_);
@@ -1181,7 +1224,7 @@ void VulkanBackend::EndFrame() {
         }
     }
     if (frame_ % 60 == 0) {   // once a second: textures unused for 30 s go (EvictTextures)
-        size_t gone = EvictTextures(1800);
+        size_t gone = EvictTextures(1800 * uint32_t(hold_ ? pictures_ : 1));   // (a submit a picture)
         static const bool stats = std::getenv("NGB_D3D_TEXSTATS") != nullptr;
         if (stats) {
             uint64_t bytes = 0;
@@ -1344,6 +1387,68 @@ void VulkanBackend::QuadSnap(const State& s, const Assembled& a, uint32_t count,
     c.qsnap[0] = 1.0f;
 }
 
+// Frame interpolation: after a frame without its replay (a cut, a load, the display too slow), the replay's colour
+// targets made the game's again before the next replay, so an effect building on its last picture (motion blur)
+// doesn't build on a picture from before; the replay's targets the game no longer has go.
+void VulkanBackend::FreeReplayTargets() {
+    std::vector<uint64_t> gone;
+    for (auto& [k, t] : targets_)
+        if ((k & kReplayBits) && &t != draw_rt_ && &t != bound_rt_ && &t != bound_ds_) gone.push_back(k);
+    for (uint64_t k : gone) {
+        Target& t = targets_[k];
+        Retire(t.img);
+        if (t.ms.image) Retire(t.ms);
+        if (t.fb.image) Retire(t.fb);
+        targets_.erase(k);
+    }
+    replay_stale_ = ~0u;
+}
+
+// (the current replay index's set: replay_ is set)
+void VulkanBackend::SyncReplayTargets() {
+    Begin();
+    EndRendering();
+    const uint64_t bit = ReplayKey();
+    std::vector<uint64_t> gone;
+    for (auto& [k, t] : targets_)
+        if ((k & kReplayBits) == bit && !targets_.count(k & ~kReplayBits)) gone.push_back(k);
+    for (uint64_t k : gone) {
+        Target& t = targets_[k];
+        Retire(t.img);
+        if (t.ms.image) Retire(t.ms);
+        if (t.fb.image) Retire(t.fb);
+        targets_.erase(k);
+    }
+    std::vector<uint64_t> keys;
+    for (auto& [k, t] : targets_)
+        if (!(k & kReplayBits) && !(k & 1) && t.drawn && t.img.image) keys.push_back(k);
+    for (uint64_t k : keys) {
+        Target& g = targets_.find(k)->second;   // (the map's elements stay where they are as it grows)
+        auto it = targets_.find(k | bit);
+        if (it != targets_.end() && (it->second.img.w != g.img.w || it->second.img.h != g.img.h ||
+                                     it->second.samples != g.samples || it->second.gw != g.gw || it->second.gh != g.gh)) {
+            Retire(it->second.img);
+            if (it->second.ms.image) Retire(it->second.ms);
+            if (it->second.fb.image) Retire(it->second.fb);
+            targets_.erase(it);
+            it = targets_.end();
+        }
+        Target* r = it != targets_.end() ? &it->second : MakeTarget(Surface{}, false, k | bit, g.gw, g.gh, g.img.w, g.img.h, g.samples);
+        if (!r) continue;
+        Barrier(g.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        Barrier(r->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkImageCopy c{};
+        c.srcSubresource = c.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        c.extent = {g.img.w, g.img.h, 1};
+        d_.vkCmdCopyImage(cmd_, g.img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r->img.image,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        r->drawn = true;
+        r->ms_stale = r->samples > 1;
+        r->stamp = g.stamp;
+        r->stamped = g.stamped;
+    }
+}
+
 void VulkanBackend::Retire(Image& img, VkImageView extra) {
     graveyard_.push_back({img, extra, frame_});
     img = Image{};
@@ -1464,7 +1569,7 @@ Target* VulkanBackend::EnsureTarget(const Surface& s, bool depth) {
     if (!depth && w==128 && h==128 && ContinuousGlowEnabled() && glow_targets_.count(s.data))
         scale=GlowTargetScale(uint32_t(scale_));
     uint32_t iw = w * scale, ih = h * scale;
-    uint64_t key = uint64_t(s.data) << 1 | (depth ? 1 : 0);
+    uint64_t key = uint64_t(s.data) << 1 | (depth ? 1 : 0) | ReplayKey();
     auto it = targets_.find(key);
     // MSAA (a quality setting) for the display-sized targets: the 3D and what is drawn over it
     uint32_t samples = big ? uint32_t(msaa_) : 1;
@@ -1584,6 +1689,7 @@ void VulkanBackend::FillMs(Target& t) {
 }
 
 void VulkanBackend::VisibilityEnd(uint32_t report_va) {
+    if (replay_) return;
     vis_on_ = false;
     vis_end_[slot_].push_back({vis_test_, report_va});
 }
@@ -2017,7 +2123,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
     info.rect = d.linear;
     // a render target read as a texture
     // (targets are keyed by the surface's physical address, the description has the virtual one)
-    auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1 | (fi.depth ? 1 : 0));
+    auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1 | (fi.depth ? 1 : 0) | ReplayKey());
     // A bump map (V8U8: nothing renders into that) or a mip chain is never a target: the game has put a
     // texture where it once drew, and the target left behind is not it (#16: the pond's ripple maps,
     // read as the target that memory had held, a picture of something else).
@@ -2038,8 +2144,19 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
             Retire(t.img);
             if (t.ms.image) Retire(t.ms);
             if (t.fb.image) Retire(t.fb);
+            const uint64_t base = tit->first & ~kReplayBits;   // the other passes' (frame interpolation) go too
             targets_.erase(tit);
             tit = targets_.end();
+            for (uint64_t i = 0; i < 4; i++) {
+                auto tw = targets_.find(base | i << 61);
+                if (tw != targets_.end() && &tw->second != draw_rt_ && &tw->second != bound_rt_ &&
+                    &tw->second != bound_ds_) {
+                    Retire(tw->second.img);
+                    if (tw->second.ms.image) Retire(tw->second.ms);
+                    if (tw->second.fb.image) Retire(tw->second.fb);
+                    targets_.erase(tw);
+                }
+            }
         }
     }
     if (tit != targets_.end() && !d.cube && d.depth == 1 && never_target) {
@@ -2879,7 +2996,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             if (!from_target[i] || info[i].shadow || info[i].kind != kTex2D || !s.textures[size_t(i)] ||
                 !Describe(s.textures[size_t(i)], d))
                 continue;
-            auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1);
+            auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1 | ReplayKey());
             if (tit == targets_.end() || !tit->second.gw || &tit->second == rt)
                 continue;
             const Target& src = tit->second;
@@ -3156,7 +3273,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         }
     }
     bool continuous_composite=glow_pass &&
-        continuous_record_[2].frame==presents_ && continuous_record_[2].data==(glow_desc.data&0x7FFFFFFFu);
+        continuous_record_[2].frame==frame_ && continuous_record_[2].data==(glow_desc.data&0x7FFFFFFFu);
     glow_pass=continuous_composite;
     if (glow_pass && GlowStrength()<1.0f) {
         async_now_=false;
@@ -3178,7 +3295,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         return;
     }
     if (glow_pass && GlowSoftenMode()) {
-        auto source=targets_.find(uint64_t(glow_desc.data&0x7FFFFFFFu)<<1);
+        auto source=targets_.find(uint64_t(glow_desc.data&0x7FFFFFFFu)<<1 | ReplayKey());
         if (source==targets_.end() || !SoftenGlow(source->second.img))
             ngb_renderer_fatal("Could not create the glow softening pass.");
         views[0]=glow_soft_[1].view;
@@ -3980,7 +4097,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             static uint32_t dumped_frame;
             if (!dump_dir_.empty() && dumped_frame != presents_) {
                 dumped_frame = presents_;
-                auto tit = targets_.find(uint64_t(d0.data & 0x7FFFFFFFu) << 1 | 1);
+                auto tit = targets_.find(uint64_t(d0.data & 0x7FFFFFFFu) << 1 | 1 | ReplayKey());
                 if (tit != targets_.end()) {
                     char name[64];
                     std::snprintf(name, sizeof(name), "step_%05u_%04u_shadowmap", presents_, st_.drawn);
@@ -4081,7 +4198,8 @@ void VulkanBackend::Dump(Target& t, const char* name) {
     if (name)
         std::snprintf(path, sizeof(path), "%s/%s.ppm", dump_dir_.c_str(), name);
     else
-        std::snprintf(path, sizeof(path), "%s/frame_%05u.ppm", dump_dir_.c_str(), presents_);
+        std::snprintf(path, sizeof(path), "%s/frame_%05u%s.ppm", dump_dir_.c_str(), presents_,
+                      !replay_ ? "" : replay_index_ == 1 ? "i" : replay_index_ == 2 ? "i2" : "i3");
     if (FILE* f = std::fopen(path, "wb")) {
         std::fprintf(f, "P6\n%u %u\n255\n", t.img.w, t.img.h);
         const uint8_t* p = static_cast<const uint8_t*>(info.pMappedData);
@@ -4452,7 +4570,7 @@ void VulkanBackend::Present(const Surface& front) {
         CapturePeek(none, pk_);
         CaptureQuick(qk_);
     }
-    presents_++;
+    if (!replay_) presents_++;   // (an interpolated picture is no frame of the game's: its timings count frames)
     id_count_ = 0;
     if (id_file_) std::fflush(id_file_);
     static const bool section_log = std::getenv("NGB_D3D_SECTION_LOG") != nullptr;
@@ -4504,7 +4622,8 @@ void VulkanBackend::Present(const Surface& front) {
             std::fclose(f);
             std::remove(burst.c_str());
             dump_from_ = presents_ + 1;
-            dump_count_ = 40;
+            static const uint32_t burst_n = std::getenv("NGB_D3D_BURST") ? uint32_t(std::atoi(std::getenv("NGB_D3D_BURST"))) : 40;
+            dump_count_ = burst_n;   // (NGB_D3D_BURST=n: that many)
         }
     }
     stat_frames_++;
@@ -4539,6 +4658,7 @@ void VulkanBackend::Present(const Surface& front) {
         if (t) {
             Image& d = display_[size_t(display_next_)];
             if (d.image && (d.w != t->img.w || d.h != t->img.h)) {
+                nv2a_present_flush_held();   // pictures the pacer holds shown before an image goes
                 Submit();
                 nv2a_vk_queue_lock();
                 d_.vkDeviceWaitIdle(dev_);
@@ -4576,7 +4696,7 @@ void VulkanBackend::Present(const Surface& front) {
                 GammaCopy(t->img, d, bars, bars_y);
                 Barrier(d, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
                 show = &d;
-                display_next_ = (display_next_ + 1) % 3;
+                display_next_ = (display_next_ + 1) % (hold_ ? 8 : 3);
             } else if (d.image) {
                 EndRendering();
                 Barrier(t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -4589,7 +4709,7 @@ void VulkanBackend::Present(const Surface& front) {
                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
                 Barrier(d, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
                 show = &d;
-                display_next_ = (display_next_ + 1) % 3;
+                display_next_ = (display_next_ + 1) % (hold_ ? 8 : 3);
             }
         }
     }
@@ -4653,7 +4773,10 @@ void VulkanBackend::Present(const Surface& front) {
     EndFrame();
     // after the frame is on the queue: the presenter's blit, later on the same queue, waits for it
     // (its barrier on the picture)
-    if (show) nv2a_present_set_external(show->image, show->w, show->h);
+    // interpolating: the frame's own picture held until the one made before it (the replay's) is shown
+    if (show && hold_ && !replay_) held_ = show;
+    else if (show && replay_ && replay_at_ > 0) nv2a_present_set_external_at(show->image, show->w, show->h, replay_at_);
+    else if (show) nv2a_present_set_external(show->image, show->w, show->h);
     frame_++;
 }
 
