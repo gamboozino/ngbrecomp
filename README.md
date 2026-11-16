@@ -144,6 +144,9 @@ packages are signed ad hoc, without Developer ID signing or notarization.
 | Shader cache | `~/.cache/NinjaGaidenBlack` | `%LOCALAPPDATA%\NinjaGaidenBlack\shaders` | `~/Library/Application Support/NinjaGaidenBlack/cache/NinjaGaidenBlack/shaders` | `cache` in the folder above |
 | Log | the terminal, or `log.txt` beside the saves when started without one | `log.txt` beside the saves (or the console it was started from) | `log.txt` beside the saves | `log.txt` beside the saves |
 
+**Text language:** the game's text follows the system's language, Japanese on a Japanese system and English
+otherwise (the disc has only these two). `text_language = japanese` or `english` in `settings.ini` overrides it.
+
 **Portable mode:** with a file named `portable.txt` next to `NinjaGaidenBlack.exe` (or the AppImage or Mac app),
 all of these go into a `userdata` folder next to it instead. The first-run setup offers this as a
 checkbox. The folder must be writable, so not inside Program Files. Delete `portable.txt` to go back.

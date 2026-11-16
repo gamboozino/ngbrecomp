@@ -173,6 +173,11 @@ the New Game prologue and the story movies play -- the game's own Start does not
 Skip Any Cutscene lets Start end them; from the next start). They are saved to `~/.config/NinjaGaidenBlack/settings.ini` as they change.
 `--settings` shows the old settings screen before the game.
 
+The text's language (#236) is the dashboard's, which the game reads at boot (XC_LANGUAGE, and the EEPROM's user
+section): `xbox_XcLanguage`, set in `src/main.c` from `text_language` in settings.ini (`auto`, `english`, `japanese`;
+no menu row), auto taking SDL's first preferred locale (Japanese for `ja`, else English). The 21:9 aspect takes the
+window's own shape between 64:27 and 12:5 (`ngb_settings_aspect_ratio`), followed as the window changes (#233).
+
 All Difficulties (Cheats > Unlocks, saved): New Game offers every difficulty, Ninja Dog to Master Ninja,
 without clearing the one before (or dying for Ninja Dog). The game's menus ask one function (sub_001DB520, now in
 `src/cheats.c`) for their unlock flags -- 7-9 are those three, read from the system data --
