@@ -1076,6 +1076,10 @@ NTSTATUS __stdcall xbox_ExSaveNonVolatileSetting(ULONG ValueIndex, ULONG Type, P
  * Black's D3D then waits on display hardware the NV2A model lacks.) */
 extern ULONG xbox_XcVideoFlags;
 
+/* The dashboard's language, as XC_LANGUAGE reports it: 1 English (the default), 2 Japanese, 3 German, 4 French,
+ * 5 Spanish, 6 Italian. A title takes its text from it at boot. */
+extern ULONG xbox_XcLanguage;
+
 /* Unknown ordinals - stub */
 VOID    __stdcall xbox_Unknown_8(void);
 VOID    __stdcall xbox_Unknown_23(void);

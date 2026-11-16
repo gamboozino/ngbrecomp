@@ -14,6 +14,7 @@
 #include <stdlib.h>
 
 ULONG xbox_XcVideoFlags = 0;
+ULONG xbox_XcLanguage = 1;
 
 /* ============================================================================
  * Exported Data Objects
@@ -139,9 +140,8 @@ NTSTATUS __stdcall xbox_ExQueryNonVolatileSetting(
 
     switch (ValueIndex) {
     case XC_LANGUAGE:
-        /* English = 1 */
         if (ValueLength >= sizeof(ULONG)) {
-            *(PULONG)Value = 1;
+            *(PULONG)Value = xbox_XcLanguage;
             if (Type) *Type = 4; /* REG_DWORD */
             if (ResultLength) *ResultLength = sizeof(ULONG);
         }
@@ -233,6 +233,14 @@ NTSTATUS __stdcall xbox_ExQueryNonVolatileSetting(
                 "ExQueryNonVolatileSetting: unhandled index 0x%02X (said once)", ValueIndex);
         }
         memset(Value, 0, ValueLength);
+        /* the language as XC_LANGUAGE answers it, in the blocks that hold it: the whole EEPROM's user section at
+         * 0x90, and that section alone (XC_MAX_OS, 0xFF, from the EEPROM's 0x60) at 0x30 */
+        if (xbox_XcLanguage != 1) {
+            if (ValueIndex == 0xFFFF && ValueLength >= 0x94)
+                *(PULONG)((char *)Value + 0x90) = xbox_XcLanguage;
+            else if (ValueIndex == 0xFF && ValueLength >= 0x34)
+                *(PULONG)((char *)Value + 0x30) = xbox_XcLanguage;
+        }
         if (Type) *Type = 4;
         if (ResultLength) *ResultLength = ValueLength;
         break;

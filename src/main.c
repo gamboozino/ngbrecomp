@@ -56,6 +56,7 @@
 #include "usb/usb_gamepad.h"
 extern void xbox_InputInit(void);
 #if defined(NGB_NV2A_VK)
+#include <SDL_locale.h>   /* SDL_GetPreferredLocales: the text language (#236); not SDL.h (its main) */
 #include "launcher.h"
 #include "quick_select.h"
 
@@ -1347,6 +1348,19 @@ int main(int argc, char **argv)
     /* Widescreen (16:9 and 16:10 alike: the game's anamorphic mode, shown
      * at the chosen shape) unless 4:3. */
     s_widescreen = cfg.aspect != ASPECT_4_3;
+    /* The text's language, which the game takes from the dashboard's at boot (#236): settings.ini's text_language,
+     * else the system's first preferred language -- Japanese on a Japanese system, as on a Japanese console. The
+     * disc has English and Japanese text only. */
+    {
+        int ja = cfg.text_language == 2;
+        if (cfg.text_language == 0) {
+            SDL_Locale *loc = SDL_GetPreferredLocales();
+            ja = loc && loc[0].language && !strcmp(loc[0].language, "ja");
+            SDL_free(loc);
+        }
+        xbox_XcLanguage = ja ? 2 : 1;
+        fprintf(stderr, "Text language: %s%s\n", ja ? "Japanese" : "English", cfg.text_language ? "" : " (the system's)");
+    }
 #else
     {
         const char *ws = getenv("NGB_WIDESCREEN");
