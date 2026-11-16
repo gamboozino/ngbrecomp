@@ -4372,10 +4372,12 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
     // to a top corner from the screen's edge, and no larger than the karma window: the window and the health bar.
     // The Talisman of Rebirth's picture and flash, about the middle and as large as a panel, reach over the window,
     // and its figures were drawn as the picture's, apart from its words (#219); a panel's own labels start further in.
+    // (The health bar at its longest with the window is two thirds of the width: with a limit of 60%, the window
+    // split again on a revival late in the story, #219.)
     bool sided = false;
     for (const HudElem& e : hud_elems_)
         if (!e.gauge && e.ay == 0.0f && (e.ax == 0.0f ? e.x0 < w * 0.1f : e.ax == w && e.x1 > w * 0.9f) &&
-            e.x1 - e.x0 < w * 0.6f && e.y1 < h * 0.5f &&
+            e.x1 - e.x0 < w * 0.8f && e.y1 < h * 0.5f &&
             cx >= e.x0 && cx <= e.x1 && cy >= e.y0 && cy <= e.y1)
             sided = true;
     // what is on a picture about the middle (hud_picture_boxes_: a window's words) with it
