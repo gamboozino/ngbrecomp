@@ -274,6 +274,7 @@ struct Target {
     uint32_t gw = 0, gh = 0;   // guest size
     uint32_t samples = 1;
     bool drawn = false;
+    bool split_due = false;    // drawn into since the last command buffer split (SplitCommands)
     bool ms_stale = false;     // img holds the picture, ms not yet: filled from img before the next pass
     Image fb;                  // a copy of img for a draw that reads the target it draws into (BindTexture)
     uint32_t addr = 0;         // its guest memory (physical)
@@ -591,6 +592,12 @@ private:
     VkCommandBuffer cmd_ = VK_NULL_HANDLE;
     VkFence fence_ = VK_NULL_HANDLE;
     VkCommandBuffer cmds_[2] = {};
+    // a frame's commands in more than one command buffer (SplitCommands), submitted together with the last
+    std::vector<VkCommandBuffer> extra_[2];
+    size_t extra_at_[2] = {};
+    std::vector<VkCommandBuffer> pending_;
+    void SplitCommands();
+    void SubmitWith(VkFence fence);
     VkFence fences_[2] = {};
     // Set 0 per draw: pushed (VK_KHR_push_descriptor), or on a driver without it (the Mali drivers of many MediaTek
     // phones, #158 #159) written to a set from the frame slot's pools and bound -- the pools emptied with the slot's
@@ -1159,11 +1166,8 @@ void VulkanBackend::Submit() {
     TsEnd();
     d_.vkEndCommandBuffer(cmd_);
     auto sync_t0 = stats_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &cmd_;
     d_.vkResetFences(dev_, 1, &fence_);
-    QueueSubmit(si, fence_);
+    SubmitWith(fence_);
     d_.vkWaitForFences(dev_, 1, &fence_, VK_TRUE, UINT64_MAX);
     if (submitted_[slot_ ^ 1]) {
         d_.vkWaitForFences(dev_, 1, &fences_[slot_ ^ 1], VK_TRUE, UINT64_MAX);
@@ -1178,12 +1182,55 @@ void VulkanBackend::Submit() {
             std::chrono::steady_clock::now() - sync_t0).count());
     }
     d_.vkResetCommandBuffer(cmd_, 0);
+    if (cmd_ != cmds_[slot_]) {   // split this frame: all of the slot's buffers are done, its own one goes on
+        cmd_ = cmds_[slot_];
+        d_.vkResetCommandBuffer(cmd_, 0);
+    }
+    for (size_t i = 0; i < extra_at_[slot_]; i++) d_.vkResetCommandBuffer(extra_[slot_][i], 0);
+    extra_at_[slot_] = 0;
     ResetSets(slot_);
     if (!submitted_[slot_ ^ 1]) ResetSets(slot_ ^ 1);
     recording_ = false;
     ring_pos_ = 0;
     ring_epoch_++;
     Begin();
+}
+
+// The commands recorded so far ended and set aside, the rest recorded into another of the slot's buffers; all
+// go to the GPU together, in order, at the next submit. Turnip (Adreno) read a picture drawn earlier in the same
+// command buffer as it was before (the water's screen copy black, #234 #235) whatever the barriers; a command
+// buffer boundary between the two set it right.
+void VulkanBackend::SplitCommands() {
+    if (!recording_) return;
+    EndRendering();
+    VkCommandBuffer next;
+    if (extra_at_[slot_] < extra_[slot_].size()) {
+        next = extra_[slot_][extra_at_[slot_]];
+    } else {
+        VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        cai.commandPool = pool_;
+        cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cai.commandBufferCount = 1;
+        if (d_.vkAllocateCommandBuffers(dev_, &cai, &next) != VK_SUCCESS) return;
+        extra_[slot_].push_back(next);
+    }
+    extra_at_[slot_]++;
+    d_.vkEndCommandBuffer(cmd_);
+    pending_.push_back(cmd_);
+    cmd_ = next;
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    d_.vkBeginCommandBuffer(cmd_, &bi);
+}
+
+// the set-aside buffers and the one recording, in order, in one submission
+void VulkanBackend::SubmitWith(VkFence fence) {
+    pending_.push_back(cmd_);
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = uint32_t(pending_.size());
+    si.pCommandBuffers = pending_.data();
+    QueueSubmit(si, fence);
+    pending_.clear();
 }
 
 // The frame's commands to the GPU without waiting: the next frame records in the other slot, once
@@ -1193,11 +1240,8 @@ void VulkanBackend::EndFrame() {
     EndRendering();
     TsEnd();
     d_.vkEndCommandBuffer(cmd_);
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &cmd_;
     d_.vkResetFences(dev_, 1, &fence_);
-    QueueSubmit(si, fence_);
+    SubmitWith(fence_);
     submitted_[slot_] = true;
     recording_ = false;
     slot_ ^= 1;
@@ -1209,6 +1253,8 @@ void VulkanBackend::EndFrame() {
         VisResults(slot_);
     }
     d_.vkResetCommandBuffer(cmd_, 0);
+    for (size_t i = 0; i < extra_at_[slot_]; i++) d_.vkResetCommandBuffer(extra_[slot_][i], 0);
+    extra_at_[slot_] = 0;
     ResetSets(slot_);
     ring_pos_ = 0;
     ring_epoch_++;
@@ -2028,6 +2074,7 @@ void VulkanBackend::BeginRendering(Target* rt, Target* ds) {
             ca.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
         rt->drawn = true;
+        rt->split_due = true;
         StampTarget(*rt);
     }
     if (ds) {
@@ -2099,7 +2146,10 @@ void VulkanBackend::Clear(const State& s, uint32_t count, const uint8_t* rects, 
         Color(color, at[n].clearValue.color.float32);
         n++;
     }
-    if (ds && ds == bds) {
+    // only when the pass has it: a depth target of another size than the colour one is left out of the pass
+    // (BeginRendering), and clearing a depth aspect the pass has no attachment for is invalid (the water's
+    // 256x256 screen copy is cleared with the game's 720x480 depth buffer set, #234 #235)
+    if (ds && ds == bds && ds == bound_ds_) {
         VkImageAspectFlags a = ((flags & kClearZ) ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
                                ((flags & kClearStencil) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
         at[n] = {a, 0, {}};
@@ -2982,6 +3032,21 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     draw_rt_ = rt;
     for (int i = 0; i < 4; i++) views[i] = BindTexture(s, i, info[i], from_target[i]);
     draw_rt_ = nullptr;
+    {   // A display-sized target read as a texture (the back buffer into the water's 256x256 screen copy, which the
+        // sword's trail and the hit rings read too): what drew into it ends a command buffer first, the rest in
+        // another (SplitCommands). NGB_D3D_SPLIT=0: one command buffer a frame, as before.
+        static const bool split = [] { const char* e = std::getenv("NGB_D3D_SPLIT"); return !(e && !std::strcmp(e, "0")); }();
+        for (int j = 0; j < 4 && split; j++) {
+            TextureDesc dj;
+            if (!from_target[j] || !s.textures[size_t(j)] || !Describe(s.textures[size_t(j)], dj)) continue;
+            auto tj = targets_.find(uint64_t(dj.data & 0x7FFFFFFFu) << 1 | ReplayKey());
+            if (tj != targets_.end() && tj->second.gw >= 640 && &tj->second != rt && tj->second.split_due) {
+                SplitCommands();
+                for (auto& t : targets_) t.second.split_due = false;   // all drawn so far is in the ended buffer
+                break;
+            }
+        }
+    }
     // A picture drawn at the render scale shrunk into a target at a smaller one -- the glow's chain: its 256x128 at
     // the render scale into its 128x128 at 1x -- was read once per pixel, a few texels of the many under it: above
     // 1x bright spots came and went as the camera moved (#213). Such a read now averages the texels under the pixel
@@ -3020,6 +3085,20 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     static const bool bumplog = std::getenv("NGB_D3D_BUMPLOG") != nullptr;
     if ((info[0].flags & kTexSigned) && bumplog) {   // the water's stage 0 sampling (#16)
         static int n;
+        if (n < 40) {   // where each stage's texture comes from (#234 #235)
+            std::string w;
+            for (int j = 0; j < 4; j++) {
+                TextureDesc dj;
+                if (!s.textures[size_t(j)] || !Describe(s.textures[size_t(j)], dj)) { w += " -"; continue; }
+                char b[160];
+                auto tj = targets_.find(uint64_t(dj.data & 0x7FFFFFFFu) << 1 | ReplayKey());
+                std::snprintf(b, sizeof(b), " t%d@%08X fmt %X %ux%u%s%s", j, dj.data, dj.format, dj.width, dj.height,
+                              from_target[j] ? " TARGET" : "", tj != targets_.end() && &tj->second == rt ? "(=rt,copy)" : "");
+                w += b;
+            }
+            std::fprintf(stderr, "[D3D] bump draw: rt @%08X %ux%u modes %05X:%s\n", rt ? rt->addr : 0, rt ? rt->gw : 0,
+                         rt ? rt->gh : 0, s.rs[kRsPsTextureModes], w.c_str());
+        }
         if (n++ < 6) {
             const auto& t = s.tss[0];
             std::fprintf(stderr, "[D3D] water stage 0: mag %u min %u mip %u maxmip %u lodbias %08X addr %u %u\n", t[kTssMagFilter],
@@ -4174,6 +4253,7 @@ void VulkanBackend::Copy(const Surface& src, const Surface& dst, uint32_t count,
     d_.vkCmdBlitImage(cmd_, a->img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, b->img.image,
                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, uint32_t(rs.size()), rs.data(), VK_FILTER_LINEAR);
     b->drawn = true;
+    b->split_due = true;
 }
 
 void VulkanBackend::Dump(Target& t, const char* name) {
