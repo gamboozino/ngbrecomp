@@ -959,23 +959,39 @@ NTSTATUS __stdcall xbox_NtReadFile(
         return STATUS_INVALID_HANDLE;
     }
 
-    if (ByteOffset && ByteOffset->QuadPart >= 0)
-        lseek(fd, (off_t)ByteOffset->QuadPart, SEEK_SET);
+    /* At the given offset or the file's position, without moving it first: a seek and a read apart, two
+     * threads reading one handle took each other's place. */
+    off_t at = ByteOffset && ByteOffset->QuadPart >= 0 ? (off_t)ByteOffset->QuadPart : lseek(fd, 0, SEEK_CUR);
     if (xbox_FileReadHook)
-        xbox_FileReadHook(w32_handle_path(FileHandle),
-                          (uint64_t)lseek(fd, 0, SEEK_CUR), Length);
+        xbox_FileReadHook(w32_handle_path(FileHandle), (uint64_t)at, Length);
 
     /* A syscall does not fault on a write-protected page, it fails: let a
      * tracker of guest memory (the GPU's dirty pages) unprotect it first. */
     if (xbox_GuestDmaWriteHook)
         xbox_GuestDmaWriteHook(Buffer, Length);
-    ssize_t n = read(fd, Buffer, Length);
-    if (n < 0) {
-        XBOX_TRACE(XBOX_LOG_FILE, "NtReadFile(handle=%p) errno=%d", FileHandle, errno);
+    /* All that was asked, up to the file's end: a read may stop short (Android's FUSE storage, SD cards) or be
+     * interrupted by a signal, and the title took a failed or short read of its disc as a dirty disc (#237). */
+    ssize_t n = 0;
+    int err = 0;
+    while ((size_t)n < Length) {
+        ssize_t r = pread(fd, (char *)Buffer + n, Length - (size_t)n, at + n);
+        if (r < 0) {
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+            err = errno;
+            break;
+        }
+        if (r == 0)
+            break;
+        n += r;
+    }
+    if (err && n == 0) {
+        fprintf(stderr, "[FILE] read of %u at %lld failed: errno %d\n", (unsigned)Length, (long long)at, err);
         IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
         IoStatusBlock->Information = 0;
         return STATUS_UNSUCCESSFUL;
     }
+    lseek(fd, at + n, SEEK_SET);   /* the position past what was read, as read() leaves it */
 
     IoStatusBlock->Information = (ULONG_PTR)n;
     if (n == 0 && Length > 0) {
