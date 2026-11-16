@@ -36,6 +36,8 @@ void nv2a_window_request(int width, int height, int fullscreen);
 /* The window as it is now: 0 window, 1 fullscreen, 2 borderless (as nv2a_window_create), and its size
  * when windowed (left alone otherwise); -1 with no window. */
 int nv2a_window_mode(int *width, int *height);
+/* The picture's size in the window now (its swapchain's, in pixels); -1 before there is one. */
+int nv2a_window_extent(int *width, int *height);
 void nv2a_present_set_aspect(double aspect);
 /* Where the game's picture is in a window (drawable pixels) ww x wh. */
 void nv2a_present_picture_rect(int ww, int wh, int *x0, int *y0, int *dw, int *dh);

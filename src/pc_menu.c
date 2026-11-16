@@ -716,6 +716,8 @@ void ngb_aspect_tick(void)
             fprintf(stderr, "[ASPECT] tick: constants %.4f %.4f 977EF8 %.4f flags %X\n", MEMF(0x414AF4), MEMF(0x414AF8),
                     MEMF(0x977EF8), MEM32(0x9776A8));
     }
+    void ngb_aspect_follow_window(void);   /* src/ingame_menu.c */
+    ngb_aspect_follow_window();
     if (s_aspect_a > 0 && patch_constant(s_aspect_a))
         s_aspect_a = 0;
     if (s_flags_wide >= 0) {

@@ -910,6 +910,16 @@ int nv2a_window_mode(int *width, int *height)
     return 0;
 }
 
+int nv2a_window_extent(int *width, int *height)
+{
+    int w = (int)s_extent.width, h = (int)s_extent.height;
+    if (w <= 0 || h <= 0)
+        return -1;
+    *width = w;
+    *height = h;
+    return 0;
+}
+
 void nv2a_window_request(int width, int height, int fullscreen)   /* mode: 0, 1, 2 */
 {
     s_win_w = width;

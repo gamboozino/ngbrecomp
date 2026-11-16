@@ -67,6 +67,24 @@ static void apply_aspect(NgbSettings *s, bool window)
         nv2a_window_request(s->width, s->height, s->fullscreen);
 }
 
+/* 21:9's shape is the window's (64:27, 43:18 or 12:5, ngb_settings_aspect_ratio): taken again when the window
+ * changes size -- fullscreen and back, a size from a menu, the display's shape once the window is up (#233).
+ * Each frame, from src/pc_menu.c. */
+void ngb_aspect_follow_window(void)
+{
+    static int lw, lh;
+    int w, h;
+    if (nv2a_window_extent(&w, &h) != 0 || (w == lw && h == lh))
+        return;
+    lw = w;
+    lh = h;
+    if (s_running.aspect != ASPECT_21_9)
+        return;
+    double a = ngb_settings_aspect_ratio(&s_running);
+    ngb_game_set_aspect(1, a);
+    nv2a_present_set_aspect(a);
+}
+
 void ngb_menu_set_running(const NgbSettings *s)
 {
     s_running = *s;
