@@ -847,11 +847,26 @@ DWORD xbox_InputSetState(DWORD dwPort, const XBOX_VIBRATION *pVibration)
         return ERROR_DEVICE_NOT_CONNECTED;
     SDL_LockMutex(g_pad_lock);
     SDL_GameController *c = g_pads[dwPort];
-    /* SDL rumble needs a duration; refresh for ~1s on each call (the game
-     * polls vibration continuously). */
-    if (c)
-        SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
-                                 pVibration->wRightMotorSpeed, 1000);
+    /* SDL rumble needs a duration: 1 s, renewed every half second while the
+     * speeds stay the same. The title sends its motors' speeds every few
+     * milliseconds, changed or not, and each SDL call is a write to the
+     * controller (a fraction of a millisecond, under the lock the pad reads
+     * take too). */
+    if (c) {
+        static SDL_GameController *last_pad[XBOX_MAX_CONTROLLERS];
+        static WORD last_l[XBOX_MAX_CONTROLLERS], last_r[XBOX_MAX_CONTROLLERS];
+        static Uint32 last_at[XBOX_MAX_CONTROLLERS];
+        Uint32 now = SDL_GetTicks();
+        if (c != last_pad[dwPort] || pVibration->wLeftMotorSpeed != last_l[dwPort] ||
+            pVibration->wRightMotorSpeed != last_r[dwPort] || now - last_at[dwPort] >= 500) {
+            SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
+                                     pVibration->wRightMotorSpeed, 1000);
+            last_pad[dwPort] = c;
+            last_l[dwPort] = pVibration->wLeftMotorSpeed;
+            last_r[dwPort] = pVibration->wRightMotorSpeed;
+            last_at[dwPort] = now;
+        }
+    }
     SDL_UnlockMutex(g_pad_lock);
     return c ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
 }

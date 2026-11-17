@@ -883,6 +883,11 @@ int nv2a_window_create(const char *title, int width, int height,
         return -1;
     }
     fprintf(stderr, "nv2a: window on %s\n", SDL_GetCurrentVideoDriver());
+    /* No typing in the game: SDL starts with text input on, which on Windows
+     * gives the window an input method. A keyboard layout with one (Japanese,
+     * Chinese, Korean) could open its candidate box over the game, or hang
+     * the window as "Not responding" when the input method stalled. */
+    SDL_StopTextInput();
     if (fullscreen == 2)
         borderless_apply(s_window);
     if (aspect > 0)

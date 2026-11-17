@@ -594,6 +594,7 @@ int ngb_launcher_run(NgbSettings *s)
     win = SDL_CreateWindow("Ninja Gaiden Black", SDL_WINDOWPOS_CENTERED,
                            SDL_WINDOWPOS_CENTERED, LW, LH,
                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_StopTextInput();         /* no typing here: no input method's window over it (see present_sdl.c) */
     r = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED |
                                           SDL_RENDERER_PRESENTVSYNC) : NULL;
     if (r == NULL && win)
