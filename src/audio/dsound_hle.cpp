@@ -12,6 +12,7 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -163,9 +164,10 @@ struct Voice {
     // SetNotificationPositions: frames, and the events set when play reaches them (DSBPN_OFFSETSTOP: at the stop)
     std::vector<std::pair<uint32_t, uint32_t>> notify;
     uint32_t notify_stop = 0;
-    // the ADPCM block last decoded
-    int64_t block = -1;
-    int16_t decoded[65 * 2];
+    // the last two ADPCM blocks decoded (the interpolator reads frames on both sides of a block's edge)
+    int64_t block[2] = {-1, -1};
+    int16_t decoded[2][65 * 2];
+    uint8_t block_next = 0;
 };
 
 std::recursive_mutex g_lock;
@@ -232,11 +234,14 @@ float Sample(Voice& v, uint32_t f, int c) {
     c = std::min<int>(c, v.channels - 1);
     if (v.tag == 0x69) {
         int64_t at = int64_t(v.data) + int64_t(f / kAdpcmFrames) * 36 * v.channels;
-        if (at != v.block) {
-            DecodeBlock(static_cast<const uint8_t*>(HostPtr(uint32_t(at))), std::min<int>(v.channels, 2), v.decoded);
-            v.block = at;
+        int k = at == v.block[0] ? 0 : at == v.block[1] ? 1 : -1;
+        if (k < 0) {
+            k = v.block_next;
+            v.block_next ^= 1;
+            DecodeBlock(static_cast<const uint8_t*>(HostPtr(uint32_t(at))), std::min<int>(v.channels, 2), v.decoded[k]);
+            v.block[k] = at;
         }
-        return v.decoded[(f % kAdpcmFrames) * v.channels + c] / 32768.0f;
+        return v.decoded[k][(f % kAdpcmFrames) * v.channels + c] / 32768.0f;
     }
     const uint8_t* p = static_cast<const uint8_t*>(HostPtr(v.data));
     if (v.bits == 8) return (p[f * v.align + c] - 128) / 128.0f;
@@ -592,6 +597,8 @@ void Reached(uint32_t ev) { g_events.push_back(ev); }
 // the voice's frame at its position and the one after it, none once it stopped
 struct Cursor {
     uint32_t f, next;
+    uint32_t start, end;  // the frames that play: the loop's (looping) or the buffer's
+    bool loop;
 };
 std::optional<Cursor> BufferFrame(Voice& v) {
     uint32_t f = uint32_t(v.pos), end = FramesOf(v, v.bytes), start = 0;
@@ -610,7 +617,7 @@ std::optional<Cursor> BufferFrame(Voice& v) {
         if (f >= end) f = start, v.pos = start;
     }
     if (!v.data) return std::nullopt;
-    Cursor at = {f, f};
+    Cursor at = {f, f, start, end, v.looping && end > start};
     if (f + 1 < end) at.next = f + 1;
     else if (v.looping) at.next = start;
     return at;
@@ -626,13 +633,58 @@ float RunFilter(Voice& v, int c, float x) {
     return std::clamp(v.sv_l[c], -1.0f, 1.0f);
 }
 
+// The frame k frames from the cursor's, through the loop; -1 where there is none (before the start, past the end).
+// (Before the first frame of a buffer that loops from its start: the loop's last frames, the ones played just
+// before -- a stream's ring wraps there.)
+int64_t FrameAt(const Cursor& at, int k) {
+    int64_t i = int64_t(at.f) + k, len = int64_t(at.end) - at.start;
+    if (i >= int64_t(at.end)) {
+        if (!at.loop) return -1;
+        i = at.start + (i - at.end) % len;
+    } else if (i < 0) {
+        if (!at.loop || at.start) return -1;
+        i = at.end - 1 - (-i - 1) % len;
+    }
+    return i;
+}
+
+// The sound chip's resampler interpolates through eight frames around the position (three before, four after),
+// where a straight line between two dulled the top octave and let aliasing through on pitched-down sounds. Lagrange
+// weights for the fraction t: w_k = prod_{j != k} (t - j) / (k - j), k and j in -3..4.
 void ReadFrame(Voice& v, const Cursor& at, float x[2]) {
     float t = float(v.pos - std::floor(v.pos));
-    for (int c = 0; c < 2; c++) {
-        float now = Sample(v, at.f, c);
-        x[c] = now + (Sample(v, at.next, c) - now) * t;
-        if (v.lpf) x[c] = RunFilter(v, c, x[c]);
+    int chans = std::min<int>(std::max<int>(v.channels, 1), 2);
+    if (t == 0.0f) {  // on a frame: the frame itself
+        for (int c = 0; c < chans; c++) x[c] = Sample(v, at.f, c);
+    } else {
+        // the denominators are the same for every t: their reciprocals once; the numerators from the products of
+        // (t - j) before and after each tap
+        static const auto inv = [] {
+            std::array<float, 8> d{};
+            for (int k = -3; k <= 4; k++) {
+                double p = 1.0;
+                for (int j = -3; j <= 4; j++)
+                    if (j != k) p *= double(k - j);
+                d[k + 3] = float(1.0 / p);
+            }
+            return d;
+        }();
+        float d[8], before[8], after[8], w[8];
+        for (int k = 0; k < 8; k++) d[k] = t - float(k - 3);
+        before[0] = after[7] = 1.0f;
+        for (int k = 1; k < 8; k++) before[k] = before[k - 1] * d[k - 1];
+        for (int k = 6; k >= 0; k--) after[k] = after[k + 1] * d[k + 1];
+        for (int k = 0; k < 8; k++) w[k] = before[k] * after[k] * inv[k];
+        x[0] = x[1] = 0.0f;
+        for (int k = -3; k <= 4; k++) {
+            int64_t f = FrameAt(at, k);
+            if (f < 0) continue;
+            for (int c = 0; c < chans; c++) x[c] += w[k + 3] * Sample(v, uint32_t(f), c);
+        }
     }
+    if (chans == 1) x[1] = x[0];
+    for (int c = 0; c < 2; c++)
+        if (v.lpf) x[c] = RunFilter(v, c, x[c]);
 }
 
 // a mono 3D voice through one ear's filter (or its "Clear" level, or both: "Mixed"), from its recent samples
@@ -649,6 +701,8 @@ float EarOut(const Voice& v, const Ear& e, float pan, float norm, int mode) {
 
 // adds the voice to the lanes and its reverb share to the send
 void MixVoice(Voice& v, float* out, float* send, uint32_t frames, int mode) {
+    // the decoded blocks kept for this block of output only: a ring the title refills in place is decoded again
+    v.block[0] = v.block[1] = -1;
     Place at = Locate(v);
     float g[2][kLanes], w[2];
     Levels(v, at, g, w);
@@ -752,9 +806,13 @@ void Render(float* out, uint32_t frames) {
     }
     for (uint32_t i = 0; i < frames; i++) {
         const float* m = &lanes[size_t(i) * kLanes];
+        // the centre and the back pairs at -3 dB, as the console folds them for two speakers (the back pairs were
+        // added at full level)
         float c = 0.70710678f * m[kBinCentre];
-        float l = m[kBinFrontLeft] + m[kBinBackLeft] + m[kBinCrosstalkFrontLeft] + m[kBinCrosstalkBackLeft] + c;
-        float r = m[kBinFrontRight] + m[kBinBackRight] + m[kBinCrosstalkFrontRight] + m[kBinCrosstalkBackRight] + c;
+        float l = m[kBinFrontLeft] + m[kBinCrosstalkFrontLeft] + c +
+                  0.70710678f * (m[kBinBackLeft] + m[kBinCrosstalkBackLeft]);
+        float r = m[kBinFrontRight] + m[kBinCrosstalkFrontRight] + c +
+                  0.70710678f * (m[kBinBackRight] + m[kBinCrosstalkBackRight]);
         out[i * 2] = std::clamp(l, -1.0f, 1.0f);
         out[i * 2 + 1] = std::clamp(r, -1.0f, 1.0f);
     }
@@ -1102,7 +1160,7 @@ extern "C" int dsound_hle_call(int fn, uint32_t va, const uint32_t* a, uint32_t*
         v.bytes = v.loop_len = a[2];
         v.loop_start = 0;
         v.pos = 0;
-        v.block = -1;
+        v.block[0] = v.block[1] = -1;
         return 1;
     case DSF_IDirectSoundBuffer_Play:
         v.playing = true;
