@@ -42,30 +42,15 @@ static uint32_t table(void)
     return s_table;
 }
 
-/* The game's flag check (sub_001DB520, src/cheats.c: All Costumes reads 1-4 as set), the registers kept. */
-static int unlocked(uint32_t flag)
-{
-    uint32_t sa = eax, sb = ebx, sc = ecx, sd = edx, ss = esi, sdi = edi;
-    ecx = flag;
-    PUSH32(esp, 0);
-    sub_001DB520();
-    int r = (eax & 0xFF) != 0;
-    eax = sa; ebx = sb; ecx = sc; edx = sd; esi = ss; edi = sdi;
-    return r;
-}
-
-/* As the menu opens, the list: the default costume, the game's others only once unlocked (the game
- * shows the locked ones as white shapes; here they are left out), and with All Costumes on the extra
- * costumes after them, while their pictures can be made. */
+/* As the menu opens, the list: the game's five, the locked ones as the game shows them (white shapes,
+ * not chosen: its own checks of the flag, #246), and with All Costumes on the extra costumes after
+ * them, while their pictures can be made. */
 static void costume_count_now(void)
 {
     uint32_t t = table();
     s_n = 0;
     for (int i = 0; i < 5; i++) {
-        uint32_t g = GAME_TABLE + 12 * i;
-        if (i && !unlocked(MEM32(g + 4)))
-            continue;
-        memcpy((void *)XBOX_PTR(t + 12 * s_n), (void *)XBOX_PTR(g), 12);
+        memcpy((void *)XBOX_PTR(t + 12 * s_n), (void *)XBOX_PTR(GAME_TABLE + 12 * i), 12);
         s_n++;
     }
     if (!ngb_pc_setting(16))
