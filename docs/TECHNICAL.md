@@ -44,7 +44,8 @@ The game's 34 DirectSound calls (`tools/dsound_symbols.txt`, named by XbSymbolDa
 (`tools/take_dsound.py [trilogy|tomoe]`: `src/audio/dsound_hooks.c` and `dsound_hooks_arcade.c`, the recompiled
 bodies kept in `dsound_orig*.c`, the arcade's left out of its generation by `src/manual_functions_arcade.json`) and taken by a host mixer (`src/audio/dsound_hle.cpp`, after SCDA-XBERecomp's,
 `src/audio/NOTICE`): each sound buffer read from guest memory as it plays (PCM and Xbox ADPCM, its
-loop region, pitch, volume and mix bins -- a bin a buffer lists twice plays twice, as the chip adds every
+loop region, pitch -- resampled to 48 kHz through eight samples about the position, Lagrange weights, since 0.9.72;
+a straight line between two before --, volume and mix bins -- a bin a buffer lists twice plays twice, as the chip adds every
 slot, and each bin takes its headroom, the library's one step unless the program sets it: the game sets
 none, the arcade leaves it), position notifications (the arcade's double buffer: set at its next
 `DirectSoundDoWork`, on its own thread), the library's 3D pass (distance, rolloff, the direction by its own octant estimate), and dsstdfx's
@@ -58,7 +59,8 @@ byte): "Console" filters it as the chip does, "Clear" (the default from 0.9.40 t
 takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Mixed" (the default since 0.9.52) is half Console's filters (brought to Clear's power) and half a level pan by the direction, the far ear 6 dB down for a sound straight to one side (`NGB_MIX_PAN_DB`; Clear's levels a few dB apart left sounds hard to place, #126), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
 Stereo, 5.1, or Auto: 5.1 when the default output device has six channels or more. On 5.1 the program is
 told its speakers are surround (with Dolby Digital) and mixes for them, and the output is FL FR C LFE BL
-BR; on stereo the centre is folded into the front pair. `NGB_AUDIO_CHANNELS=2|6` overrides it,
+BR; on stereo the centre is folded into the front pair at -3 dB, and the back pairs into their sides at -3 dB too
+(at full level before 0.9.72). `NGB_AUDIO_CHANNELS=2|6` overrides it,
 `NGB_AUDIO_ENGINE=apu` goes back to the recompiled library on the emulated chip (xemu's voice
 processor, 0.9.29 and before: no reverb, no 5.1). `NGB_DSOUND_LOG=1` logs the calls (`=3` every Lock, `=2` every volume
 change too), `NGB_DSOUND_WAV=<file>` records what plays (either engine), `NGB_DSOUND_REVERB=0` leaves the
@@ -139,7 +141,10 @@ was not (a loading pause). Presented at the tick, every frame waited a whole ref
 GPU-command thread, presents came out unevenly. V-Sync's Mailbox is mailbox where the system has it
 (no tearing, no queue: a FIFO queue fills against the game's own clock and adds 30-50 ms), FIFO on as
 few images as allowed where it has not; its FIFO is FIFO (every frame in turn: steadier where
-mailbox, like Nvidia's Fast sync, now and then shows a frame twice, #17); Off is immediate. `NV2A_FPS_LOG=1` logs the frame rate and
+mailbox, like Nvidia's Fast sync, now and then shows a frame twice, #17); Off is immediate. A picture larger than
+the window is halved exactly (2:1 blits) while more than 2:1 is left, then brought to the window by area: each window
+pixel the average of the picture pixels under it, weighted by how much of each it covers (0.9.72; a bilinear blit
+before, which shimmered at ratios like 1.8:1; `NV2A_AREA_DOWNSCALE=0` goes back to it). Upscaling is a bilinear blit. `NV2A_FPS_LOG=1` logs the frame rate and
 `[LAT]` lines: each picture's age when presented and the spacing of presents.
 
 ## Settings, menus and features
