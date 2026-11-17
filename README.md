@@ -47,7 +47,10 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 - Keyboard and mouse with key prompts in the game, Xbox, PlayStation and Nintendo button prompts,
   rebindable controls for keyboard, mouse and controller (Ninpo and Wind Run on any two buttons),
   mouse support in the menus
-- Mods: replacement game files in a `mods` folder, without touching the installed game
+- Mods: replacement game files in a `mods` folder, without touching the installed game; texture packs (PNG
+  files in a `textures` folder; `NV2A_TEX_DUMP=<folder>` writes the game's textures to start from)
+- Saves that share a slot number (copied in by hand) no longer hide each other: the older ones are moved to a
+  `saves-not-shown` folder next to the saves, after a backup; nothing is deleted
 - Skippable intros, movies and cutscenes (an option), unlock-all options for difficulties and costumes, optional cheats
 - The arcade Ninja Gaiden on the Han's Bar cabinet and the main menu, recompiled as well
 - Sound mixed on the PC: positional 3D sound, the console's room reverb, and 5.1 surround on a 5.1 or

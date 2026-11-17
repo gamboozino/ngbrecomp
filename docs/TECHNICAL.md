@@ -244,7 +244,9 @@ frame -- the game keeps it per segment at 0x58A534, maxima at 0x58A524, and 0x58
 sum; a single blow taking all of it at once still kills), Infinite Ninpo (0x58A56C/0x58A56E),
 Infinite Essence (0x589570, the game's cap of 99,999) and Golden Scarabs (enough in the bag --
 inventory slots at 0x5891D0, item 0x59 -- to make 50 with those already given to Muramasa,
-0x589574: every one of his rewards at the next visit). All Weapons puts every melee and projectile
+0x589574: every one of his rewards at the next visit; his reward table, live00.afs, holds the harder
+difficulties' 49th and 50th until Chapter 9, which the cheat does not wait for: sub_001868F0 in
+`src/cheats.c`, #247). All Weapons puts every melee and projectile
 weapon Black gives in the bag, or raises it, at its highest level (a weapon's count is its level; Lunar
 and Kitetsu are one item a level, 0x12B/0x133/0x134 and 0x182/0x0CC/0x183, and a lower one held
 becomes the top one), with a full stack of what it fires once a game is loaded: the Strongbow, the
@@ -261,8 +263,9 @@ checksums (sub_00164E50) and returns to the title when one changes without the f
 code sets (0x7F1A94 + n); a cheat that writes sets them all. Unlocks also has All
 Costumes (saved): the Costume Selection at New Game offers every costume, as after clearing
 the game, through the same flag function as All Difficulties (flags 1-4). The game has eight costumes (chr_ryu.afs, chr_ryua-g.afs) and its Costume Selection
-lists five (0 and 4-7, the table at 0x3E9D10), the locked ones as white shapes; here it lists only
-those unlocked (`src/costume_menu.c`), and with All Costumes on costumes 1-3 too, after the game's five:
+lists five (0 and 4-7, the table at 0x3E9D10), the locked ones as white shapes, as here too
+(`src/costume_menu.c`; until 0.9.73 the locked ones were left out, #246), and with All Costumes on costumes
+1-3 too, after the game's five:
 the game has no pictures of them, so each is its default costume's picture as a silhouette with
 the name across it (EXTRA 1-3, made at run time from the player's copy, `src/pause_tab.c`).
 Debugging aids there: `NGB_CHEATS=111` turns them on at start, `NGB_POKE=addr:bytes:value,...`
