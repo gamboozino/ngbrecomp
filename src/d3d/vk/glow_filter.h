@@ -23,11 +23,14 @@ bool VulkanBackend::SoftenGlow(Image& source) {
     for (int axis=0;axis<2;++axis) {
         Image& output=glow_soft_[axis];
         auto footprint=GlowFootprint();
-        uint32_t options[]={width,height,uint32_t(GlowSoftenMode()),uint32_t(axis),5u,uint32_t(ngb_pc_setting(7))};
+        uint32_t options[]={width,height,uint32_t(GlowCorrected()?3:GlowSoftenMode()),uint32_t(axis),5u,uint32_t(ngb_pc_setting(7))};
         uint64_t ps=Hash(options,sizeof(options),0x674C4F57534F4650ull);
         if (!Module(ps,[&] {
             double sigma=(GlowSoftenMode()==1?0.6:1.2)*double(axis?height:width)/128.0;
             if (!axis) sigma*= (16.0/9.0)/footprint.aspect/8;
+            // Corrected: a Gaussian of 1.5 of the 128x128's texels each way, what the console's picture lost to the
+            // TV's softness; the game's sparse four-tap blur leaves the glow blotchy around small lights without it
+            if (GlowCorrected()) sigma=1.5*double(axis?height:width)/128.0;
             sigma=std::max(sigma,0.3);
             int radius=int(std::ceil(sigma*3));
             double weight_sum=0;
@@ -76,7 +79,9 @@ void VulkanBackend::InvalidateContinuousGlow(uint32_t data) {
     for (auto& r:continuous_record_) if (r.data==(data&0x7FFFFFFFu)) r.frame=~0u;
 }
 
-int VulkanBackend::ContinuousGlowStage(const State& s,const Assembled& a,uint32_t count) {
+// chained: each stage only after the one before it was replaced this frame (Reduced); unchained, a stage is known by
+// itself (Corrected and Off, which keep the game's passes)
+int VulkanBackend::ContinuousGlowStage(const State& s,const Assembled& a,uint32_t count,bool chained) {
     if (!s.ps || s.rs[kRsZEnable] || s.rs[kRsStencilEnable] || SimpleState(s,kMBlendEnable) ||
         SimpleState(s,kMColorWriteEnable)!=0x01010101 || SimpleState(s,kMAlphaTestEnable)) return -1;
     uint32_t w,h;SurfaceSize(s.rt,w,h);
@@ -97,8 +102,8 @@ int VulkanBackend::ContinuousGlowStage(const State& s,const Assembled& a,uint32_
     if (stage<0) return -1;
     if (stage) {
         const auto& previous=continuous_record_[stage-1];
-        if (previous.frame!=frame_ || previous.data!=(src.data&0x7FFFFFFFu) ||
-            s.rs[kRsPsTextureModes]!=0x8421) return -1;
+        if (s.rs[kRsPsTextureModes]!=0x8421 ||
+            (chained && (previous.frame!=frame_ || previous.data!=(src.data&0x7FFFFFFFu)))) return -1;
     }
     // Match the coordinates, axis and offsets too. Similar-sized water,
     // shadow and unrelated screen quads must retain their original shaders.
@@ -170,7 +175,7 @@ bool VulkanBackend::ContinuousGlowPass(Image& input,Image& output,uint32_t w,uin
             <<"[loop] for(int x=int(floor(lo.x));x<int(ceil(hi.x));++x) {\n"
             <<"float wx=max(0.0,min(hi.x,float(x+1))-max(lo.x,float(x)));\n"
             <<"float4 value=tex0.Load(int3(clamp(int2(x,y),int2(0,0),int2("<<input.w-1<<","<<input.h-1<<")),0));\n";
-        if (!stage) code<<"value=saturate(2*(value+threshold)-1);\n";
+        if (!stage) code<<"value=saturate(2*(value+threshold)-1);\n";   // (3: a plain average, Corrected's)
         code<<"sum+=value*wx*wy; }}\nreturn sum/(size.x*size.y)"<<((stage==1 || stage==2)?"*(256.0/255.0)":"")<<"; }\n";
         return code.str();
     },false)) return false;

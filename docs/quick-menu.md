@@ -90,7 +90,7 @@ or waits for the whole GPU to idle.
   them. Existing combat bindings are retained when quick actions are rebound.
 - `launcher.c/h` stores the percentage and shares its stepping/validation
   between both settings menus. In `ingame_menu.c`'s `ngb_pc_setting`, 19 is
-  Quick Menu Pause and 20 the Quick Menu size (18 is Smoother Glow).
+  Quick Menu Pause and 20 the Quick Menu size (18 is Bloom).
 - `main.c`: polls the host input; `ingame_menu.c` forwards SDL events. `cheats.c` invokes
   the guest state guard at frame end. `pc_menu.c`, `pause_tab.c`,
   `launcher.c/h`, and `ingame_menu.c` expose the settings (the Gameplay page).

@@ -1,10 +1,20 @@
-// Optional quality profile, based on the preferred launcher 18 comparison: RECOMP SETTINGS ->
-// Graphics -> Smoother Glow (ngb_pc_setting 18), off by default; NGB_GLOW_QUALITY=1 or 0 overrides it.
-// Stock rendering is unchanged otherwise.
-inline bool ContinuousGlowEnabled() {
-    static int forced=[] {const char* e=std::getenv("NGB_GLOW_QUALITY");return e && *e ? std::strcmp(e,"0") ? 1 : 0 : -1;}();
-    return forced >= 0 ? forced : ngb_pc_setting(18) != 0;
+// RECOMP SETTINGS -> Graphics -> Bloom (ngb_pc_setting 18): 0 Original (the game's passes as they are), 2 Corrected
+// (the game's passes, fed and finished at the console's size: steady at any render scale, #248), 3 Off (the glow not
+// added). 1, Reduced (the continuous chain below, fainter: #64), is no longer offered: NGB_BLOOM=0..3 overrides the
+// setting, and NGB_GLOW_QUALITY=1 or 0 as before (Reduced or Original), for comparing.
+inline int GlowMode() {
+    static int forced=[] {
+        const char* e=std::getenv("NGB_BLOOM");
+        if (e && *e) return std::clamp(std::atoi(e),0,3);
+        e=std::getenv("NGB_GLOW_QUALITY");
+        return e && *e ? std::strcmp(e,"0") ? 1 : 0 : -1;
+    }();
+    int v=std::clamp(ngb_pc_setting(18),0,3);
+    return forced >= 0 ? forced : v==1 ? 2 : v;
 }
+inline bool ContinuousGlowEnabled() { return GlowMode()==1; }
+inline bool GlowCorrected() { return GlowMode()==2; }
+inline bool GlowOff() { return GlowMode()==3; }
 inline int GlowSoftenMode() {
     static int mode=[] {const char* e=std::getenv("NGB_GLOW_SOFTEN");return e?std::clamp(std::atoi(e),0,2):0;}();
     return mode;

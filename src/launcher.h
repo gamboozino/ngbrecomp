@@ -35,7 +35,7 @@ typedef struct NgbSettings {
     int bow_crosshair;      /* Gameplay > Bow Crosshair: a dot in the middle while aiming a bow in first person (src/camera.c, #228) */
     int hud_aspect;         /* Display > HUD Aspect: 0 stretched as the game's widescreen mode draws it, 1 its own shape (the renderer narrows only the HUD's elements: src/d3d/vk/backend.cpp, #220 #219) */
     int audio_output;       /* 0 auto (5.1 on a 5.1 or 7.1 device), 1 stereo, 2 5.1 (src/audio/dsound_hle.cpp) */
-    int smooth_glow;        /* the glow's continuous filtering (src/d3d/vk/glow_filter.h, #64) */
+    int smooth_glow;        /* Bloom: 0 Original, 2 Corrected (#248), 3 Off (src/d3d/vk/glow_options.h; 1, Reduced, by NGB_BLOOM only) */
     int detail_under_load;  /* the game's own detail lowering when the GPU looks busy (src/d3d/d3d.c, #50, #114) */
     int render_thread;      /* Multithreaded Renderer: drawing on a thread of its own (src/d3d/gpu/threaded.cpp) */
     int intercept;          /* Gameplay > Intercept (src/intercept.c, #109): 0 off, 1 Black's, 2 the Hurricane Pack's */
@@ -67,6 +67,7 @@ int ngb_vsync_step(int v, int dir);
 int ngb_quick_scale_value(int v);
 int ngb_quick_scale_step(int v, int dir);
 int ngb_positional_step(int v, int step);   /* src/ingame_menu.c: Positional Audio in the menus' order */
+int ngb_glow_step(int v, int step);         /* src/ingame_menu.c: Bloom in the menus' order */
 
 /* The window sizes offered for an aspect ratio, smallest first; the index of
  * the settings' own (-1: none of them). */

@@ -89,7 +89,7 @@ static const char *const s_label[S_COUNT] = {
     "Display", "V-Sync", "FPS Counter", "Window Size", "Aspect Ratio",
     "Skip Intros", "Settings at Startup", "Anti-Aliasing (MSAA)",
     "Infinite Health", "Infinite Ninpo", "Infinite Essence", "All Difficulties",
-    "Golden Scarabs", "All Costumes", "Extra Costume", "Smoother Glow", "Quick Menu Pause",
+    "Golden Scarabs", "All Costumes", "Extra Costume", "Bloom", "Quick Menu Pause",
     "Quick Menu", "Infinite Items", "Infinite Projectiles", "Positional Audio", "HUD",
     "Audio Output", "Missions", "Arcade Ninja Gaiden", "Movie Theater", "Lower Detail Under Load",
     "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
@@ -116,7 +116,7 @@ static const char *const s_help[S_COUNT] = {
     "All 50: Muramasa gives every reward. For this session only.",
     "Every costume at the Costume Selection, and three it never offers.",
     "Costumes in the game it never offers. From the next area.",
-    "A softer, fainter glow on bright lights. Off: the console's.",
+    "Original: the console's. Corrected: the same bloom, steady and even at any resolution. Off: none.",
     "The game pauses while the quick menu is open (once Ryu's action ends).",
     "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size.",
     "Healing items, talismans and jewels are not used up. For this session only.",
@@ -237,6 +237,7 @@ static void value_text(int row, char *out, size_t n)
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
     case S_INTERCEPT: snprintf(out, n, "%s", v == 2 ? "Hurricane" : v ? "Black" : "Off"); break;
     case S_HUDSTYLE: snprintf(out, n, "%s", v ? "Compact" : "Original"); break;
+    case S_GLOW: snprintf(out, n, "%s", v == 3 ? "Off" : v ? "Corrected" : "Original"); break;
     case S_INTERP: snprintf(out, n, "%s", v == 3 ? "2x" : v == 2 ? "Half Rate" : v ? "Full Rate" : "Off"); break;
     case S_HUDASPECT: snprintf(out, n, "%s", v ? "Corrected" : "Stretched"); break;
     case S_UNLOCKS: snprintf(out, n, "%s", ""); break;
@@ -294,6 +295,9 @@ static void change(int row, int step)
         break;
     case S_POSAUDIO:
         ngb_pc_set_setting(row, ngb_positional_step(v, step));
+        break;
+    case S_GLOW:
+        ngb_pc_set_setting(row, ngb_glow_step(v, step));
         break;
     case S_AUDIOOUT:
     case S_INTERCEPT:

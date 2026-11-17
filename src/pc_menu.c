@@ -132,6 +132,7 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_INTERP   0x20208            /* Frame Interpolation (src/d3d/gpu/threaded.cpp, #226) */
 #define D_INTERP   0x20209
 #define T_INTERP0  0x2020A            /* + 0..3: Off, Full Rate, Half Rate, 2x */
+#define T_GLOW0    0x2020E            /* + 0..3: Bloom's Original, Reduced, Corrected, Off */
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -196,7 +197,7 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define D_EXTRACOST 0x201AE
 #define T_EXTRA0   0x201B0            /* + 0..3: Game's Choice, Extra 1-3 */
 #define D_CONTROLS 0x201B4            /* the category */
-#define T_GLOW     0x201B5            /* Smoother Glow (src/d3d/vk/glow_options.h) */
+#define T_GLOW     0x201B5            /* Bloom (src/d3d/vk/glow_options.h) */
 #define D_GLOW     0x201B6
 #define T_MISSIONS 0x201D4            /* the unlocks (src/cheats.c): the main menu's extras */
 #define T_ARCADE   0x201D5
@@ -253,6 +254,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_INTERP, "Frame Interpolation" },
     { D_INTERP, "Experimental. Pictures between the game's frames, on a 120 Hz or faster display." },
     { T_INTERP0 + 0, "Off" }, { T_INTERP0 + 1, "Full Rate" }, { T_INTERP0 + 2, "Half Rate" }, { T_INTERP0 + 3, "2x" },
+    { T_GLOW0 + 0, "Original" }, { T_GLOW0 + 1, "Reduced" }, { T_GLOW0 + 2, "Corrected" }, { T_GLOW0 + 3, "Off" },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
     { D_AUDIOOUT, "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game." },
@@ -285,8 +287,8 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_TEXTURE, "Anisotropic Filtering" },
     { T_MSAA,    "Anti-Aliasing (MSAA)" },
     { D_MSAA,    "Smooths the edges of the 3D; 2x to 8x samples a pixel." },
-    { T_GLOW,    "Smoother Glow" },
-    { D_GLOW,    "A softer, fainter glow on bright lights. Off: the console's." },
+    { T_GLOW,    "Bloom" },
+    { D_GLOW,    "Original: the console's. Corrected: the same bloom, steady and even at any resolution. Off: none." },
     { T_LOADDETAIL, "Lower Detail Under Load" },
     { D_LOADDETAIL, "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker." },
     { T_RTHREAD, "Multithreaded Renderer" },
@@ -886,7 +888,7 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
     case ROW_ALLDIFF: return ngb_pc_setting(14) ? T_YES : T_NO;
     case ROW_SCARABS: return ngb_pc_setting(15) ? T_ON : T_OFF;
     case ROW_ALLCOST: return ngb_pc_setting(16) ? T_YES : T_NO;
-    case ROW_GLOW:    return ngb_pc_setting(18) ? T_ON : T_OFF;
+    case ROW_GLOW:    return T_GLOW0 + (uint32_t)ngb_pc_setting(18);
     case ROW_LOADDETAIL: return ngb_pc_setting(29) ? T_ON : T_OFF;
     case ROW_RTHREAD: return ngb_pc_setting(30) ? T_ON : T_OFF;
     case ROW_INTERCEPT: return T_INTERCEPT0 + (uint32_t)ngb_pc_setting(31);
@@ -961,7 +963,7 @@ static int pc_value_change(int row, int delta)
     case ROW_ALLDIFF: ngb_pc_set_setting(14, !ngb_pc_setting(14)); break;
     case ROW_SCARABS: ngb_pc_set_setting(15, !ngb_pc_setting(15)); break;
     case ROW_ALLCOST: ngb_pc_set_setting(16, !ngb_pc_setting(16)); break;
-    case ROW_GLOW:    ngb_pc_set_setting(18, !ngb_pc_setting(18)); break;
+    case ROW_GLOW:    ngb_pc_set_setting(18, ngb_glow_step(ngb_pc_setting(18), step)); break;
     case ROW_LOADDETAIL: ngb_pc_set_setting(29, !ngb_pc_setting(29)); break;
     case ROW_RTHREAD: ngb_pc_set_setting(30, !ngb_pc_setting(30)); break;
     case ROW_INTERCEPT: ngb_pc_set_setting(31, (ngb_pc_setting(31) + (step > 0 ? 1 : 2)) % 3); break;

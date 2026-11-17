@@ -173,8 +173,8 @@ of the pause menu. Changes apply at once and are saved.
 </table>
 
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
-  anisotropic), anti-aliasing (MSAA), shadow resolution, Smoother Glow (a softer, fainter glow on
-  bright lights; off is the console's look), Lower Detail Under Load, Multithreaded Renderer (drawing on a
+  anisotropic), anti-aliasing (MSAA), shadow resolution, Bloom (Original, the console's; Corrected, the
+  same bloom kept steady and even at any render resolution; Off), Lower Detail Under Load, Multithreaded Renderer (drawing on a
   thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC), Frame
   Interpolation (experimental: pictures made between the game's 60 frames a second, for displays of 120 Hz
   and up; Full Rate, Half Rate or 2x)
