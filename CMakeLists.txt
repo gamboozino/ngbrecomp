@@ -164,6 +164,7 @@ add_library(ngb_gen OBJECT ${RECOMP_GEN_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/d3d/gpu_regs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/playtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/save_slots.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/quick_select.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main_menu.c
     # The Direct3D hooks (docs/renderer.md, tools/take_d3d.py).

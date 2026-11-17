@@ -902,6 +902,8 @@ static void *guest_main(void *unused)
         char save_dir[4096];
         save_dir_path(save_dir, sizeof(save_dir));
         printf("Save directory: %s\n", save_dir);
+        extern void ngb_save_slots_fix(const char *save_dir);   /* src/save_slots.c: one save a slot number */
+        ngb_save_slots_fix(save_dir);
         xbox_path_init(s_game_dir, save_dir);
     }
     xbox_kernel_bridge_init();

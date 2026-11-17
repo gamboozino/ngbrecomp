@@ -436,6 +436,13 @@ case-blind). Game files taken from mods are listed in `<save folder>/mods-cache.
 game's own file is put back over its cached copy at the next start (the game never checks its cache again).
 The quick menu's icons read `spr.afs` the same way. The log names each file taken (`[MODS]`).
 
+Save slots (`src/save_slots.c`): the game lists its saves by the number each name starts with ("2. CHAPTER 7
+004:51" is No. 2, 1 to 30) and shows one save a number, so two saves of one number (copied in by hand, or left by
+saving over a slot on Linux before 0.9.10) hid each other. At each start, of a number's saves the newest stays and
+the others are moved, as they are, to `<save folder>/saves-not-shown`, from where a player can bring one back by
+hand. Nothing is deleted or changed, and the saves are copied to `<save folder>/save-backup/<date and time>` before
+the first move. The log names each (`[SAVES]`). `NGB_SAVE_SLOTS=0` leaves them as they are.
+
 In the game's menus (main menu, Options, the pause menu and its tabs, message boxes) the mouse
 points: the game's own cursor follows it onto the item under it (a press of the pad at a time,
 so the game moves it as it would), a click there chooses it, a right click is B, the wheel
@@ -518,6 +525,15 @@ Push descriptors are used where the driver has them, else a descriptor set per d
 `NGB_RENDERER=xemu` draws with xemu's NV2A renderer instead, as before (on Steam:
 `NGB_RENDERER=xemu %command%`). `NGB_RENDERER=mirror` keeps xemu drawing and showing the game
 and renders with the new one unseen, for comparing (`NGB_D3D_DUMP=dir` writes its frames).
+
+Texture packs (#249): a PNG named by a texture's id in the `textures` folder beside the saves
+(`%LOCALAPPDATA%\NinjaGaidenBlack\textures`, `~/.local/share/NinjaGaidenBlack/textures`,
+`NV2A_TEX_REPLACE=dir` for another) is drawn instead of that texture, at its own size (the same
+aspect ratio, at most 8192 a side), with mipmaps made for it when it is opaque or the game's texture had its own. `NV2A_TEX_DUMP=dir` writes each texture the game uses, once,
+as `<id>.png`: the names to keep when editing or upscaling them. The id is a hash of the texture's
+bytes, palette, format and size, so a texture the game changes as it plays is a new one. Plain 2D
+textures only: not cube maps, the water's bump maps, nor linear (screen-sized) ones. The two
+renderers name textures differently; xemu's has its own packs.
 
 ## Bring-up tools
 
