@@ -13,6 +13,8 @@
 #include "recomp_funcs.h"
 
 int ngb_pc_setting(int which);   /* src/ingame_menu.c: 24 the HUD shown */
+/* This frame's run of it found play (src/pc_menu.c: such a frame is never a 2D screen; cleared at the frame's end) */
+volatile int ngb_hud_in_play;
 
 void sub_001FA210(void)
 {
@@ -32,6 +34,7 @@ void sub_001FA210(void)
         esp += 4;
         return;
     }
+    ngb_hud_in_play = 1;
     eax = 0;
     if (MEM16(0xDB9C6E) != 0xFFFF) {
         esp += 4;

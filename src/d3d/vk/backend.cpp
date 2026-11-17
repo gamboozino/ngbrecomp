@@ -424,7 +424,12 @@ private:
     uint32_t towers_lo_ = 0, towers_hi_ = 0;   // the towers' chunk's data, up to the next loaded chunk's
     uint32_t towers_frame_ = ~0u, peek_frames_ = 0;
     // ngb_2d_screen_frame as of the call: a 2D screen, knowing the 3D drawn so far this frame
-    bool ScreenFrame(uint32_t threed) const { return (pk_.screen & 1) || ((pk_.screen & 2) && threed < 30); }
+    // (4: the game's HUD routine found play this frame -- play, however little 3D: first person facing an empty
+    // view draws next to none, and its HUD was laid out as a 2D screen's)
+    bool ScreenFrame(uint32_t threed) const {
+        return (pk_.screen & 1) || ((pk_.screen & 2) && !(pk_.screen & 4) && threed < 30);
+    }
+    bool play_seen_ = false;   // a draw of this frame came after the HUD routine found play
     // device: the NV2A renderer's, shared, when NGB_RENDERER=d3d (its presenter then shows our
     // frames in the game window); else one of our own, drawing unseen (mirror mode)
     bool CreateInstance();
@@ -3795,6 +3800,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         }
     }
     if (rt && rt->gw >= 640) ngb_frame_draws++;
+    if (pk_.screen & 4) play_seen_ = true;
     if (!a.pretransformed && rt && rt->gw < 640) offscreen3d_++;
     if (!a.pretransformed && rt && rt->gw >= 640) {
         static const bool viewlog = std::getenv("NGB_D3D_VIEWLOG") != nullptr;   // debugging: the camera's direction
@@ -4835,8 +4841,10 @@ void VulkanBackend::Present(const Surface& front) {
     pic_tex_ = 0;
     pic_x1_ = -1;
     offscreen3d_ = 0;
-    __atomic_store_n(&ngb_frame_done_2d, ngb_frame_draws > 0 && ngb_frame_3d_draws < 30, __ATOMIC_RELAXED);
+    __atomic_store_n(&ngb_frame_done_2d, ngb_frame_draws > 0 && ngb_frame_3d_draws < 30 && !play_seen_,
+                     __ATOMIC_RELAXED);
     ngb_frame_draws = ngb_frame_3d_draws = 0;
+    play_seen_ = false;
     hud_cover_ = 0;
     if (trace_) {
         static const char* nopic = std::getenv("NGB_TRACE_NOPIC");

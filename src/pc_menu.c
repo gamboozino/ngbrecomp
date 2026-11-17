@@ -642,6 +642,10 @@ void ngb_aspect_menu_running(void)
 /* Each frame's end (src/cheats.c, at Swap): the next frame's mode -- a menu marks itself again; a
  * frame of next to no 3D (the renderer's count, src/d3d/vk/backend.cpp) is a 2D screen. */
 extern int ngb_frame_draws, ngb_frame_3d_draws, ngb_frame_done_2d, ngb_render_threaded;
+/* src/hud.c: the game's HUD routine found play this frame (by its own test, before it draws the bars). Such a
+ * frame is play however few 3D draws it makes: first person facing an empty view draws next to none, and would be
+ * taken for a 2D screen, the HUD laid out as one's. */
+extern volatile int ngb_hud_in_play;
 void ngb_aspect_frame_end(void)
 {
 
@@ -652,7 +656,8 @@ void ngb_aspect_frame_end(void)
     if (__atomic_load_n(&ngb_render_threaded, __ATOMIC_RELAXED))
         s_screen_2d = __atomic_load_n(&ngb_frame_done_2d, __ATOMIC_RELAXED);
     else
-        s_screen_2d = ngb_frame_draws > 0 && ngb_frame_3d_draws < 30;
+        s_screen_2d = ngb_frame_draws > 0 && ngb_frame_3d_draws < 30 && !ngb_hud_in_play;
+    ngb_hud_in_play = 0;   /* (the next frame's HUD routine says again) */
 }
 
 /* For the renderer and the mouse: the game is in its widescreen mode on a wide screen, its 2D drawn
@@ -676,14 +681,15 @@ int ngb_2d_screen(void)
  * that one frame. */
 int ngb_2d_screen_frame(int threed)
 {
-    return s_screen_wide && (s_menu_now || ((s_menu_last || s_screen_2d) && threed < 30));
+    return s_screen_wide && (s_menu_now || ((s_menu_last || s_screen_2d) && !ngb_hud_in_play && threed < 30));
 }
 
 /* Its parts as of a call, for a renderer that draws later (gpu::Peek): 1 a menu now, 2 the last frame's menu or a
- * 2D screen -- ngb_2d_screen_frame is (1) or (2 and fewer than 30 3D draws so far). */
+ * 2D screen, 4 play found by the HUD routine -- ngb_2d_screen_frame is (1) or (2, not 4, and fewer than 30 3D draws
+ * so far). */
 int ngb_2d_screen_flags(void)
 {
-    return s_screen_wide ? (s_menu_now ? 1 : 0) | (s_menu_last || s_screen_2d ? 2 : 0) : 0;
+    return s_screen_wide ? (s_menu_now ? 1 : 0) | (s_menu_last || s_screen_2d ? 2 : 0) | (ngb_hud_in_play ? 4 : 0) : 0;
 }
 /* Before the game runs: the screen's shape (the flags are the game's to set up, then kept by the tick). */
 void ngb_game_aspect_init(int widescreen)
