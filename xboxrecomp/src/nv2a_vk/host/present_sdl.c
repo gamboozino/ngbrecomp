@@ -283,45 +283,66 @@ static VkImage picture_source(PGRAPHVkState *r, int *w, int *h, bool *ext)
  * averages 2x2 pixels: a box filter), until the last, ordinary blit has
  * less than 2:1 left to do. */
 #define MAX_HALVINGS 4
-static VkImage s_half[MAX_HALVINGS];
-static VmaAllocation s_half_mem[MAX_HALVINGS];
-static uint32_t s_half_w[MAX_HALVINGS], s_half_h[MAX_HALVINGS];
+/* (one more: the picture copied at its own size, for the area filter below when no halving is needed) */
+#define FULL_COPY MAX_HALVINGS
+static VkImage s_half[MAX_HALVINGS + 1];
+static VmaAllocation s_half_mem[MAX_HALVINGS + 1];
+static VkImageView s_half_view[MAX_HALVINGS + 1];
+static uint32_t s_half_w[MAX_HALVINGS + 1], s_half_h[MAX_HALVINGS + 1];
 
-static void halving_images(PGRAPHVkState *r, int n, uint32_t w, uint32_t h)
+static void level_image(PGRAPHVkState *r, int i, bool want, uint32_t hw, uint32_t hh);
+static void area_forget(int i);
+
+/* n halvings of a w x h picture, and the full-size copy if full */
+static void halving_images(PGRAPHVkState *r, int n, uint32_t w, uint32_t h, bool full)
 {
-    for (int i = 0; i < MAX_HALVINGS; i++) {
-        uint32_t hw = w >> (i + 1), hh = h >> (i + 1);
-        bool want = i < n;
-        if (s_half[i] && (!want || s_half_w[i] != hw || s_half_h[i] != hh)) {
-            nv2a_vk_queue_lock();
-            vkDeviceWaitIdle(r->device);
-            nv2a_vk_queue_unlock();
-            vmaDestroyImage(r->allocator, s_half[i], s_half_mem[i]);
+    for (int i = 0; i < MAX_HALVINGS; i++)
+        level_image(r, i, i < n, w >> (i + 1), h >> (i + 1));
+    level_image(r, FULL_COPY, full, w, h);
+}
+
+static void level_image(PGRAPHVkState *r, int i, bool want, uint32_t hw, uint32_t hh)
+{
+    if (s_half[i] && (!want || s_half_w[i] != hw || s_half_h[i] != hh)) {
+        nv2a_vk_queue_lock();
+        vkDeviceWaitIdle(r->device);
+        nv2a_vk_queue_unlock();
+        if (s_half_view[i])
+            vkDestroyImageView(r->device, s_half_view[i], NULL);
+        s_half_view[i] = VK_NULL_HANDLE;
+        area_forget(i);   /* (a new view may get the old one's handle: its set written again regardless) */
+        vmaDestroyImage(r->allocator, s_half[i], s_half_mem[i]);
+        s_half[i] = VK_NULL_HANDLE;
+    }
+    if (want && !s_half[i]) {
+        VkImageCreateInfo ci = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = VK_FORMAT_R8G8B8A8_UNORM,
+            .extent = { hw, hh, 1 },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+        VmaAllocationCreateInfo ai = { .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE };
+        if (vmaCreateImage(r->allocator, &ci, &ai, &s_half[i], &s_half_mem[i],
+                           NULL) != VK_SUCCESS) {
             s_half[i] = VK_NULL_HANDLE;
+            return;
         }
-        if (want && !s_half[i]) {
-            VkImageCreateInfo ci = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                .imageType = VK_IMAGE_TYPE_2D,
-                .format = VK_FORMAT_R8G8B8A8_UNORM,
-                .extent = { hw, hh, 1 },
-                .mipLevels = 1,
-                .arrayLayers = 1,
-                .samples = VK_SAMPLE_COUNT_1_BIT,
-                .tiling = VK_IMAGE_TILING_OPTIMAL,
-                .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            };
-            VmaAllocationCreateInfo ai = { .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE };
-            if (vmaCreateImage(r->allocator, &ci, &ai, &s_half[i], &s_half_mem[i],
-                               NULL) != VK_SUCCESS) {
-                s_half[i] = VK_NULL_HANDLE;
-                return;
-            }
-            s_half_w[i] = hw;
-            s_half_h[i] = hh;
-        }
+        VkImageViewCreateInfo vi = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = s_half[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+        };
+        if (vkCreateImageView(r->device, &vi, NULL, &s_half_view[i]) != VK_SUCCESS)
+            s_half_view[i] = VK_NULL_HANDLE;
+        s_half_w[i] = hw;
+        s_half_h[i] = hh;
     }
 }
 
@@ -759,6 +780,25 @@ static void barrier(VkCommandBuffer cmd, VkImage img, VkImageLayout from,
                     VkImageLayout to, VkAccessFlags src, VkAccessFlags dst,
                     VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage);
 
+/* The swapchain image idx's view, to draw into (made again for a new swapchain) */
+static VkImageView swap_view(PGRAPHVkState *r, uint32_t idx)
+{
+    if (s_layer.views_of != s_swapchain) {
+        layer_drop_views(r);
+        for (uint32_t i = 0; i < s_image_count; i++) {
+            VkImageViewCreateInfo vi = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = s_images[i],
+                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = s_format,
+                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+            };
+            if (vkCreateImageView(r->device, &vi, NULL, &s_layer.views[i]) != VK_SUCCESS)
+                s_layer.views[i] = VK_NULL_HANDLE;
+        }
+        s_layer.views_of = s_swapchain;
+    }
+    return s_layer.views[idx];
+}
+
 /* Over the swapchain image idx (in TRANSFER_DST, and left there) */
 static void layer_draw(PGRAPHVkState *r, VkCommandBuffer cmd, unsigned f, uint32_t idx)
 {
@@ -794,20 +834,7 @@ static void layer_draw(PGRAPHVkState *r, VkCommandBuffer cmd, unsigned f, uint32
         s_layer.serial = serial;
         s_layer.valid = true;
     }
-    if (s_layer.views_of != s_swapchain) {
-        layer_drop_views(r);
-        for (uint32_t i = 0; i < s_image_count; i++) {
-            VkImageViewCreateInfo vi = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = s_images[i],
-                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = s_format,
-                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
-            };
-            if (vkCreateImageView(r->device, &vi, NULL, &s_layer.views[i]) != VK_SUCCESS)
-                s_layer.views[i] = VK_NULL_HANDLE;
-        }
-        s_layer.views_of = s_swapchain;
-    }
-    if (!s_layer.views[idx])
+    if (!swap_view(r, idx))
         return;
     barrier(cmd, s_images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -833,6 +860,261 @@ static void layer_draw(PGRAPHVkState *r, VkCommandBuffer cmd, unsigned f, uint32
     barrier(cmd, s_images[idx], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+}
+
+/* ---- The last step down to the window, by area ----
+ *
+ * After the halvings less than 2:1 is left, and a bilinear blit at, say,
+ * 1.8:1 reads 2x2 pixels around each window pixel's centre: of the 1.8 picture
+ * pixels a window pixel covers, some count fully, some partly, some not at all,
+ * and which depends on where the pixel falls, so fine detail shimmers as the
+ * camera moves. Here each window pixel is the average of the picture pixels
+ * under it, each weighted by how much of it is covered. Upscaling keeps the
+ * blit. NV2A_AREA_DOWNSCALE=0 turns it off. */
+static struct {
+    int state;                 /* 0 not tried, 1 ready, -1 unavailable */
+    VkSampler sampler;
+    VkDescriptorSetLayout dsl;
+    VkPipelineLayout layout;
+    VkDescriptorPool pool;
+    VkDescriptorSet set[MAX_HALVINGS + 1];   /* one per level image */
+    VkImageView bound[MAX_HALVINGS + 1];     /* the view each set holds */
+    VkPipeline pipe;
+    VkFormat pipe_format, failed_format;   /* (failed_format: VK_FORMAT_UNDEFINED, 0, when none failed) */
+} s_area;
+
+/* Level image i is going: its set is written again for whatever view comes next */
+static void area_forget(int i)
+{
+    s_area.bound[i] = VK_NULL_HANDLE;
+}
+
+static bool area_init(PGRAPHVkState *r)
+{
+    if (s_area.state)
+        return s_area.state > 0;
+    s_area.state = -1;
+    const char *e = getenv("NV2A_AREA_DOWNSCALE");
+    if (e && *e == '0')
+        return false;
+    nv2a_vk_shared sh;
+    if (nv2a_vk_share(&sh) != 1 || !sh.features13 || !vkCmdBeginRendering)
+        return false;
+    VkSamplerCreateInfo sci = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_NEAREST, .minFilter = VK_FILTER_NEAREST,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    };
+    VkDescriptorSetLayoutBinding b = {
+        .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+    VkDescriptorSetLayoutCreateInfo dli = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b,
+    };
+    VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_HALVINGS + 1 };
+    VkDescriptorPoolCreateInfo pci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = MAX_HALVINGS + 1,
+        .poolSizeCount = 1, .pPoolSizes = &ps,
+    };
+    VkPushConstantRange pc = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 8 * sizeof(float) };
+    if (vkCreateSampler(r->device, &sci, NULL, &s_area.sampler) != VK_SUCCESS ||
+        vkCreateDescriptorSetLayout(r->device, &dli, NULL, &s_area.dsl) != VK_SUCCESS ||
+        vkCreateDescriptorPool(r->device, &pci, NULL, &s_area.pool) != VK_SUCCESS)
+        return false;
+    VkPipelineLayoutCreateInfo pli = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &s_area.dsl,
+        .pushConstantRangeCount = 1, .pPushConstantRanges = &pc,
+    };
+    if (vkCreatePipelineLayout(r->device, &pli, NULL, &s_area.layout) != VK_SUCCESS)
+        return false;
+    for (int i = 0; i <= MAX_HALVINGS; i++) {
+        VkDescriptorSetAllocateInfo dai = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = s_area.pool,
+            .descriptorSetCount = 1, .pSetLayouts = &s_area.dsl,
+        };
+        if (vkAllocateDescriptorSets(r->device, &dai, &s_area.set[i]) != VK_SUCCESS)
+            return false;
+    }
+    s_area.state = 1;
+    return true;
+}
+
+static bool area_pipeline(PGRAPHVkState *r)
+{
+    if (s_area.pipe && s_area.pipe_format == s_format)
+        return true;
+    if (s_area.failed_format == s_format)   /* (failed for this format: the blit, not a compile every frame) */
+        return false;
+    s_area.failed_format = s_format;
+    if (s_area.pipe)
+        vkDestroyPipeline(r->device, s_area.pipe, NULL);
+    s_area.pipe = VK_NULL_HANDLE;
+    ShaderModuleInfo *vs = pgraph_vk_create_shader_module_from_glsl(r, VK_SHADER_STAGE_VERTEX_BIT,
+        "#version 450\n"
+        "void main() { vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n"
+        "  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n");
+    /* a: the picture's size, the rectangle's corner in the window; b: the rectangle's size, bottom up (1) */
+    ShaderModuleInfo *fs = pgraph_vk_create_shader_module_from_glsl(r, VK_SHADER_STAGE_FRAGMENT_BIT,
+        "#version 450\n"
+        "layout(set = 0, binding = 0) uniform sampler2D tex;\n"
+        "layout(push_constant) uniform P { vec4 a; vec4 b; } p;\n"
+        "layout(location = 0) out vec4 color;\n"
+        "void main() {\n"
+        "  vec2 size = p.a.xy, k = size / p.b.xy, o = gl_FragCoord.xy - p.a.zw;\n"
+        "  vec2 lo = (o - 0.5) * k, hi = (o + 0.5) * k;\n"   /* the window pixel's span in picture pixels */
+        "  ivec2 first = ivec2(floor(lo)), n = ivec2(ceil(hi)) - first, last = ivec2(size) - 1;\n"
+        "  vec4 sum = vec4(0.0); float total = 0.0;\n"
+        "  for (int y = 0; y < 8 && y < n.y; y++) {\n"
+        "    float py = float(first.y + y), wy = min(hi.y, py + 1.0) - max(lo.y, py);\n"
+        "    int ty = clamp(p.b.z > 0.5 ? last.y - (first.y + y) : first.y + y, 0, last.y);\n"
+        "    for (int x = 0; x < 8 && x < n.x; x++) {\n"
+        "      float px = float(first.x + x), w = wy * (min(hi.x, px + 1.0) - max(lo.x, px));\n"
+        "      sum += w * texelFetch(tex, ivec2(clamp(first.x + x, 0, last.x), ty), 0);\n"
+        "      total += w;\n"
+        "    }\n"
+        "  }\n"
+        "  color = sum / max(total, 1e-6);\n"
+        "}\n");
+    if (!vs || !fs) {
+        if (vs)
+            pgraph_vk_destroy_shader_module(r, vs);
+        if (fs)
+            pgraph_vk_destroy_shader_module(r, fs);
+        return false;
+    }
+    VkPipelineShaderStageCreateInfo st[2] = {
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
+          .module = vs->module, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+          .module = fs->module, .pName = "main" },
+    };
+    VkPipelineVertexInputStateCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo ia = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo vp = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rs = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo ms = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineColorBlendAttachmentState ba = { .colorWriteMask = 0xF };
+    VkPipelineColorBlendStateCreateInfo cb = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &ba,
+    };
+    VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo ds = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = dyn,
+    };
+    VkPipelineRenderingCreateInfo rinfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1, .pColorAttachmentFormats = &s_format,
+    };
+    VkGraphicsPipelineCreateInfo gi = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &rinfo,
+        .stageCount = 2, .pStages = st, .pVertexInputState = &vi, .pInputAssemblyState = &ia,
+        .pViewportState = &vp, .pRasterizationState = &rs, .pMultisampleState = &ms, .pColorBlendState = &cb,
+        .pDynamicState = &ds, .layout = s_area.layout,
+    };
+    VkResult res = vkCreateGraphicsPipelines(r->device, VK_NULL_HANDLE, 1, &gi, NULL, &s_area.pipe);
+    pgraph_vk_destroy_shader_module(r, vs);
+    pgraph_vk_destroy_shader_module(r, fs);
+    if (res != VK_SUCCESS) {
+        s_area.pipe = VK_NULL_HANDLE;
+        return false;
+    }
+    s_area.pipe_format = s_format;
+    s_area.failed_format = VK_FORMAT_UNDEFINED;
+    return true;
+}
+
+static void area_destroy(PGRAPHVkState *r)
+{
+    if (s_area.pipe)
+        vkDestroyPipeline(r->device, s_area.pipe, NULL);
+    if (s_area.layout)
+        vkDestroyPipelineLayout(r->device, s_area.layout, NULL);
+    if (s_area.pool)
+        vkDestroyDescriptorPool(r->device, s_area.pool, NULL);   /* (its sets with it) */
+    if (s_area.dsl)
+        vkDestroyDescriptorSetLayout(r->device, s_area.dsl, NULL);
+    if (s_area.sampler)
+        vkDestroySampler(r->device, s_area.sampler, NULL);
+    memset(&s_area, 0, sizeof s_area);
+}
+
+/* Whether the area filter can draw this frame (before any level image is made for it) */
+static bool area_ready(PGRAPHVkState *r)
+{
+    return s_swapchain_color && area_init(r) && area_pipeline(r);
+}
+
+/* Level image lv (in TRANSFER_SRC, cw x ch, bottom up if flip) into the rectangle x0, y0, dw x dh of the
+ * swapchain image idx (in TRANSFER_DST, and left there). False: nothing drawn, blit instead. */
+static bool area_draw(PGRAPHVkState *r, VkCommandBuffer cmd, uint32_t idx, int lv, uint32_t cw, uint32_t ch,
+                      bool flip, int32_t x0, int32_t y0, int32_t dw, int32_t dh)
+{
+    VkImageView dst = swap_view(r, idx);
+    if (!dst || !s_half_view[lv])
+        return false;
+    if (s_area.bound[lv] != s_half_view[lv]) {   /* (a new image: made after the device went idle) */
+        VkDescriptorImageInfo ii = { s_area.sampler, s_half_view[lv], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkWriteDescriptorSet w = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = s_area.set[lv], .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii,
+        };
+        vkUpdateDescriptorSets(r->device, 1, &w, 0, NULL);
+        s_area.bound[lv] = s_half_view[lv];
+    }
+    barrier(cmd, s_half[lv], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    barrier(cmd, s_images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    VkRenderingAttachmentInfo ca = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = dst,
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+    };
+    VkRenderingInfo ri = {   /* (only the picture's rectangle: a tiled GPU loads and stores no more) */
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = { { x0, y0 }, { (uint32_t)dw, (uint32_t)dh } },
+        .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &ca,
+    };
+    vkCmdBeginRendering(cmd, &ri);
+    VkViewport v = { (float)x0, (float)y0, (float)dw, (float)dh, 0, 1 };
+    VkRect2D sc = { { x0, y0 }, { (uint32_t)dw, (uint32_t)dh } };
+    vkCmdSetViewport(cmd, 0, 1, &v);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_area.pipe);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_area.layout, 0, 1, &s_area.set[lv], 0, NULL);
+    float pc[8] = { (float)cw, (float)ch, (float)x0, (float)y0, (float)dw, (float)dh, flip ? 1.0f : 0.0f, 0 };
+    vkCmdPushConstants(cmd, s_area.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    {
+        static uint32_t said_w, said_h;
+        if (said_w != cw || said_h != ch) {
+            fprintf(stderr, "[PRESENT] %ux%u to %dx%d by area\n", cw, ch, dw, dh);
+            said_w = cw, said_h = ch;
+        }
+    }
+    barrier(cmd, s_images[idx], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    /* back for the next frame's write into it (a transfer, which then waits for this read) */
+    barrier(cmd, s_half[lv], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT, 0, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    return true;
 }
 
 /* ---- Window (host main thread) ---- */
@@ -1379,12 +1661,9 @@ static bool create_swapchain(PGRAPHVkState *r)
         s_system_turns = true;
     }
 
-    /* drawn into as well where a picture goes over it (layer_draw: the touch controls, Android only) */
-#ifdef __ANDROID__
+    /* drawn into as well: a picture over it (layer_draw: the touch controls, Android) and the last step down
+     * from a high render resolution (area_draw) */
     VkImageUsageFlags color_usage = caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-#else
-    VkImageUsageFlags color_usage = 0;
-#endif
 
     {
         VkPresentModeKHR mode = choose_present_mode(r);
@@ -2218,7 +2497,11 @@ static void present_frame(PGRAPHState *pg, bool on_pfifo)
             sh /= 2;
             n++;
         }
-        halving_images(r, n, pw, ph);
+        /* what is left is a reduction both ways: the area filter, from the last halving or a copy of the
+         * picture (an image it can read) */
+        bool area = sw >= (uint32_t)dw && sh >= (uint32_t)dh && (sw > (uint32_t)dw || sh > (uint32_t)dh) &&
+                    area_ready(r);
+        halving_images(r, n, pw, ph, area && n == 0);
         VkImage src = picture;
         uint32_t cw = pw, ch = ph;
         for (int i = 0; i < n && s_half[i]; i++) {
@@ -2243,12 +2526,31 @@ static void present_frame(PGRAPHState *pg, bool on_pfifo)
             cw = s_half_w[i];
             ch = s_half_h[i];
         }
+        int lv = n > 0 && s_half[n - 1] && src == s_half[n - 1] ? n - 1 : -1;
+        if (area && n == 0 && s_half[FULL_COPY]) {   /* the picture as it is, into an image the filter reads */
+            barrier(cmd, s_half[FULL_COPY], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            VkImageBlit same = {
+                .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .srcOffsets = { { 0, 0, 0 }, { (int32_t)cw, (int32_t)ch, 1 } },
+                .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .dstOffsets = { { 0, 0, 0 }, { (int32_t)cw, (int32_t)ch, 1 } },
+            };
+            vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s_half[FULL_COPY],
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &same, VK_FILTER_NEAREST);
+            barrier(cmd, s_half[FULL_COPY], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+            lv = FULL_COPY;
+        }
         /* The display image is bottom up; an external picture top down. */
-        blit.srcOffsets[0] = (VkOffset3D){ 0, ext ? 0 : (int32_t)ch, 0 };
-        blit.srcOffsets[1] = (VkOffset3D){ (int32_t)cw, ext ? (int32_t)ch : 0, 1 };
-        vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       s_images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                       &blit, VK_FILTER_LINEAR);
+        if (!(area && lv >= 0 && area_draw(r, cmd, idx, lv, cw, ch, !ext, x0, y0, dw, dh))) {
+            blit.srcOffsets[0] = (VkOffset3D){ 0, ext ? 0 : (int32_t)ch, 0 };
+            blit.srcOffsets[1] = (VkOffset3D){ (int32_t)cw, ext ? (int32_t)ch : 0, 1 };
+            vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           s_images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                           &blit, VK_FILTER_LINEAR);
+        }
         if (!ext)
             barrier(cmd, picture, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -2328,9 +2630,15 @@ void nv2a_host_vk_finalize(PGRAPHState *pg)
         if (s_fence[i]) vkDestroyFence(r->device, s_fence[i], NULL);
         if (s_acquired[i]) vkDestroySemaphore(r->device, s_acquired[i], NULL);
     }
-    for (int i = 0; i < MAX_HALVINGS; i++)
+    for (int i = 0; i <= MAX_HALVINGS; i++) {
+        if (s_half_view[i])
+            vkDestroyImageView(r->device, s_half_view[i], NULL);
         if (s_half[i])
             vmaDestroyImage(r->allocator, s_half[i], s_half_mem[i]);
+        s_half_view[i] = VK_NULL_HANDLE;
+        s_half[i] = VK_NULL_HANDLE;
+    }
+    area_destroy(r);
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++)
         if (s_ovl_buf[i])
             vmaDestroyBuffer(r->allocator, s_ovl_buf[i], s_ovl_mem[i]);
