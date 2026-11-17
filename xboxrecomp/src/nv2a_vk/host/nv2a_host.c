@@ -904,6 +904,12 @@ static void *vblank_thread(void *unused)
                 next.tv_sec++;
             }
             sleep_until(&next);
+            /* Far behind (the host stalled): on from now, not every missed tick at once, which had the game
+             * run at two or three times its speed until it had caught up (#244) */
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            if ((int64_t)(now.tv_sec - next.tv_sec) * 1000000000LL + (now.tv_nsec - next.tv_nsec) > 100000000LL)
+                next = now;
         }
         if (nv2a_vblank_hold) {
             clock_gettime(CLOCK_MONOTONIC, &next);   /* resume from now */
@@ -1008,8 +1014,12 @@ static void *vblank_thread(void *unused)
             if (direct < 0)
                 direct = !(getenv("NV2A_PACE") && !strcmp(getenv("NV2A_PACE"), "tick"));
             bool ext = direct && ext_seen_us && tick_us - ext_seen_us < 100000;
-            for (int i = 0; i < 40 && __atomic_load_n(&nv2a_pcrtc_start_writes,
-                                                      __ATOMIC_ACQUIRE) == flips; i++)
+            /* At most 4 ms by the clock, not 40 naps of 0.1 ms: where the kernel rounds a short sleep up to a
+             * millisecond or more, those took 40 ms and more on every tick without a flip (a 30 fps movie's
+             * every other tick), the clock fell behind and movies played at 20 fps (#244) */
+            int64_t flip_by = g_get_monotonic_time() + 4000;
+            while (__atomic_load_n(&nv2a_pcrtc_start_writes, __ATOMIC_ACQUIRE) == flips &&
+                   g_get_monotonic_time() < flip_by)
                 vcpu_nap_us(100);
             if (ext) {
                 vcpu_nap_us(4000);   /* (its picture comes about 2 ms after the tick) */
