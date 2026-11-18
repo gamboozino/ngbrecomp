@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -733,6 +734,8 @@ private:
         uint8_t vblend;                            // fixed function: vertices blended between worlds (D3DRS_VERTEXBLEND)
         uint64_t key2;                             // the key without the vertex buffer (a mesh moved on the CPU)
         uint64_t key3;                             // the key without the target's slot
+        uint64_t key4;                             // its look alone: shaders, textures, target (another mesh of it)
+        const std::bitset<192>* reads;             // a vertex shader's: the constants its program reads (Reads)
         uint32_t vb, fvf;                          // stream 0's buffer, the vertex format
         bool copied;                               // its vertices kept (cur_vb_)
         uint32_t dbg[18];                          // (NGB_INTERP_LOG) what its key was made of
@@ -893,19 +896,94 @@ private:
                 }
         }
     }
-    static uint64_t DrawKey(const State& s, uint32_t prim, uint32_t start, uint32_t count, bool with_vb = true) {
+    // The constants a vertex shader's program reads (its instructions' constant operands; one read by index, the
+    // bones of a skinned mesh, counts from its base to the last register), kept by the program's words.
+    std::unordered_map<uint64_t, std::bitset<192>> reads_;
+    const std::bitset<192>* Reads(const VertexShader& vs, uint64_t h) {
+        auto it = reads_.find(h);
+        if (it != reads_.end()) return &it->second;
+        std::bitset<192> m, direct, bases;
+        for (size_t i = 0; i + 4 <= vs.program.size(); i += 4) {
+            const uint32_t* t = &vs.program[i];
+            const uint32_t mux_a = (t[2] >> 26) & 3, mux_b = (t[2] >> 11) & 3, mux_c = (t[3] >> 28) & 3;
+            if (mux_a != 3 && mux_b != 3 && mux_c != 3) continue;
+            const uint32_t c = (t[1] >> 13) & 0xFF;
+            if (c >= 192) continue;
+            ((t[3] >> 1) & 1 ? bases : direct).set(c);
+        }
+        // one read by index: from its base up to the next register the program reads by number (what lies past a
+        // skinned mesh's bones is another draw's leavings), or the last
+        m = direct;
+        for (uint32_t c = 0; c < 192; c++) {
+            if (!bases.test(c)) continue;
+            for (uint32_t r = c; r < 192 && (r == c || !direct.test(r)); r++) m.set(r);
+        }
+        if (m.none()) m.set();   // (a program not understood: all of them, as before)
+        if (reads_.size() >= 4096) return nullptr;   // (never in play, a few dozen programs: then all, as before)
+        return &reads_.emplace(h, m).first->second;
+    }
+    // How far apart two draws of one kind are: what tells several of a kind apart (six pots of one mesh, three
+    // enemies of one model) when each is paired with the last frame's nearest. Only by what the draw itself uses:
+    // a vertex shader's constants its program reads, a fixed-function draw's worlds, as many as it blends.
+    // Compared whole (192 registers, four worlds), the registers and worlds left by whatever was drawn before
+    // counted too, and more than the things' own places: when the title drew the pots in another order (it sorts
+    // them by distance, so whenever the camera moves in a room full of them), a pot was paired with another pot's
+    // last place and drawn part of the way between the two -- pots and enemies jumping back and forth in the
+    // pictures between.
+    static float Distance(const InterpDraw& a, const InterpDraw& b) {
+        float d = 0;
+        if (a.vs) {
+            const std::bitset<192>* reads = a.reads;
+            for (size_t r = 0; r < 192; r++) {
+                if (reads && !reads->test(r)) continue;
+                for (size_t e = 0; e < 4; e++) d += std::fabs(a.c[r][e] - b.c[r][e]);
+            }
+        } else {
+            // (D3DVERTEXBLENDFLAGS, 1..6: odd, n weights for n + 1 worlds; even, a weight a world)
+            const uint32_t v = a.vblend;
+            const size_t worlds = v >= 1 && v <= 6 ? size_t(v & 1 ? (v + 3) / 2 : v / 2 + 1) : 1;
+            for (size_t w = 2; w < 2 + worlds; w++)
+                for (size_t e = 0; e < 16; e++) d += std::fabs(a.m[w][e] - b.m[w][e]);
+        }
+        return d < 3e38f ? d : 3e38f;   // (NaN or inf in a register: the farthest, never unordered)
+    }
+    // What a draw looks like, not which vertices: a pot drawn from its near mesh in one frame and its far one in the
+    // next (the title's level of detail, as the camera moves) is the same thing
+    // The shaders by what they are, once a draw (its keys and Reads all take it): vs the vertex program alone
+    struct ShaderHash { uint64_t vs, both; };
+    static ShaderHash HashShaders(const State& s) {
         uint64_t h = 0xcbf29ce484222325ull;
         auto mix = [&](uint64_t v) { h = (h ^ v) * 0x100000001b3ull; };
-        mix(s.vs_handle);
-        // the shaders by what they are, not where: the title selects Ryu's vertex shader anew for each piece, a new
-        // object each time, and by address a piece found its pair only when the allocator gave the same place
-        // again: some of his pieces lerped, their neighbours not, and the seams between them opened (#226)
         if (s.vs) {
             mix(s.vs->program_type);
             for (uint32_t w : s.vs->program) mix(w);
         }
+        ShaderHash out{h, 0};
         if (s.ps)
             for (uint32_t w : s.ps->def) mix(w);
+        out.both = h;
+        return out;
+    }
+    static uint64_t LookKey(const State& s, uint32_t prim, uint64_t shaders) {
+        uint64_t h = 0x84222325cbf29ce4ull;
+        auto mix = [&](uint64_t v) { h = (h ^ v) * 0x100000001b3ull; };
+        mix(s.vs_handle);
+        mix(shaders);
+        for (uint32_t t : s.textures) mix(t);
+        mix(prim);
+        mix(s.rt.format);
+        return h;
+    }
+    static uint64_t DrawKey(const State& s, uint32_t prim, uint32_t start, uint32_t count, uint64_t shaders,
+                            bool with_vb = true) {
+        uint64_t h = 0xcbf29ce484222325ull;
+        auto mix = [&](uint64_t v) { h = (h ^ v) * 0x100000001b3ull; };
+        mix(s.vs_handle);
+        // the shaders by what they are (HashShaders), not where: the title selects Ryu's vertex shader anew for
+        // each piece, a new object each time, and by address a piece found its pair only when the allocator gave
+        // the same place again: some of his pieces lerped, their neighbours not, and the seams between them opened
+        // (#226)
+        mix(shaders);
         for (uint32_t t : s.textures) mix(t);
         mix(with_vb ? s.streams[0].vb : 0x56420000u);
         mix(s.streams[0].stride);
@@ -1009,8 +1087,10 @@ private:
         if (slot == frame_targets_.size()) frame_targets_.push_back(target);
         d.slot = uint16_t(slot);
         d.vblend = uint8_t(state_.rs[kRsVertexBlend]);
-        d.key2 = (DrawKey(state_, prim, start, count, false) ^ (slot + 1)) * 0x100000001b3ull;
-        d.key3 = DrawKey(state_, prim, start, count);
+        const ShaderHash sh = HashShaders(state_);
+        d.key2 = (DrawKey(state_, prim, start, count, sh.both, false) ^ (slot + 1)) * 0x100000001b3ull;
+        d.key3 = DrawKey(state_, prim, start, count, sh.both);
+        d.key4 = (LookKey(state_, prim, sh.both) ^ (slot + 1)) * 0x100000001b3ull;
         d.vb = state_.streams[0].vb;
         d.fvf = state_.vs_handle;
         d.copied = KeepVertices(start, count, idx);
@@ -1024,9 +1104,10 @@ private:
                                     state_.rt.format, uint32_t(slot), state_.vs ? state_.vs->program_type : 0};
             std::memcpy(d.dbg, v, sizeof v);
         }
-        d.key = (dbg_ & 64) ? DrawKey(state_, prim, start, count)   // (a test: as before, the targets not told apart)
-                            : (DrawKey(state_, prim, start, count) ^ (slot + 1)) * 0x100000001b3ull;
+        d.key = (dbg_ & 64) ? d.key3   // (a test: as before, the targets not told apart)
+                            : (d.key3 ^ (slot + 1)) * 0x100000001b3ull;
         d.vs = (state_.vs_handle & 1) != 0;
+        d.reads = d.vs && state_.vs ? Reads(*state_.vs, sh.vs) : nullptr;
         for (int i = 0; i < 6; i++) d.m[size_t(i)] = state_.transforms[kLerpMatrices[i]];
         d.c = state_.vsc;
         for (size_t t = 0; t < 4; t++) d.tm[t] = state_.transforms[16 + t];
@@ -1041,6 +1122,22 @@ private:
         }
     }
     static bool Perspective(const InterpDraw& d) { return d.m[1][11] == 1.0f && d.m[1][15] == 0.0f; }
+    // Where a fixed-function draw's object (its world's origin) is on the screen, -1..1 across; false for one under
+    // half a unit in front of the camera (its place swings with the least move) or far off the screen
+    static bool OnScreen(const InterpDraw& d, float out[2]) {
+        const auto& w = d.m[2];
+        const auto& v = d.m[0];
+        const auto& p = d.m[1];
+        float e[4], c[4];
+        for (int j = 0; j < 4; j++)
+            e[j] = w[12] * v[size_t(j)] + w[13] * v[size_t(4 + j)] + w[14] * v[size_t(8 + j)] + v[size_t(12 + j)];
+        for (int j = 0; j < 4; j++)
+            c[j] = e[0] * p[size_t(j)] + e[1] * p[size_t(4 + j)] + e[2] * p[size_t(8 + j)] + e[3] * p[size_t(12 + j)];
+        if (!(e[2] > 0.5f) || !(c[3] > 0.01f)) return false;
+        out[0] = c[0] / c[3];
+        out[1] = c[1] / c[3];
+        return std::fabs(out[0]) < 1.5f && std::fabs(out[1]) < 1.5f;
+    }
     // false: no picture between this frame and the last (too little the same, or the camera cut)
     bool Match() {
         match_.assign(cur_draws_.size(), -1);
@@ -1054,19 +1151,7 @@ private:
             cur_by[cur_draws_[size_t(i)].key].push_back(i);
             if (cur_draws_[size_t(i)].vs) vs++; else ff++;
         }
-        auto distance = [&](int32_t c, int32_t p) {
-            const InterpDraw& a = cur_draws_[size_t(c)];
-            const InterpDraw& b = prev_draws_[size_t(p)];
-            float d = 0;
-            if (a.vs) {
-                for (size_t r = 0; r < 192; r++)
-                    for (size_t e = 0; e < 4; e++) d += std::fabs(a.c[r][e] - b.c[r][e]);
-            } else {
-                for (size_t w = 2; w < 6; w++)
-                    for (size_t e = 0; e < 16; e++) d += std::fabs(a.m[w][e] - b.m[w][e]);
-            }
-            return d < 3e38f ? d : 3e38f;   // (NaN or inf in a register: the farthest, never unordered)
-        };
+        auto distance = [&](int32_t c, int32_t p) { return Distance(cur_draws_[size_t(c)], prev_draws_[size_t(p)]); };
         // (a frame's budget of floats compared: past it, a group in order; a vertex shader pair is 768, a
         // fixed-function one 64)
         int64_t budget = 1500000;
@@ -1188,6 +1273,88 @@ private:
                 matched++;
             }
         }
+        // Last, a draw whose mesh changed between the frames (the title's level of detail: a pot's near mesh, then its
+        // far one, as the camera moves away): left without a pair it was drawn where it is now while all around it
+        // was half a frame behind, and jumped against the room in every picture between. Paired by its look with
+        // the last frame's draw of the same look left without one, each the other's nearest (by its constants or
+        // matrices, as Match does), so its place is part of the way too; the replay draws the new mesh.
+        lod_pairs_ = 0;
+        {
+            std::vector<uint8_t> taken(prev_draws_.size(), 0);
+            for (int32_t m : match_)
+                if (m >= 0) taken[size_t(m)] = 1;
+            // only draws whose whole key is on one side alone: a mesh that changed (not one of many alike, which
+            // Match leaves without a pair on purpose)
+            std::unordered_map<uint64_t, std::vector<int32_t>> free_prev, free_cur, all_cur;
+            for (int32_t j = 0; j < int32_t(prev_draws_.size()); j++)
+                if (!taken[size_t(j)] && !cur_by.count(prev_draws_[size_t(j)].key))
+                    free_prev[prev_draws_[size_t(j)].key4].push_back(j);
+            bool any = false;
+            for (int32_t i = 0; i < int32_t(cur_draws_.size()); i++)
+                if (match_[size_t(i)] < 0 && !prev_by.count(cur_draws_[size_t(i)].key)) {
+                    const uint64_t k4 = cur_draws_[size_t(i)].key4;
+                    if (!free_prev.count(k4)) continue;
+                    free_cur[k4].push_back(i);
+                    any = true;
+                }
+            // How far a thing moves between these two frames: among the draws paired by their whole key, vertex
+            // shader and fixed function apart, the distance nine in ten stay within (the camera's turn is in it; not
+            // the most, which an unrelated pair Match made in order would set). A pair by look further apart than
+            // three times that is two things (one gone, another of its kind come), not one with a new mesh. Measured
+            // only in a frame with such a draw.
+            float reach[2] = {0, 0};
+            if (any) {
+                std::vector<float> seen[2];
+                int64_t cost = 0;
+                for (size_t i = 0; i < cur_draws_.size() && cost < budget; i++) {
+                    const int32_t m = match_[i];
+                    if (m < 0 || cur_draws_[i].key != prev_draws_[size_t(m)].key) continue;
+                    const InterpDraw& a = cur_draws_[i];
+                    seen[a.vs].push_back(Distance(a, prev_draws_[size_t(m)]));
+                    cost += a.vs ? 768 : 64;
+                }
+                budget -= cost;
+                for (int v = 0; v < 2; v++)
+                    if (!seen[v].empty()) {
+                        const size_t at = seen[v].size() * 9 / 10;
+                        std::nth_element(seen[v].begin(), seen[v].begin() + std::ptrdiff_t(at), seen[v].end());
+                        reach[v] = seen[v][at];
+                    }
+                for (int32_t i = 0; i < int32_t(cur_draws_.size()); i++)
+                    if (free_cur.count(cur_draws_[size_t(i)].key4)) all_cur[cur_draws_[size_t(i)].key4].push_back(i);
+            }
+            for (auto& [key, cs] : free_cur) {
+                auto it = free_prev.find(key);
+                if (it == free_prev.end()) continue;
+                const std::vector<int32_t>& ps = it->second;
+                const bool vs = cur_draws_[size_t(cs[0])].vs;
+                const int64_t group = int64_t(cs.size() * ps.size() + cs.size() * all_cur[key].size()) * (vs ? 768 : 64);
+                if (reach[vs] <= 0 || cs.size() * ps.size() > 1024 || group > budget) continue;
+                budget -= group;
+                std::vector<int32_t> near_c(cs.size(), -1), near_p(ps.size(), -1);
+                std::vector<float> best_c(cs.size(), 3e38f), best_p(ps.size(), 3e38f);
+                for (size_t x = 0; x < cs.size(); x++)
+                    for (size_t y = 0; y < ps.size(); y++) {
+                        const InterpDraw& a = cur_draws_[size_t(cs[x])];
+                        const InterpDraw& b = prev_draws_[size_t(ps[y])];
+                        if (a.vs != b.vs) continue;
+                        float d = Distance(a, b);
+                        if (d < best_c[x]) best_c[x] = d, near_c[x] = int32_t(y);
+                        if (d < best_p[y]) best_p[y] = d, near_p[y] = int32_t(x);
+                    }
+                for (size_t x = 0; x < cs.size(); x++) {
+                    if (near_c[x] < 0 || near_p[size_t(near_c[x])] != int32_t(x)) continue;
+                    if (best_c[x] > reach[vs] * 3.0f) continue;   // (two things, not one)
+                    // ... and under half the way to the nearest other draw of its look this frame (Match's rule)
+                    float gap = 3e38f;
+                    for (int32_t z : all_cur[key])
+                        if (z != cs[x]) gap = std::min(gap, Distance(cur_draws_[size_t(cs[x])], cur_draws_[size_t(z)]));
+                    if (best_c[x] > gap * 0.5f) continue;
+                    match_[size_t(cs[x])] = ps[size_t(near_c[x])];
+                    lod_pairs_++;
+                }
+            }
+        }
         if (interp_log_ && interp_frames_ % 60 == 59) {   // (NGB_INTERP_LOG) the draws without a pair
             uint32_t un_vs = 0, un_ff = 0;
             for (size_t i = 0; i < cur_draws_.size(); i++)
@@ -1199,7 +1366,7 @@ private:
                                  interp_frames_, i, cur_draws_[i].vs ? "VS" : "FF", v[2], v[3], v[4], v[5], v[6],
                                  v[7], v[8], v[9], v[11], v[12], v[13], v[14], v[15], v[16], v[17], v[1]);
                 }
-            std::fprintf(stderr, "[INTERP] unpaired: %u VS, %u FF; VS draws:", un_vs, un_ff);
+            std::fprintf(stderr, "[INTERP] unpaired: %u VS, %u FF (%u paired by look); VS draws:", un_vs, un_ff, lod_pairs_);
             for (size_t i = 0; i < cur_draws_.size(); i++)
                 if (cur_draws_[i].vs) std::fprintf(stderr, " %zu%s", i, match_[i] < 0 ? "!" : "");
             std::fprintf(stderr, "\n");
@@ -1277,16 +1444,45 @@ private:
             break;
         }
         (void)camera;
-        bool cut = turn < kCutCos || move > cut_move_;
+        // ... and where the things on the screen went: a camera that snaps back from a wall (a small room full of
+        // pots, the camera pushed in against Ryu and then free again) moves little and turns under 30 degrees, but
+        // everything jumps across the screen; drawn part of the way, the picture between was a view the game never
+        // had, and pots and enemies flickered in and out of it. A cut when the middle of the matched objects moved
+        // over a quarter of the screen's width in the frame (a fast turn moves them a tenth or so).
+        float jump = 0;
+        {
+            // each place once: a room's many pieces drawn with no world of their own are all its origin, one point
+            // that would be the middle alone
+            std::vector<float> moved;
+            std::vector<std::array<float, 3>> seen;
+            for (size_t i = 0; i < cur_draws_.size() && seen.size() < 512; i++) {
+                if (match_[i] < 0 || cur_draws_[i].vs || !Perspective(cur_draws_[i])) continue;
+                // (not one whose world jumped, nor one paired by less than its whole key: those pairs may be two
+                // things, and a room of them would read as a cut every frame)
+                if (snap_[i] || cur_draws_[i].key != prev_draws_[size_t(match_[i])].key) continue;
+                const auto& w = cur_draws_[i].m[2];
+                const std::array<float, 3> at = {w[12], w[13], w[14]};
+                if (std::find(seen.begin(), seen.end(), at) != seen.end()) continue;
+                seen.push_back(at);
+                float a[2], b[2];
+                if (!OnScreen(prev_draws_[size_t(match_[i])], a) || !OnScreen(cur_draws_[i], b)) continue;
+                moved.push_back(std::sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1])));
+            }
+            if (moved.size() >= 8) {
+                std::nth_element(moved.begin(), moved.begin() + std::ptrdiff_t(moved.size() / 2), moved.end());
+                jump = moved[moved.size() / 2];
+            }
+        }
+        bool cut = turn < kCutCos || move > cut_move_ || jump > cut_jump_;
         bool ok = !cut && matched * 2 >= cur_draws_.size() && !cur_draws_.empty();
         if (!ok) interp_skipped_++;
         if (move > move_max_) move_max_ = move;
         interp_frames_++;
         if (interp_log_ && (cut || interp_frames_ % 60 == 0)) {
             std::fprintf(stderr, "[INTERP] frame %u: %zu draws (%u FF, %u VS), %u matched to the last frame's %zu; "
-                         "camera moved %.3f (most %.3f), turned %.1f deg%s; %u skipped, %.2f ms apart; %u vertices changed (of %u hashed), %u jumped; shrunk %llu of %llu; crossed %llu VS %llu FF\n",
+                         "camera moved %.3f (most %.3f), turned %.1f deg, things moved %.2f%s; %u skipped, %.2f ms apart; %u vertices changed (of %u hashed), %u jumped; shrunk %llu of %llu; crossed %llu VS %llu FF\n",
                          interp_frames_, cur_draws_.size(), ff, vs, matched, prev_draws_.size(), move, move_max_,
-                         std::acos(std::clamp(turn, -1.0f, 1.0f)) * 57.29578f, cut ? ": CUT" : "", interp_skipped_,
+                         std::acos(std::clamp(turn, -1.0f, 1.0f)) * 57.29578f, jump, cut ? ": CUT" : "", interp_skipped_,
                          frame_us_ / 1000.0, vchanged_, vhashed_, jumped, (unsigned long long)shrunk_total_,
                          (unsigned long long)ffw_total_, (unsigned long long)crossed_vs_, (unsigned long long)crossed_ff_);
             if (!cut) move_max_ = 0;
@@ -1476,6 +1672,7 @@ private:
     bool have_peek_ = false;
     std::vector<InterpDraw> prev_draws_, cur_draws_;
     std::vector<int32_t> match_;   // cur_draws_'s draw in prev_draws_, or -1
+    uint32_t lod_pairs_ = 0;       // (NGB_INTERP_LOG) draws paired by their look alone (Match's last pass)
     std::vector<uint8_t> snap_;    // its world jumped: not lerped
     std::vector<uint8_t> dyn_;     // a CPU-moved mesh's draw, paired by key2: its vertices lerped
     std::unordered_map<uint32_t, VbCopy> cur_vb_, prev_vb_;          // by vertex buffer: this frame's vertices, the last's
@@ -1496,6 +1693,10 @@ private:
     float cut_move_ = [] {   // the camera moving further in a frame (NGB_INTERP_CUT)
         const char* v = std::getenv("NGB_INTERP_CUT");
         return v ? float(std::atof(v)) : 3.0f;
+    }();
+    float cut_jump_ = [] {   // the middle of the things on the screen moving further in a frame, -1..1 across (NGB_INTERP_JUMP)
+        const char* v = std::getenv("NGB_INTERP_JUMP");
+        return v ? float(std::atof(v)) : 0.5f;
     }();
     float move_max_ = 0;
     uint32_t interp_skipped_ = 0;
