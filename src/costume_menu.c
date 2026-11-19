@@ -14,6 +14,7 @@
 #define RECOMP_GENERATED_CODE
 #include "recomp_funcs.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "xbox_memory_layout.h"   /* xbox_HeapAlloc */
@@ -42,9 +43,19 @@ static uint32_t table(void)
     return s_table;
 }
 
+/* The game's own four costumes all earned (its flags 1-4, bytes of the system data: sub_001DB520): the three
+ * it never offers come after them then without the cheat too (#253): nothing in the game unlocks them. */
+static int all_earned(void)
+{
+    for (int i = 0; i < 4; i++)
+        if (!MEM8(0xDB941C + i))
+            return 0;
+    return 1;
+}
+
 /* As the menu opens, the list: the game's five, the locked ones as the game shows them (white shapes,
  * not chosen: its own checks of the flag, #246), and with All Costumes on the extra costumes after
- * them, while their pictures can be made. */
+ * them (or once the game's four are all earned), while their pictures can be made. */
 static void costume_count_now(void)
 {
     uint32_t t = table();
@@ -53,7 +64,7 @@ static void costume_count_now(void)
         memcpy((void *)XBOX_PTR(t + 12 * s_n), (void *)XBOX_PTR(GAME_TABLE + 12 * i), 12);
         s_n++;
     }
-    if (!ngb_pc_setting(16))
+    if (!ngb_pc_setting(16) && !all_earned())
         return;
     for (int i = 0; i < EXTRAS; i++) {
         uint32_t id = ngb_extra_costume_picture(1 + i);
@@ -823,3 +834,324 @@ loc_00177AAA: ;
 
 }
 
+/**
+ * sub_002EC9A0
+ * Original: 0x002EC9A0 - 0x002ECB06 (358 bytes, 115 insns)
+ * CC: cdecl, 0 params, returns int_or_void
+ * Frame: fpo_leaf
+ */
+static void area_start_items(void)
+{
+    RECOMP_ENTRY(0x002EC9A0u);
+    int _flags = 0; /* fallback flag var */
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+
+loc_002EC9A0: ;
+    PUSH32(esp, ecx);
+    PUSH32(esp, ebx);
+    PUSH32(esp, esi);
+    esi = eax;
+    SET_LO8(eax, MEM8(0x589761));
+    ebx = 0; /* xor self */
+    _fa = (uint32_t)(ebx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    SET_LO8(edx, 0); /* xor self */
+    _fa = (uint32_t)(LO8(edx)) & 0xFFu; _fas = (int32_t)(int8_t)(_fa); /* xor result */
+    _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(0xFF) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 0xFF (8-bit) */
+    MEM8(esp + 0xB) = LO8(ebx);
+    MEM16(0x5895E0) = 0x64;
+    if (CMP_AE(_fa, _fb)) goto loc_002EC9C4; /* jae: above or equal (unsigned >=) */
+
+loc_002EC9BF: ;
+    MEM8(0x589760) = LO8(eax);
+
+loc_002EC9C4: ;
+    _fa = (uint32_t)(MEM8(0x589753)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(0x589753), LO8(ebx) (8-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_002ECB02; /* jne: not equal / not zero */
+
+loc_002EC9D0: ;
+    PUSH32(esp, edi);
+    eax = 0x5891D6;
+    edi = 0x59;
+    goto loc_002EC9E0;
+
+    /* nop */
+
+loc_002EC9E0: ;
+    _fa = (uint32_t)(MEM16(eax + -6)) & 0xFFFFu; _fb = (uint32_t)(LO16(edi)) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp MEM16(eax + -6), LO16(edi) (16-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_002EC9F1; /* jne: not equal / not zero */
+
+loc_002EC9E6: ;
+    SET_LO8(ecx, MEM8(eax + -4));
+    _fa = (uint32_t)(LO8(ecx)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ecx), LO8(ebx) (8-bit) */
+    if (CMP_BE(_fa, _fb)) goto loc_002EC9F1; /* jbe: below or equal (unsigned <=) */
+
+loc_002EC9ED: ;
+    MEM8(esp + 0xF) = LO8(ecx);
+
+loc_002EC9F1: ;
+    MEM16(eax + -6) = LO16(ebx);
+    _fa = (uint32_t)(MEM16(eax + -2)) & 0xFFFFu; _fb = (uint32_t)(LO16(edi)) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp MEM16(eax + -2), LO16(edi) (16-bit) */
+    MEM8(eax + -4) = LO8(ebx);
+    if (CMP_NE(_fa, _fb)) goto loc_002ECA08; /* jne: not equal / not zero */
+
+loc_002EC9FE: ;
+    SET_LO8(ecx, MEM8(eax));
+    _fa = (uint32_t)(LO8(ecx)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ecx), LO8(ebx) (8-bit) */
+    if (CMP_BE(_fa, _fb)) goto loc_002ECA08; /* jbe: below or equal (unsigned <=) */
+
+loc_002ECA04: ;
+    MEM8(esp + 0xF) = LO8(ecx);
+
+loc_002ECA08: ;
+    MEM16(eax + -2) = LO16(ebx);
+    _fa = (uint32_t)(MEM16(eax + 2)) & 0xFFFFu; _fb = (uint32_t)(LO16(edi)) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp MEM16(eax + 2), LO16(edi) (16-bit) */
+    MEM8(eax) = LO8(ebx);
+    if (CMP_NE(_fa, _fb)) goto loc_002ECA1F; /* jne: not equal / not zero */
+
+loc_002ECA14: ;
+    SET_LO8(ecx, MEM8(eax + 4));
+    _fa = (uint32_t)(LO8(ecx)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ecx), LO8(ebx) (8-bit) */
+    if (CMP_BE(_fa, _fb)) goto loc_002ECA1F; /* jbe: below or equal (unsigned <=) */
+
+loc_002ECA1B: ;
+    MEM8(esp + 0xF) = LO8(ecx);
+
+loc_002ECA1F: ;
+    MEM16(eax + 2) = LO16(ebx);
+    _fa = (uint32_t)(MEM16(eax + 6)) & 0xFFFFu; _fb = (uint32_t)(LO16(edi)) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp MEM16(eax + 6), LO16(edi) (16-bit) */
+    MEM8(eax + 4) = LO8(ebx);
+    if (CMP_NE(_fa, _fb)) goto loc_002ECA37; /* jne: not equal / not zero */
+
+loc_002ECA2C: ;
+    SET_LO8(ecx, MEM8(eax + 8));
+    _fa = (uint32_t)(LO8(ecx)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ecx), LO8(ebx) (8-bit) */
+    if (CMP_BE(_fa, _fb)) goto loc_002ECA37; /* jbe: below or equal (unsigned <=) */
+
+loc_002ECA33: ;
+    MEM8(esp + 0xF) = LO8(ecx);
+
+loc_002ECA37: ;
+    MEM16(eax + 6) = LO16(ebx);
+    MEM8(eax + 8) = LO8(ebx);
+    _fb = (uint32_t)(0x10) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    eax = eax + 0x10;
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0x5893D6) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0x5893D6 (32-bit) */
+    if (CMP_L(_fas, _fbs)) goto loc_002EC9E0; /* jl: less (signed <) */
+
+loc_002ECA48: ;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fb = (uint32_t)(ebx) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, ebx (32-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_002ECAAC; /* je: equal / zero */
+
+loc_002ECA4C: ;
+    _fa = (uint32_t)(MEM32(esi)) & 0xFFFFFFFFu; _fb = (uint32_t)(0x87000006u) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi), 0x87000006u (32-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_002ECAAC; /* je: equal / zero */
+
+loc_002ECA54: ;
+    eax = MEM32(esi);
+    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + 4;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0x87000001u) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0x87000001u (32-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_002ECA8B; /* je: equal / zero */
+
+loc_002ECA60: ;
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0x87000004u) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0x87000004u (32-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_002ECAA0; /* jne: not equal / not zero */
+
+loc_002ECA67: ;
+    ebx = MEM32(esi + 4);
+    eax = 0; /* xor self */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    SET_LO16(eax, MEM16(esi));
+    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + 4;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + 4;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    PUSH32(esp, eax);
+    PUSH32(esp, 2);
+    PUSH32(esp, 0x002ECA7Du); RECOMP_ABI_CALL(0x002FE290u, sub_002FE290); /* call 0x002FE290 */
+
+loc_002ECA7D: ;
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    { uint32_t _icall_esp = g_esp;
+    PUSH32(esp, 0x002ECA85u); RECOMP_ICALL_SAFE(0x00154300u, _icall_esp); /* manual call 0x00154300 */
+    }
+
+loc_002ECA85: ;
+    SET_LO8(edx, 1);
+    ebx = 0; /* xor self */
+    _fa = (uint32_t)(ebx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    goto loc_002ECAA0;
+
+loc_002ECA8B: ;
+    SET_LO8(eax, MEM8(esi));
+    SET_LO8(ecx, MEM8(0x589761));
+    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + 4;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fa = (uint32_t)(LO8(ecx)) & 0xFFu; _fb = (uint32_t)(0xFF) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ecx), 0xFF (8-bit) */
+    if (CMP_B(_fa, _fb)) goto loc_002ECAA0; /* jb: below (unsigned <) */
+
+loc_002ECA9B: ;
+    MEM8(0x589760) = LO8(eax);
+
+loc_002ECAA0: ;
+    _fa = (uint32_t)(MEM32(esi)) & 0xFFFFFFFFu; _fb = (uint32_t)(0x87000006u) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(esi), 0x87000006u (32-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_002ECA54; /* jne: not equal / not zero */
+
+loc_002ECAA8: ;
+    _fa = (uint32_t)(LO8(edx)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(edx), LO8(ebx) (8-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_002ECAE8; /* jne: not equal / not zero */
+
+loc_002ECAAC: ;
+    esi = 0; /* xor self */
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    edi = edi;
+
+loc_002ECAB0: ;
+    eax = 0; /* xor self */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    SET_LO16(eax, MEM16(esi + 0x446CC8));
+    PUSH32(esp, eax);
+    PUSH32(esp, 2);
+    PUSH32(esp, 0x002ECAC1u); RECOMP_ABI_CALL(0x002FE290u, sub_002FE290); /* call 0x002FE290 */
+
+loc_002ECAC1: ;
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fa = (uint32_t)(LO16(eax)) & 0xFFFFu; _fb = (uint32_t)(0xFFFF) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(eax), 0xFFFF (16-bit) */
+    if (CMP_AE(_fa, _fb)) goto loc_002ECAE8; /* jae: above or equal (unsigned >=) */
+
+loc_002ECACA: ;
+    SET_LO8(ecx, MEM8(esi + 0x446CCA));
+    MEM16(esi + 0x5891D0) = LO16(eax);
+    MEM8(esi + 0x5891D2) = LO8(ecx);
+    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + 4;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fb = (uint32_t)(0x200) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, 0x200 (32-bit) */
+    if (CMP_L(_fas, _fbs)) goto loc_002ECAB0; /* jl: less (signed <) */
+
+loc_002ECAE8: ;
+    SET_LO8(eax, MEM8(esp + 0xF));
+    _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), LO8(ebx) (8-bit) */
+    if (CMP_BE(_fa, _fb)) goto loc_002ECAFA; /* jbe: below or equal (unsigned <=) */
+
+loc_002ECAF0: ;
+    ebx = ZX8(LO8(eax));
+    eax = edi;
+    { uint32_t _icall_esp = g_esp;
+    PUSH32(esp, 0x002ECAFAu); RECOMP_ICALL_SAFE(0x00154300u, _icall_esp); /* manual call 0x00154300 */
+    }
+
+loc_002ECAFA: ;
+    MEM8(0x7F1A94) = 1;
+    POP32(esp, edi);
+
+loc_002ECB02: ;
+    POP32(esp, esi);
+    POP32(esp, ebx);
+    POP32(esp, ecx);
+    esp += 4; return; /* ret */
+
+}
+
+
+/* Load Game's Costume (#253): the game gives items through a costume's remap (sub_002FE290: the table at 0x447520,
+ * {kind, item, costume, item}; costume 2's Dragon Sword is the Plasma Saber, the True Dragon Sword the Mk.II) --
+ * New Game's first area gives the starting sword that way, but a loaded save keeps the bag it had (its "started"
+ * flag, 0x589753, set), so a save made in another costume kept its sword. At each area start of a game under way,
+ * the bag and the sword in Ryu's hands follow the costume worn now (0x589760): the remap's swords, and back (the
+ * Plasma Saber only: the game has it from the costume alone; the Mk.II and 0x0FC are earned too). */
+static int rename_item(uint16_t from, uint16_t to)
+{
+    int n = 0, has_from = 0;
+    /* (not when he has the other one too -- All Weapons' gifts, src/cheats.c, come past the remap: two of one
+     * sword would stay as two rows -- nor a slot a cheat marked as its own) */
+    for (uint32_t a = 0x5891D0; a < 0x5891D0 + 128 * 4; a += 4)
+        if (MEM16(a) == to && MEM8(a + 2))
+            return 0;
+    for (uint32_t a = 0x5891D0; a < 0x5891D0 + 128 * 4; a += 4)
+        if (MEM16(a) == from && MEM8(a + 2)) {
+            if (MEM8(a + 3) & 0x80) {
+                has_from = 1;
+                continue;
+            }
+            MEM16(a) = to;
+            n++;
+        }
+    if (n)
+        MEM8(0x7F1A94) = 1;   /* the bag changed: its checksum made again (sub_00164F10), as after a give */
+    if (!n || has_from)
+        return n;
+    /* in his hands: the saved game's copy (0x5895BA, what sub_002ED290 and sub_002FC190 read as this area starts,
+     * before Ryu is made), and Ryu's own when he is there already (its checksum is another, 0x7F1A9C) */
+    if (MEM16(0x5895BA) == from) {
+        MEM16(0x5895BA) = to;
+        n++;
+    }
+    if (MEM8(0x4B7640) < 0x20) {
+        uint32_t p = 0x58A570 + MEM8(0x4B7640) * 0x210u;
+        if (MEM16(p) == from) {
+            MEM16(p) = to;
+            MEM8(0x7F1A9C) = 1;
+            n++;
+        }
+    }
+    return n;
+}
+
+static void costume_swords(void)
+{
+    if (!MEM8(0x589753) || MEM16(0xDB9C6E) == 0x19)   /* (a new game: given as the game does; 0x19: its own skip) */
+        return;
+    const unsigned worn = MEM8(0x589760);
+    int n = 0;
+    for (uint32_t e = 0x447520; e < 0x447520 + 8 * 32 && MEM16(e) != 0xFF; e += 8) {
+        if (MEM16(e) != 2)
+            continue;
+        const uint16_t from = MEM16(e + 2), costume = MEM16(e + 4), to = MEM16(e + 6);
+        if (worn == costume)
+            n += rename_item(from, to);
+        else if (to == 0xCE)
+            n += rename_item(to, from);
+    }
+    if (n) {
+        fprintf(stderr, "[COSTUME] costume %u: %d of its swords changed\n", worn, n);
+    }
+}
+
+void sub_002EC9A0(void)
+{
+    area_start_items();
+    costume_swords();
+}
