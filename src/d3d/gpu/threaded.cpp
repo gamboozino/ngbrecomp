@@ -1159,6 +1159,12 @@ private:
                 lb += b.m[w][e] * b.m[w][e];
             }
             if (la > 0 && lb > 0 && dot < 0.9f * std::sqrt(la * lb)) return false;
+            // ... or turned under that but over 18 degrees on the very spot: the portal's segments stand 30 degrees
+            // apart about one middle (0.91 by this measure), and one was still paired with its neighbour now and
+            // then, a ghost of the barrier for a picture. (A limb or a cloth swung that far in a frame moved too.)
+            float mv = 0;
+            for (size_t e = 12; e < 15; e++) mv += (a.m[w][e] - b.m[w][e]) * (a.m[w][e] - b.m[w][e]);
+            if (la > 0 && lb > 0 && mv < 1e-6f && dot < 0.95f * std::sqrt(la * lb)) return false;
         }
         return true;
     }
@@ -1190,6 +1196,7 @@ private:
     // false: no picture between this frame and the last (too little the same, or the camera cut)
     bool Match() {
         match_.assign(cur_draws_.size(), -1);
+        how_.assign(cur_draws_.size(), 0);
         // Several of one kind (the shards of a broken pot, one mesh): each with the nearest of the last frame's, by
         // its place (fixed function) or its constants (a vertex shader), not the n-th with the n-th: drawn in
         // another order, a shard was lerped toward another's place.
@@ -1223,7 +1230,7 @@ private:
                 // (paired in order, unrelated puffs were lerped toward each other). Vertex shader ones as they are.
                 if (vs_group || cs.size() * ps.size() > 262144) {   // (in order, as before)
                     for (size_t n = 0; n < cs.size() && n < ps.size(); n++) {
-                        match_[size_t(cs[n])] = ps[n];
+                        match_[size_t(cs[n])] = ps[n], how_[size_t(cs[n])] = 1;
                         matched++;
                     }
                     continue;
@@ -1263,7 +1270,7 @@ private:
                 }
                 for (size_t x = 0; x < cs.size(); x++)
                     if (near_c[x] >= 0 && near_p[size_t(near_c[x])] == int32_t(x)) {
-                        match_[size_t(cs[x])] = ps[size_t(near_c[x])];
+                        match_[size_t(cs[x])] = ps[size_t(near_c[x])], how_[size_t(cs[x])] = 2;
                         matched++;
                     }
                 continue;
@@ -1295,7 +1302,7 @@ private:
                 if (match_[i] >= 0) continue;
                 auto it = free_prev.find(cur_draws_[i].key3);
                 if (it == free_prev.end() || it->second.empty()) continue;
-                match_[i] = TakeNearest(cur_draws_[i], it->second);
+                match_[i] = TakeNearest(cur_draws_[i], it->second), how_[i] = 3;
                 if (match_[i] >= 0) matched++;
             }
         }
@@ -1314,7 +1321,7 @@ private:
                 auto it = free_prev.find(cur_draws_[i].key2);
                 if (it == free_prev.end() || it->second.empty()) continue;
                 // (only the buffers' turn: with the same buffer it was left without a pair on purpose, a puff of many)
-                match_[i] = TakeNearest(cur_draws_[i], it->second, true);
+                match_[i] = TakeNearest(cur_draws_[i], it->second, true), how_[i] = 4;
                 if (match_[i] < 0) continue;
                 dyn_[i] = 1;
                 matched++;
@@ -1343,7 +1350,7 @@ private:
                 auto it = free_prev.find(key);
                 if (c.second != 1 || it == free_prev.end() || it->second.second != 1) continue;
                 if (!StandAlike(cur_draws_[size_t(c.first)], prev_draws_[size_t(it->second.first)])) continue;
-                match_[size_t(c.first)] = it->second.first;
+                match_[size_t(c.first)] = it->second.first, how_[size_t(c.first)] = 5;
                 matched++;
             }
         }
@@ -1425,7 +1432,7 @@ private:
                         if (z != cs[x]) gap = std::min(gap, Distance(cur_draws_[size_t(cs[x])], cur_draws_[size_t(z)]));
                     if (best_c[x] > gap * 0.5f) continue;
                     if (!StandAlike(cur_draws_[size_t(cs[x])], prev_draws_[size_t(ps[size_t(near_c[x])])])) continue;
-                    match_[size_t(cs[x])] = ps[size_t(near_c[x])];
+                    match_[size_t(cs[x])] = ps[size_t(near_c[x])], how_[size_t(cs[x])] = 6;
                     lod_pairs_++;
                 }
             }
@@ -1466,6 +1473,31 @@ private:
                 jumped++;
             }
         }
+        // (NGB_INTERP_LOG=2) each frame: the draws paired by less than the whole key, and the 3D ones left without
+        // a pair (a sprite's four vertices aside), with how far their worlds stand turned and moved
+        static const bool pairlog = [] { const char* e = std::getenv("NGB_INTERP_LOG"); return e && *e == '2'; }();
+        if (pairlog)
+            for (size_t i = 0; i < cur_draws_.size(); i++) {
+                const InterpDraw& a = cur_draws_[i];
+                if (a.dbg[2] <= 6 || (match_[i] >= 0 && !how_[i])) continue;
+                float cosw = 1, mv = 0;
+                if (match_[i] >= 0 && !a.vs) {
+                    const auto& p = prev_draws_[size_t(match_[i])].m[2];
+                    const auto& q = a.m[2];
+                    float dot = 0, la = 0, lb = 0;
+                    for (size_t e = 0; e < 11; e++) {
+                        if (e % 4 == 3) continue;
+                        dot += p[e] * q[e];
+                        la += p[e] * p[e];
+                        lb += q[e] * q[e];
+                    }
+                    cosw = la > 0 && lb > 0 ? dot / std::sqrt(la * lb) : 1;
+                    for (size_t e = 12; e < 15; e++) mv += (q[e] - p[e]) * (q[e] - p[e]);
+                }
+                std::fprintf(stderr, "[PAIR] f%u d%zu %s n %u tex %X vsh %X psh %X %s how %u cos %.3f moved %.3f snap %d\n",
+                             interp_frames_, i, a.vs ? "VS" : "FF", a.dbg[2], a.dbg[3], a.dbg[13], a.dbg[14],
+                             match_[i] < 0 ? "UNPAIRED" : "paired", unsigned(how_[i]), cosw, std::sqrt(mv), int(snap_.size() > i && snap_[i]));
+            }
         // (NGB_INTERP_LOG) matched draws whose world matrices shrink when lerped halfway: a big turn in a frame
         uint32_t shrunk = 0, ffw = 0;
         if (interp_log_)
@@ -1766,6 +1798,7 @@ private:
     bool have_peek_ = false;
     std::vector<InterpDraw> prev_draws_, cur_draws_;
     std::vector<int32_t> match_;   // cur_draws_'s draw in prev_draws_, or -1
+    std::vector<uint8_t> how_;     // (NGB_INTERP_LOG) the pass that paired it: 0 the whole key, 1 in order, 2 by place, 3 key3, 4 key2, 5 key5, 6 look
     uint32_t lod_pairs_ = 0;       // (NGB_INTERP_LOG) draws paired by their look alone (Match's last pass)
     std::unordered_map<uint64_t, int32_t> cams_;   // a camera (view, projection) -> a paired draw of it
     static uint64_t CamHash(const std::array<float, 16>& v, const std::array<float, 16>& p) {
