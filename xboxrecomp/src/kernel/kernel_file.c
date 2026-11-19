@@ -913,9 +913,14 @@ NTSTATUS __stdcall xbox_NtCreateFile(
 
     int fd;
     if (CreateOptions & XBOX_FILE_DIRECTORY_FILE) {
-        if (CreateDisposition == XBOX_FILE_CREATE || CreateDisposition == XBOX_FILE_OPEN_IF)
-            mkdir(host_path, 0755);   /* EEXIST is fine */
+        /* Made only when it is not there: the title opens its cache folder before each read of it (#239),
+         * and a mkdir on Android's shared storage is a trip to its storage service. */
         fd = open(host_path, O_RDONLY | O_DIRECTORY);
+        if (fd < 0 && errno == ENOENT &&
+            (CreateDisposition == XBOX_FILE_CREATE || CreateDisposition == XBOX_FILE_OPEN_IF)) {
+            mkdir(host_path, 0755);   /* EEXIST is fine */
+            fd = open(host_path, O_RDONLY | O_DIRECTORY);
+        }
     } else {
         /* an existing file opened only to read: a mod in its place (#179, kernel_path.c) */
         if (CreateDisposition == XBOX_FILE_OPEN && !(posix_open_flags(DesiredAccess, CreateDisposition) & O_RDWR) &&

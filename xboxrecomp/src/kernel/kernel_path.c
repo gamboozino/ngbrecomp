@@ -766,13 +766,13 @@ static BOOL xbox_partition_device_path_posix(const char *xbox_path, char *out,
     return TRUE;
 }
 
-/* Recursively create a directory and all missing parents. */
-static void mkdir_p(const char* path)
+/* Recursively create a directory and all missing parents: 0 when it is there after */
+static int mkdir_p(const char* path)
 {
     char tmp[MAX_PATH];
     size_t len = strlen(path);
     if (len == 0 || len >= sizeof(tmp))
-        return;
+        return -1;
     memcpy(tmp, path, len + 1);
 
     for (char* p = tmp + 1; *p; p++) {
@@ -783,8 +783,34 @@ static void mkdir_p(const char* path)
             *p = '/';
         }
     }
-    if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+    if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
         xbox_log(XBOX_LOG_WARN, XBOX_LOG_PATH, "mkdir %s: %s", tmp, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+/* mkdir_p once per folder: path translation makes the save side's folder before every open of a file in it,
+ * a mkdir per component of the path -- on Android's shared storage each one a trip to its storage service, on
+ * the game's thread (#239). A handful of folders (TitleData, UserData, Cache, ...): the last few made are kept. */
+static void mkdir_p_once(const char* path)
+{
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static char made[8][MAX_PATH];
+    static int next;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < 8; i++)
+        if (!strcmp(made[i], path)) {
+            pthread_mutex_unlock(&lock);
+            return;
+        }
+    pthread_mutex_unlock(&lock);
+    if (mkdir_p(path) != 0)
+        return;   /* not made (storage not there yet?): tried again on the next open */
+    pthread_mutex_lock(&lock);
+    snprintf(made[next], sizeof made[next], "%s", path);
+    next = (next + 1) % 8;
+    pthread_mutex_unlock(&lock);
 }
 
 void xbox_path_init(const char* game_dir, const char* save_dir)
@@ -967,7 +993,7 @@ translate:
             /* Ensure the save directory tree exists. */
             char dir_path[MAX_PATH];
             snprintf(dir_path, sizeof(dir_path), "%s%s", base_dir, sub_dir);
-            mkdir_p(dir_path);
+            mkdir_p_once(dir_path);
         } else {
             snprintf(host_path_buf, buf_size, "%s/%s", base_dir, remainder_posix);
         }
