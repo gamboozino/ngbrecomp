@@ -369,12 +369,16 @@ static volatile int g_labels = 1, g_labels_set = -1;   /* Nintendo pads by label
  * title's bindings and its pairs read it, unlike RECOMP_PAD_LIVE's USB pad). Each line appended to the file
  * is <button>[+<button>...][:<hold ms>] (150 ms by default), one after another with 200 ms between (none
  * after a line starting with &, to change what is held without letting go):
- * a b x y lb rb lt rt start back ls rs up down left right. Polled on the window's thread. */
-static struct { unsigned mask; Uint64 at, until; } g_vq[64];
+ * a b x y lb rb lt rt start back ls rs up down left right, and the sticks: lsl lsr lsu lsd rsl rsr rsu rsd
+ * (left stick left ... right stick down), all the way or by a percentage after it (rsr30). Polled on the
+ * window's thread. */
+static struct { unsigned mask; short ax[4]; Uint64 at, until; } g_vq[64];
 static int g_vq_n, g_vq_on = -1;
+static short g_vq_ax[4];
 
-static unsigned vpad_mask(const char *s, unsigned *hold)
+static unsigned vpad_mask(const char *s, unsigned *hold, short ax[4])
 {
+    static const char *const stick[] = { "lsl", "lsr", "lsu", "lsd", "rsl", "rsr", "rsu", "rsd" };
     static const char *const name[] = { "a", "b", "x", "y", "back", NULL, "start", "ls", "rs", "lb", "rb",
                                         "up", "down", "left", "right" };   /* (SDL_CONTROLLER_BUTTON_*) */
     unsigned m = 0;
@@ -382,6 +386,13 @@ static unsigned vpad_mask(const char *s, unsigned *hold)
     while (*s) {
         size_t n = strcspn(s, "+:\r\n");
         int b = -1;
+        for (int i = 0; i < 8; i++)
+            if (n >= 3 && !strncmp(s, stick[i], 3) && strspn(s + 3, "0123456789") == n - 3) {
+                int pct = n > 3 ? atoi(s + 3) : 100;
+                int v = (pct > 100 ? 100 : pct) * 32767 / 100;
+                ax[(i / 4) * 2 + ((i % 4) >= 2)] = (short)((i % 2) ? v : -v);   /* (x: left -, y: up -) */
+                m |= 1u << 31;
+            }
         for (int i = 0; i < (int)(sizeof name / sizeof *name); i++)
             if (name[i] && strlen(name[i]) == n && !strncmp(s, name[i], n))
                 b = i;
@@ -420,7 +431,8 @@ static void vpad_poll(void)
             line[nl] = 0;
             nl = 0;
             int join = line[0] == '&';
-            unsigned hold, m = vpad_mask(line + join, &hold);
+            short ax[4] = { 0, 0, 0, 0 };
+            unsigned hold, m = vpad_mask(line + join, &hold, ax);
             if (!m || g_vq_n >= 64)
                 continue;
             static Uint64 last_until;                  /* (the last one's end, popped or not) */
@@ -428,6 +440,7 @@ static void vpad_poll(void)
             if (at < now) at = now;
             last_until = at + hold;
             g_vq[g_vq_n].mask = m;
+            memcpy(g_vq[g_vq_n].ax, ax, sizeof ax);
             g_vq[g_vq_n].at = at;
             g_vq[g_vq_n].until = at + hold;
             g_vq_n++;
@@ -437,14 +450,22 @@ static void vpad_poll(void)
     if (f)
         fclose(f);
     unsigned m = 0;
+    short ax[4] = { 0, 0, 0, 0 };
     while (g_vq_n && now >= g_vq[0].until) {
         memmove(g_vq, g_vq + 1, --g_vq_n * sizeof *g_vq);
     }
-    if (g_vq_n && now >= g_vq[0].at)
+    if (g_vq_n && now >= g_vq[0].at) {
         m = g_vq[0].mask;
-    if ((int)m == g_vq_on)
+        memcpy(ax, g_vq[0].ax, sizeof ax);
+    }
+    if ((int)m == g_vq_on && !memcmp(ax, g_vq_ax, sizeof ax))
         return;
     g_vq_on = (int)m;
+    memcpy(g_vq_ax, ax, sizeof ax);
+    SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_LEFTX, ax[0]);
+    SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_LEFTY, ax[1]);
+    SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_RIGHTX, ax[2]);
+    SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_RIGHTY, ax[3]);
     for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX && b < 15; b++)
         SDL_JoystickSetVirtualButton(g_vpad, b, (m >> b) & 1);
     SDL_JoystickSetVirtualAxis(g_vpad, SDL_CONTROLLER_AXIS_TRIGGERLEFT, (m >> 16) & 1 ? 32767 : -32768);

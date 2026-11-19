@@ -66,7 +66,8 @@ Driving and watching a headless run:
   (find it in the game's environment; never `:0`) for keys and the mouse.
 - `RECOMP_PAD_HOST=<file>`: a virtual controller SDL takes for a real one, the only one opened while
   it is there (the machine's own pads are left out). Lines appended: `<button>[+<button>...][:<hold ms>]`
-  (`a b x y lb rb lt rt start back ls rs up down left right`), 200 ms apart, or right after the previous
+  (`a b x y lb rb lt rt start back ls rs up down left right`, and the sticks: `lsl lsr lsu lsd rsl rsr rsu rsd`,
+  all the way or by a percentage, `rsr30`), 200 ms apart, or right after the previous
   one when the line starts with `&` (hold one, then add a second). Unlike `RECOMP_PAD_LIVE` it reaches
   the recomp's own pages and the button bindings; the log shows `PAD: title gets ...`, what the game
   is handed after the bindings, as it changes.
