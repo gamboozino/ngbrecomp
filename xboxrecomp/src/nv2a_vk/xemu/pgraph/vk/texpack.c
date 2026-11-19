@@ -10,7 +10,10 @@
  *   (and pgraph_vk_texpack_register: a replacement made by the program)
  *   NV2A_TEX_REPLACE=dir   where dir/<id>.png exists, use it instead of the
  *                          title's texture: any size with the same aspect
- *                          ratio, mipmapped on upload
+ *                          ratio, mipmapped on upload. dir/<id>.dds the same,
+ *                          compressed (BC1/BC2/BC3, DXT1/3/5) or plain 32-bit,
+ *                          its own mipmaps kept; over a .png of the same id.
+ *                          Subfolders are read too (a pack sorted by area).
  *
  * <id> is 16 hex digits: a hash of the texture's bytes in guest memory (and
  * its palette), its format and size. A pack is a folder of such files, made
@@ -46,7 +49,7 @@ static int s_mem_n;
 static GMutex s_mem_lock;
 #define MEM_ID_BASE 0xFE00000000000000ull
 static int s_init;
-static GHashTable *s_have;      /* ids with a replacement file */
+static GHashTable *s_have;      /* ids with a replacement file: its path (in s_repl_dir) */
 static GHashTable *s_dumped;    /* ids written or queued this run */
 static GAsyncQueue *s_queue;    /* dumps for the writer thread */
 
@@ -81,6 +84,56 @@ static gboolean id_equal(gconstpointer a, gconstpointer b)
     return *(const uint64_t *)a == *(const uint64_t *)b;
 }
 
+static int ext_is(const char *s, const char *ext)   /* (case aside) */
+{
+    for (; *s && *ext; s++, ext++)
+        if ((*s | 0x20) != (*ext | 0x20))
+            return 0;
+    return !*s && !*ext;
+}
+
+static int is_dds(const char *path)
+{
+    size_t n = path ? strlen(path) : 0;
+    return n > 4 && ext_is(path + n - 4, ".dds");
+}
+
+/* dir (and its subfolders, a few deep): every <id>.png and <id>.dds, a .dds
+ * over a .png of the same id */
+static void scan_dir(const char *path, int depth, int *n, int *dds)
+{
+    DIR *dir = opendir(path);
+    struct dirent *de;
+    while (dir && (de = readdir(dir))) {
+        uint64_t id;
+        char tail[8];
+        char full[1400];
+        if (de->d_name[0] == '.')
+            continue;
+        snprintf(full, sizeof full, "%s/%s", path, de->d_name);
+        if (sscanf(de->d_name, "%16" SCNx64 "%7s", &id, tail) == 2 && strlen(de->d_name) == 20 &&
+            (ext_is(tail, ".png") || ext_is(tail, ".dds"))) {
+            int dds_file = ext_is(tail, ".dds");
+            const char *had = g_hash_table_lookup(s_have, &id);
+            if (had && !dds_file)
+                continue;
+            if (!had)
+                (*n)++;
+            if (dds_file && !is_dds(had))   /* (one counted once) */
+                (*dds)++;
+            uint64_t *k = g_new(uint64_t, 1);
+            *k = id;
+            g_hash_table_replace(s_have, k, g_strdup(full));
+            continue;
+        }
+        struct stat st;
+        if (depth < 4 && stat(full, &st) == 0 && S_ISDIR(st.st_mode))
+            scan_dir(full, depth + 1, n, dds);
+    }
+    if (dir)
+        closedir(dir);
+}
+
 static void texpack_init(void)
 {
     const char *e;
@@ -88,28 +141,14 @@ static void texpack_init(void)
     if (s_init)
         return;
     s_init = 1;
-    s_have = g_hash_table_new_full(id_hash, id_equal, g_free, NULL);
+    s_have = g_hash_table_new_full(id_hash, id_equal, g_free, g_free);
     s_dumped = g_hash_table_new_full(id_hash, id_equal, g_free, NULL);
 
     if ((e = getenv("NV2A_TEX_REPLACE")) && *e) {
-        DIR *dir = opendir(e);
-        struct dirent *de;
-        int n = 0;
+        int n = 0, dds = 0;
         snprintf(s_repl_dir, sizeof s_repl_dir, "%s", e);
-        while (dir && (de = readdir(dir))) {
-            uint64_t id;
-            char tail[8];
-            if (sscanf(de->d_name, "%16" SCNx64 "%7s", &id, tail) == 2 &&
-                !strcmp(tail, ".png")) {
-                uint64_t *k = g_new(uint64_t, 1);
-                *k = id;
-                g_hash_table_add(s_have, k);
-                n++;
-            }
-        }
-        if (dir)
-            closedir(dir);
-        fprintf(stderr, "nv2a: %d replacement textures in %s\n", n, e);
+        scan_dir(e, 0, &n, &dds);
+        fprintf(stderr, "nv2a: %d replacement textures in %s (%d DDS)\n", n, e, dds);
     }
     if ((e = getenv("NV2A_TEX_DUMP")) && *e) {
         snprintf(s_dump_dir, sizeof s_dump_dir, "%s", e);
@@ -238,13 +277,47 @@ uint8_t *pgraph_vk_texpack_load(uint64_t id, int *w, int *h)
         return px;
     }
     g_mutex_unlock(&s_mem_lock);
-    char path[1100];
+    const char *path = s_repl_dir[0] ? g_hash_table_lookup(s_have, &id) : NULL;
     int n;
-    snprintf(path, sizeof path, "%s/%016" PRIx64 ".png", s_repl_dir, id);
+    if (!path || is_dds(path))
+        return NULL;   /* (a .dds: pgraph_vk_texpack_read) */
     uint8_t *px = stbi_load(path, w, h, &n, 4);
     if (!px)
         fprintf(stderr, "nv2a: cannot read %s: %s\n", path, stbi_failure_reason());
     return px;
+}
+
+/* A replacement made at run time (pgraph_vk_texpack_register): in memory already */
+bool pgraph_vk_texpack_is_mem(uint64_t id)
+{
+    return mem_find(id) != NULL;
+}
+
+/* A replacement's kind: 1 a picture (.png, or a run-time one: pgraph_vk_texpack_load),
+ * 2 a DDS (pgraph_vk_texpack_read), 0 none. The table is only written at start: any thread. */
+int pgraph_vk_texpack_kind(uint64_t id)
+{
+    texpack_init();
+    if (mem_find(id))
+        return 1;
+    const char *path = s_repl_dir[0] ? g_hash_table_lookup(s_have, &id) : NULL;
+    if (!path)
+        return 0;
+    return is_dds(path) ? 2 : 1;
+}
+
+/* A replacement file's bytes as they are (a .dds), g_free'd by the caller; NULL if unreadable. */
+uint8_t *pgraph_vk_texpack_read(uint64_t id, size_t *len)
+{
+    const char *path = s_repl_dir[0] ? g_hash_table_lookup(s_have, &id) : NULL;
+    gchar *data = NULL;
+    gsize n = 0;
+    if (!path || !g_file_get_contents(path, &data, &n, NULL)) {
+        fprintf(stderr, "nv2a: cannot read the replacement %016" PRIx64 "\n", id);
+        return NULL;
+    }
+    *len = n;
+    return (uint8_t *)data;
 }
 
 void pgraph_vk_texpack_free(uint8_t *px)
@@ -371,4 +444,9 @@ void pgraph_vk_texpack_dump_raw(uint64_t id, const void *data, size_t len)
         fwrite(data, 1, len, f);
         fclose(f);
     }
+}
+
+void pgraph_vk_texpack_free_read(uint8_t *p)
+{
+    g_free(p);
 }

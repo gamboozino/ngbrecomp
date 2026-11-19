@@ -71,6 +71,10 @@ bool pgraph_vk_texpack_active(void);
 bool pgraph_vk_texpack_has(uint64_t id);
 uint8_t* pgraph_vk_texpack_load(uint64_t id, int* w, int* h);
 void pgraph_vk_texpack_free(uint8_t* px);
+int pgraph_vk_texpack_kind(uint64_t id);
+bool pgraph_vk_texpack_is_mem(uint64_t id);
+uint8_t* pgraph_vk_texpack_read(uint64_t id, size_t* len);
+void pgraph_vk_texpack_free_read(uint8_t* p);
 void pgraph_vk_texpack_dump(uint64_t id, const void* data, int w, int h, VkFormat fmt, VkComponentMapping map);
 }
 
@@ -240,6 +244,235 @@ void DecodeBC(Host h, const uint8_t* src, uint32_t w, uint32_t h_, std::vector<u
         }
 }
 constexpr VkDeviceSize kRingSize = 64u << 20;   // vertices, indices and constants of one frame
+
+// A texture pack's picture (#258), as the GPU takes it: BGRA, or DXT blocks as a .dds has them (decoded to BGRA
+// on a GPU without DXT). levels: the chain given (a .dds's), or 1 (a .png: its chain made on upload).
+struct PackPic {
+    bool ok = false;
+    Host host = Host::BGRA8;
+    uint32_t w = 0, h = 0, levels = 1;
+    bool opaque = true;
+    std::vector<uint8_t> bytes;   // the levels one after another
+    std::vector<size_t> off;      // each level's start in bytes
+    static size_t LevelBytes(Host h, uint32_t w, uint32_t ht) {
+        return h == Host::BGRA8 ? size_t(w) * ht * 4 : size_t((w + 3) / 4) * ((ht + 3) / 4) * (h == Host::BC1 ? 8 : 16);
+    }
+};
+
+// A .dds: DXT1/3/5 (or the DX10 header's BC1-3), or plain 32-bit with alpha. False: not one of those.
+bool ParseDds(const uint8_t* f, size_t n, PackPic& p) {
+    auto u32 = [&](size_t at) { uint32_t v; std::memcpy(&v, f + at, 4); return v; };
+    if (n < 128 || std::memcmp(f, "DDS ", 4) || u32(4) != 124) return false;
+    p.h = u32(12);
+    p.w = u32(16);
+    uint32_t mips = (u32(8) & 0x20000) ? std::max(u32(28), 1u) : 1u;
+    const uint32_t pf_flags = u32(80), fourcc = u32(84);
+    size_t at = 128;
+    bool rgba = false;       // (32-bit: R in the low byte, swapped to BGRA below)
+    bool no_alpha = false;   // (32-bit with its fourth byte unused: opaque)
+    if ((pf_flags & 4) && fourcc == 0x31545844) p.host = Host::BC1;
+    else if ((pf_flags & 4) && fourcc == 0x33545844) p.host = Host::BC2;
+    else if ((pf_flags & 4) && fourcc == 0x35545844) p.host = Host::BC3;
+    else if ((pf_flags & 4) && fourcc == 0x30315844) {   // DX10: the format after the header
+        if (n < 148) return false;
+        const uint32_t dxgi = u32(128);
+        at = 148;
+        if (dxgi == 71 || dxgi == 72) p.host = Host::BC1;
+        else if (dxgi == 74 || dxgi == 75) p.host = Host::BC2;
+        else if (dxgi == 77 || dxgi == 78) p.host = Host::BC3;
+        else if (dxgi == 87 || dxgi == 91 || dxgi == 28 || dxgi == 29) p.host = Host::BGRA8;
+        else return false;
+        rgba = dxgi == 28 || dxgi == 29;
+    } else if ((pf_flags & 0x40) && u32(88) == 32) {   // uncompressed 32-bit: BGRA or RGBA by its masks
+        p.host = Host::BGRA8;
+        rgba = u32(92) == 0x000000FF;
+        no_alpha = !(pf_flags & 1);
+    } else
+        return false;
+    if (!p.w || !p.h || p.w > 16384 || p.h > 16384) return false;
+    uint32_t most = 1;
+    while ((std::max(p.w, p.h) >> most) > 0) most++;
+    p.levels = std::min(mips, most);
+    size_t total = 0;
+    for (uint32_t l = 0; l < p.levels; l++) total += PackPic::LevelBytes(p.host, std::max(p.w >> l, 1u), std::max(p.h >> l, 1u));
+    if (n - at < total) {   // (fewer levels than it says: the ones there)
+        p.levels = 0;
+        total = 0;
+        for (uint32_t l = 0; l < mips; l++) {
+            size_t b = PackPic::LevelBytes(p.host, std::max(p.w >> l, 1u), std::max(p.h >> l, 1u));
+            if (n - at < total + b) break;
+            total += b;
+            p.levels++;
+        }
+        if (!p.levels) return false;
+    }
+    p.bytes.assign(f + at, f + at + total);
+    size_t o = 0;
+    for (uint32_t l = 0; l < p.levels; l++) {
+        p.off.push_back(o);
+        o += PackPic::LevelBytes(p.host, std::max(p.w >> l, 1u), std::max(p.h >> l, 1u));
+    }
+    if (p.host == Host::BGRA8) {
+        for (size_t i = 0; i < p.bytes.size(); i += 4) {
+            if (rgba) std::swap(p.bytes[i], p.bytes[i + 2]);
+            if (no_alpha) p.bytes[i + 3] = 0xFF;
+            p.opaque = p.opaque && p.bytes[i + 3] == 0xFF;
+        }
+    } else
+        p.opaque = p.host == Host::BC1;   // (DXT1's cut-out bit left aside: its chain is the file's anyway)
+    p.ok = true;
+    return true;
+}
+
+// Texture pack pictures read and decoded on a thread of their own, kept in memory after (#258): the first use of
+// one draws the game's own texture until it is ready, instead of the frame waiting on a PNG's decoding (a big pack
+// stuttered as each area's textures came in), and an area seen again, or a texture made again after its eviction,
+// takes the picture from memory. NGB_TEXPACK_CACHE_MB (1024 by default) is how much is kept, the least recently
+// used going first; NGB_TEXPACK_SYNC=1 reads each one on first use, as before.
+class PackLoader {
+public:
+    PackLoader(bool bc, size_t budget) : bc_(bc), budget_(budget), thread_([this] { Run(); }) {}
+    ~PackLoader() {
+        {
+            std::lock_guard l(m_);
+            stop_ = true;
+        }
+        cv_.notify_all();
+        thread_.join();
+    }
+    // The picture when ready; else null, and it is queued (now: read here and then, as a run-time replacement is)
+    std::shared_ptr<const PackPic> Get(uint64_t id, bool now) {
+        {
+            std::lock_guard l(m_);
+            auto it = done_.find(id);
+            if (it != done_.end()) {
+                it->second.used = ++clock_;
+                return it->second.pic;
+            }
+            if (!now) {
+                if (queued_.insert(id).second) {
+                    q_.push_back(id);
+                    cv_.notify_one();
+                }
+                return nullptr;
+            }
+        }
+        auto pic = Load(id);
+        Keep(id, pic);
+        return pic;
+    }
+    // Ready to be drawn; one let go of (the memory's least recently used) before it was, read again
+    bool Ready(uint64_t id) {
+        std::lock_guard l(m_);
+        if (done_.count(id)) return true;
+        if (queued_.insert(id).second) {
+            q_.push_back(id);
+            cv_.notify_one();
+        }
+        return false;
+    }
+
+private:
+    struct Kept {
+        std::shared_ptr<const PackPic> pic;
+        uint64_t used = 0;
+    };
+    std::shared_ptr<const PackPic> Load(uint64_t id) const {
+        auto p = Read(id);
+        if (p->w > 8192 || p->h > 8192) {   // never drawn (past any GPU's size here): its size kept, for the log
+            p->bytes.clear();
+            p->bytes.shrink_to_fit();
+            p->off.clear();
+        }
+        return p;
+    }
+    std::shared_ptr<PackPic> Read(uint64_t id) const {
+        auto p = std::make_shared<PackPic>();
+        if (pgraph_vk_texpack_kind(id) == 2) {
+            size_t n = 0;
+            uint8_t* f = pgraph_vk_texpack_read(id, &n);
+            if (f && !ParseDds(f, n, *p)) std::fprintf(stderr, "[D3D] texture pack: %016llx.dds is not DXT1/3/5 nor 32-bit\n", (unsigned long long)id);
+            if (f) pgraph_vk_texpack_free_read(f);
+            if (p->ok && p->host != Host::BGRA8 && !bc_) {   // no DXT on this GPU: each level to BGRA
+                PackPic b;
+                b.ok = true;
+                b.w = p->w;
+                b.h = p->h;
+                b.levels = p->levels;
+                b.opaque = true;
+                for (uint32_t l = 0; l < p->levels; l++) {
+                    std::vector<uint8_t> out;
+                    DecodeBC(p->host, p->bytes.data() + p->off[l], std::max(p->w >> l, 1u), std::max(p->h >> l, 1u), out);
+                    b.off.push_back(b.bytes.size());
+                    if (l == 0)
+                        for (size_t i = 3; i < out.size() && b.opaque; i += 4) b.opaque = out[i] == 0xFF;
+                    b.bytes.insert(b.bytes.end(), out.begin(), out.end());
+                }
+                *p = std::move(b);
+            }
+            return p;
+        }
+        int w = 0, h = 0;
+        uint8_t* px = pgraph_vk_texpack_load(id, &w, &h);
+        if (px && w > 0 && h > 0) {
+            p->w = uint32_t(w);
+            p->h = uint32_t(h);
+            p->bytes.resize(size_t(w) * size_t(h) * 4);
+            p->off.push_back(0);
+            for (size_t i = 0; i < p->bytes.size(); i += 4) {   // RGBA to BGRA
+                p->bytes[i] = px[i + 2];
+                p->bytes[i + 1] = px[i + 1];
+                p->bytes[i + 2] = px[i];
+                p->bytes[i + 3] = px[i + 3];
+                p->opaque = p->opaque && px[i + 3] == 0xFF;
+            }
+            p->ok = true;
+        }
+        if (px) pgraph_vk_texpack_free(px);
+        return p;
+    }
+    void Keep(uint64_t id, std::shared_ptr<const PackPic> pic) {
+        std::lock_guard l(m_);
+        queued_.erase(id);
+        auto& k = done_[id];
+        if (k.pic) bytes_ -= k.pic->bytes.size();
+        k.pic = std::move(pic);
+        k.used = ++clock_;
+        bytes_ += k.pic->bytes.size();
+        while (bytes_ > budget_ && done_.size() > 1) {   // the least recently used go (drawn already: uploaded)
+            auto old = done_.end();
+            for (auto it = done_.begin(); it != done_.end(); ++it)
+                if (it->first != id && (old == done_.end() || it->second.used < old->second.used)) old = it;
+            if (old == done_.end()) break;
+            bytes_ -= old->second.pic->bytes.size();
+            done_.erase(old);
+        }
+    }
+    void Run() {
+        for (;;) {
+            uint64_t id;
+            {
+                std::unique_lock l(m_);
+                cv_.wait(l, [&] { return stop_ || !q_.empty(); });
+                if (stop_) return;
+                id = q_.front();
+                q_.pop_front();
+            }
+            Keep(id, Load(id));
+        }
+    }
+    const bool bc_;
+    const size_t budget_;
+    std::mutex m_;
+    std::condition_variable cv_;
+    std::deque<uint64_t> q_;
+    std::set<uint64_t> queued_;
+    std::unordered_map<uint64_t, Kept> done_;
+    size_t bytes_ = 0;
+    uint64_t clock_ = 0;
+    bool stop_ = false;
+    std::thread thread_;   // (last: started once the rest is made)
+};
 constexpr uint32_t kQuadVertices = 6;
 extern "C" int ngb_pc_setting(int which);
 extern "C" int nv2a_dirty_stamp(const void* host, size_t len, uint64_t* stamp);   // xboxrecomp nv2a_dirty.c
@@ -294,6 +527,7 @@ struct Tex {
     Image img;
     int gen = -1;              // made with generated mipmaps (1), or as given (0)
     bool pack = false;         // drawn from a texture pack's picture (its own size, mipmaps made)
+    bool pack_wait = false;    // the game's own for now: its pack picture being read (PackLoader)
     uint64_t sig = 0;          // the guest bytes (and palette) it was made from
     uint32_t used = 0;         // frame last used
     TexInfo info;
@@ -514,6 +748,7 @@ private:
     float view_yaw_ = 0, view_pitch_ = 0;   // NGB_D3D_VIEWLOG
     bool view_seen_ = false;
     uint32_t image_max_ = 4096;   // maxImageDimension2D: a texture pack's picture past it is not used
+    std::unique_ptr<PackLoader> pack_loader_;   // texture pack pictures, read off this thread (#258)
     float lod_bias_max_ = 0.0f;   // maxSamplerLodBias    // the largest point (largePoints): the particles are point sprites (#51)
     float line_max_ = 1.0f;
     VkSampleCountFlags ms_counts_ = VK_SAMPLE_COUNT_1_BIT;   // the device's for colour and depth together
@@ -2349,7 +2584,8 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
                          d.width >= 8 && d.height >= 8 && pow2(d.width) && pow2(d.height) &&
                          d.format != 0x28 && d.format != 0x17;
     if (tx.img.image && tx.sig == sig && (tx.pack || (tx.img.w == d.width && tx.img.h == d.height)) &&
-        (tx.gen == 2 || tx.gen == (mip_candidate ? 1 : 0))) {
+        (tx.gen == 2 || tx.gen == (mip_candidate ? 1 : 0)) &&
+        !(tx.pack_wait && pack_loader_ && pack_loader_->Ready(sig))) {   // (its pack picture now ready: made again)
         tx.used = frame_;
         if (bump_src) {
             info.flags |= kTexSigned;
@@ -2376,44 +2612,49 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
     bool pack_candidate = pack_on && !d.cube && !d.linear && !bump_src && (fi.host == Host::BGRA8 || bc);
     uint32_t tw = d.width, th = d.height;   // the top level's size
     static std::set<uint64_t> pack_failed;   // pictures the GPU could not hold: the game's own, not read again
+    std::shared_ptr<const PackPic> pic;      // the pack's picture drawn
+    bool pack_wait = false, pack_blit = false;   // (blit: its chain made here, from its top level)
     if (pack_candidate && !pack_failed.count(sig) && pgraph_vk_texpack_has(sig)) {
-        int pw = 0, ph = 0;
-        uint8_t* px = pgraph_vk_texpack_load(sig, &pw, &ph);
-        // at most 8192 a side (and the GPU's own limit): 256 MB of picture, decoded on the render thread
+        if (!pack_loader_) {
+            const char* e = std::getenv("NGB_TEXPACK_CACHE_MB");
+            const size_t mb = e && std::atoi(e) > 0 ? size_t(std::atoi(e)) : 1024;
+            pack_loader_ = std::make_unique<PackLoader>(bc_, mb << 20);
+        }
+        // read here and now: NGB_TEXPACK_SYNC=1, and a replacement made at run time (in memory already)
+        static const bool sync = [] { const char* e = std::getenv("NGB_TEXPACK_SYNC"); return e && *e == '1'; }();
+        auto got = pack_loader_->Get(sig, sync || pgraph_vk_texpack_is_mem(sig));
+        // at most 8192 a side (and the GPU's own limit)
         const uint32_t pack_max = std::min(image_max_, 8192u);
-        if (px && pw > 0 && ph > 0 && uint32_t(pw) <= pack_max && uint32_t(ph) <= pack_max) {
-            top.resize(size_t(pw) * size_t(ph) * 4);
-            bool opaque = true;
-            for (size_t i = 0; i < top.size(); i += 4) {   // RGBA to BGRA
-                top[i] = px[i + 2];
-                top[i + 1] = px[i + 1];
-                top[i + 2] = px[i];
-                top[i + 3] = px[i + 3];
-                opaque = opaque && px[i + 3] == 0xFF;
-            }
-            tw = uint32_t(pw);
-            th = uint32_t(ph);
+        if (!got) pack_wait = true;
+        else if (got->ok && got->w <= pack_max && got->h <= pack_max) {
+            pic = got;
+            tw = pic->w;
+            th = pic->h;
             tx.pack = true;
             tx.gen = 2;
-            fmt = kColorFormat;
-            // mipmaps as for the game's own textures (above): opaque ones, and those the game gave its own (its
-            // cut-outs thin with distance on the console too); averaging the alpha of a cut-out the game drew
-            // from one level would thin it away, so that one stays one level, as the game's is
-            levels = 1;
-            if (opaque || d.levels > 1)
+            fmt = pic->host == Host::BGRA8 ? kColorFormat : TextureFormat(pic->host);
+            // a .dds's chain as it has it; a picture's made as for the game's own textures (above): opaque ones,
+            // and those the game gave its own (its cut-outs thin with distance on the console too); averaging the
+            // alpha of a cut-out the game drew from one level would thin it away, so that one stays one level
+            levels = pic->levels;
+            if (levels == 1 && pic->host == Host::BGRA8 && (pic->opaque || d.levels > 1)) {
                 while ((std::max(tw, th) >> levels) > 0) levels++;
+                pack_blit = levels > 1;
+            }
             static int told;
             if (told < 16 && ++told)
-                std::fprintf(stderr, "[D3D] texture pack: %016llx (%ux%u fmt %X) drawn from %dx%d\n",
-                             (unsigned long long)sig, d.width, d.height, d.format, pw, ph);
+                std::fprintf(stderr, "[D3D] texture pack: %016llx (%ux%u fmt %X) drawn from %ux%u%s\n",
+                             (unsigned long long)sig, d.width, d.height, d.format, tw, th,
+                             pic->host == Host::BGRA8 ? "" : pic->host == Host::BC1 ? " DXT1" : pic->host == Host::BC2 ? " DXT3" : " DXT5");
+        } else {
+            pack_failed.insert(sig);
+            if (got->ok) {
+                static int told;
+                if (told < 16 && ++told)
+                    std::fprintf(stderr, "[D3D] texture pack: %016llx is %ux%u, past %u: the game's own is drawn\n",
+                                 (unsigned long long)sig, got->w, got->h, pack_max);
+            }
         }
-        if (px && !tx.pack) {
-            static int told;
-            if (told < 16 && ++told)
-                std::fprintf(stderr, "[D3D] texture pack: %016llx is %dx%d, past %u: the game's own is drawn\n",
-                             (unsigned long long)sig, pw, ph, std::min(image_max_, 8192u));
-        }
-        if (px) pgraph_vk_texpack_free(px);
     }
     static const bool miplog = std::getenv("NGB_D3D_MIPLOG") != nullptr;
     if (miplog) {   // debugging: which textures have one level, and their format
@@ -2464,6 +2705,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
     }
     tx.sig = sig;
     tx.used = frame_;
+    tx.pack_wait = pack_wait;
     // NGB_D3D_TEXDUMP=dir: the first textures' top level, as DDS (DXT) or PPM (BGRA), to check the data
     static const char* texdump = std::getenv("NGB_D3D_TEXDUMP");
     static int texdumped;
@@ -2471,7 +2713,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
         texdumped++;
         DumpTexture(d, fi, guest, palette, texdump, nullptr);
     }
-    if (pack_dump && pack_candidate && !tx.pack) {   // written once an id, by texpack.c's own thread
+    if (pack_dump && pack_candidate && !tx.pack && !pack_wait) {   // written once an id, by texpack.c's own thread
         std::vector<uint8_t> px;
         if (tx.gen == 1) px = top;
         else {
@@ -2491,17 +2733,24 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
     EndRendering();
     Barrier(tx.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     std::vector<uint8_t> out;
-    if (tx.pack) {   // the pack's picture as the top level, in bands of rows the upload ring holds; the chain is made below
-        const uint32_t rows = std::max(1u, uint32_t((kRingSize / 4) / (VkDeviceSize(tw) * 4)));
-        for (uint32_t y = 0; y < th; y += rows) {
-            uint32_t n = std::min(rows, th - y);
-            VkDeviceSize at = Upload(top.data() + size_t(y) * tw * 4, VkDeviceSize(n) * tw * 4, 16);
-            VkBufferImageCopy c{};
-            c.bufferOffset = at;
-            c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-            c.imageOffset = {0, int32_t(y), 0};
-            c.imageExtent = {tw, n, 1};
-            d_.vkCmdCopyBufferToImage(cmd_, ring_, tx.img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+    if (pic) {   // the pack's picture, each level it has in bands of rows the upload ring holds (DXT: rows of blocks)
+        const bool blocks = pic->host != Host::BGRA8;
+        for (uint32_t l = 0; l < (pack_blit ? 1u : levels); l++) {
+            const uint32_t lw = std::max(tw >> l, 1u), lh = std::max(th >> l, 1u);
+            const uint32_t unit = blocks ? 4 : 1;                       // pixel rows a row of the data holds
+            const size_t row = PackPic::LevelBytes(pic->host, lw, unit);  // its bytes
+            const uint32_t units = (lh + unit - 1) / unit;
+            const uint32_t per = std::max(1u, uint32_t((kRingSize / 4) / row));
+            for (uint32_t u = 0; u < units; u += per) {
+                const uint32_t n = std::min(per, units - u);
+                VkDeviceSize at = Upload(pic->bytes.data() + pic->off[l] + size_t(u) * row, VkDeviceSize(n) * row, 16);
+                VkBufferImageCopy c{};
+                c.bufferOffset = at;
+                c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1};
+                c.imageOffset = {0, int32_t(u * unit), 0};
+                c.imageExtent = {lw, std::min(n * unit, lh - u * unit), 1};
+                d_.vkCmdCopyBufferToImage(cmd_, ring_, tx.img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+            }
         }
     }
     for (uint32_t f = 0; f < (tx.pack ? 0 : faces); f++)
@@ -2538,7 +2787,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
             c.imageExtent = {std::max(d.width >> l, 1u), std::max(d.height >> l, 1u), 1};
             d_.vkCmdCopyBufferToImage(cmd_, ring_, tx.img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
         }
-    if ((tx.gen == 1 || tx.pack) && levels > 1) {   // the rest of the chain, each level a 2:1 linear blit (a box filter) of the one above
+    if ((tx.gen == 1 || pack_blit) && levels > 1) {   // the rest of the chain, each level a 2:1 linear blit (a box filter) of the one above
         VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
         b.srcStageMask = b.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         b.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;

@@ -594,6 +594,10 @@ void pgraph_vk_texpack_register(uint32_t addr, const void *bytes, uint32_t len,
 uint64_t pgraph_vk_texpack_mem_id(uint64_t addr, const void *bytes, uint32_t len);
 void pgraph_vk_texpack_dump_raw(uint64_t id, const void *data, size_t len);
 void pgraph_vk_texpack_free(uint8_t *px);
+int pgraph_vk_texpack_kind(uint64_t id);
+bool pgraph_vk_texpack_is_mem(uint64_t id);
+uint8_t *pgraph_vk_texpack_read(uint64_t id, size_t *len);
+void pgraph_vk_texpack_free_read(uint8_t *p);
 bool pgraph_vk_texpack_format_ok(VkFormat fmt);
 void pgraph_vk_texpack_dump(uint64_t id, const void *data, int w, int h,
                             VkFormat fmt, VkComponentMapping map);
