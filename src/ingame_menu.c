@@ -445,6 +445,13 @@ int ngb_pause_tab_key(int *focus)
         return 0;                          /* the game's pad meanwhile */
     }
     if (key == KEY_BACK) {
+        static int log = -1;   /* NGB_TAB_LOG=1 (debugging, #261): where a back came from */
+        if (log < 0)
+            log = getenv("NGB_TAB_LOG") != NULL;
+        if (log)
+            fprintf(stderr, "[TAB] back: pad %08X pressed %08X (B %d, Start %d, queued %d)\n", b, pressed,
+                    !!(pressed & (1u << 17)), !!(pressed & XBOX_GAMEPAD_START),
+                    !(pressed & ((1u << 17) | XBOX_GAMEPAD_START)));
         *focus = s_tab_focus = 0;
         s_wait_release = true;             /* the game gets the pad once let go */
     }
@@ -1485,6 +1492,9 @@ bool nv2a_overlay_wanted(void)
     mouse_test_tick();
     uint32_t b = pad_bits();
     if (s_tab_focus && !tab_shown()) {     /* the menu went: give the pad back */
+        if (getenv("NGB_TAB_LOG"))
+            fprintf(stderr, "[TAB] page let go of the pad: not seen for %llu ms\n",
+                    (unsigned long long)(mono_ms() - s_tab_seen));
         s_tab_focus = 0;
         s_wait_release = true;
     }
