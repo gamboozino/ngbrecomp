@@ -589,8 +589,11 @@ static int patch_constant(double a)
            patch_float(0x414AF4, wide && !game_widescreen_mode() ? (float)a : s_orig_43);
 }
 
+static double s_view_a;   /* the screen's shape the 3D is drawn for (sub_0003FA50) */
+
 void ngb_game_set_aspect_constant(double a)
 {
+    s_view_a = a;
     s_aspect_a = patch_constant(a) ? 0 : a;
 }
 
@@ -2174,4 +2177,99 @@ float ngb_hud_shape(void)
         return 1.0f;
     int a = ngb_pc_setting(7);
     return a == 1 ? 0.75f : a == 2 ? 0.8333333f : a == 3 ? 0.5625f : a == 4 ? 0.375f : 1.0f;
+}
+
+/* The camera in use copied into the view the frame is drawn with (0x977E00..), its vertical field
+ * of view (radians) into 0x977E30: the lifted routine, kept here (src/manual_functions.json) for
+ * one change. The game holds the vertical field of view and takes the horizontal one from the
+ * screen's shape, which is right for a screen wider than 16:9 (more at the sides) but on a
+ * narrower wide screen, 16:10, drew the 16:9 picture with its sides cut off (ng2recomp #129, the
+ * same here). There the vertical field of view is made taller instead, by as much as keeps the
+ * 16:9 picture's sides: the extra goes above and below. Changed in the view, not in the
+ * projection alone, so that everything reading it (what is in view, the level of detail, effects
+ * placed on the screen) agrees with what is drawn. The game's 4:3 mode is left as it is. */
+/**
+ * sub_0003FA50
+ * Original: 0x0003FA50 - 0x0003FAF7 (167 bytes, 41 insns)
+ * CC: cdecl, 0 params, returns int_or_void
+ * Frame: fpo_leaf
+ */
+static void camera_to_view(void)
+{
+    RECOMP_ENTRY(0x0003FA50u);
+    int _flags = 0; /* fallback flag var */
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+
+loc_0003FA50: ;
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* sub source, before the write */
+    esp = esp - 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0 (32-bit) */
+    if (CMP_L(_fas, _fbs)) goto loc_0003FA6C; /* jl: less (signed <) */
+
+loc_0003FA57: ;
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(2) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 2 (32-bit) */
+    if (CMP_GE(_fas, _fbs)) goto loc_0003FA6C; /* jge: greater or equal (signed >=) */
+
+loc_0003FA5C: ;
+    { int64_t _r = (int64_t)(int32_t)(eax) * (int64_t)(int32_t)(0x910);
+      eax = (uint32_t)_r;
+      _fa = (uint32_t)_r & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); _fb = (_r != (int64_t)(int32_t)_r); } /* imul */
+    SET_LO8(ecx, MEM8(eax + 0x4B4100));
+    _fa = (uint32_t)(LO8(ecx)) & 0xFFu; _fb = (uint32_t)(0) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ecx), 0 (8-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_0003FA72; /* jne: not equal / not zero */
+
+loc_0003FA6C: ;
+    eax = 0; /* xor self */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    esp += 4; return; /* ret */
+
+loc_0003FA72: ;
+    edx = eax + 0x4B3890;
+    SET_LO8(eax, MEM8(eax + 0x4B4102));
+    MEM32(esp + 4) = edx;
+    MEM8(0xDB9C6A) = LO8(eax);
+    MEM32(esp) = 0x977E00;
+    eax = MEM32(esp + 4);
+    ecx = MEM32(esp);
+    xmm0 = XMM_MEM(eax); /* movaps */
+    XMM_STORE(ecx, xmm0); /* movaps */
+    ecx = edx + 0x10;
+    MEM32(esp) = ecx;
+    MEM32(esp + 4) = 0x977E10;
+    eax = MEM32(esp);
+    ecx = MEM32(esp + 4);
+    xmm0 = XMM_MEM(eax); /* movaps */
+    XMM_STORE(ecx, xmm0); /* movaps */
+    xmm0 = XMM_SCALAR(MEMF(edx + 0x2C)); /* movss */
+    eax = MEM32(edx + 0x20);
+    ecx = MEM32(edx + 0x24);
+    MEMF(0x977E28) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(edx + 0x34)); /* movss */
+    MEMF(0x977E2C) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(edx + 0x30)); /* movss */
+    MEM32(0x977E20) = eax;
+    MEM32(0x977E24) = ecx;
+    MEMF(0x977E30) = xmm0.f[0]; /* movss */
+    eax = 1;
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    esp += 4; return; /* ret */
+
+}
+
+void sub_0003FA50(void)
+{
+    camera_to_view();
+    if (eax == 1 && s_screen_wide && s_view_a > 1.34 && s_view_a < 16.0 / 9 - 0.01)
+        MEMF(0x977E30) = (float)(2 * atan(tan(MEMF(0x977E30) * 0.5) * (16.0 / 9) / s_view_a));
 }
