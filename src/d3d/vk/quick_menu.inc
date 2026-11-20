@@ -140,8 +140,8 @@ void VulkanBackend::QuickMenu(Image& dst) {
     /* The Xbox front buffer has non-square display pixels. Match the final
      * display aspect, so bottles, weapons and arrows retain their proportions. */
     int mode = ngb_pc_setting(7);
-    float aspect = mode == 0 ? 4.0f / 3 : mode == 2 ? 16.0f / 10 : mode == 3 ? 64.0f / 27 : mode == 4 ? 32.0f / 9
-                 : 16.0f / 9;
+    float aspect = mode == 0 ? 4.0f / 3 : mode == 2 ? 16.0f / 10 : mode == 3 ? float(ngb_aspect_21_9())
+                 : mode == 4 ? 32.0f / 9 : 16.0f / 9;
     float sx = float(dst.w) / (720 * aspect), sy = float(dst.h) / 720;
     float scale = percent / 100.0f;
     sx *= scale; sy *= scale;
@@ -245,8 +245,8 @@ bool VulkanBackend::LayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& p
 // aspect: *sx undoes that stretch across, *up how much larger than lettered it is drawn (at most 40 pixels tall).
 void VulkanBackend::TextScale(const Image& dst, float* sx, float* up) {
     int mode = ngb_pc_setting(7);
-    float aspect = mode == 0 ? 4.0f / 3 : mode == 2 ? 16.0f / 10 : mode == 3 ? 64.0f / 27 : mode == 4 ? 32.0f / 9
-                 : 16.0f / 9;
+    float aspect = mode == 0 ? 4.0f / 3 : mode == 2 ? 16.0f / 10 : mode == 3 ? float(ngb_aspect_21_9())
+                 : mode == 4 ? 32.0f / 9 : 16.0f / 9;
     *sx = float(dst.w) / (float(dst.h) * aspect);
     ngb_fps_cap(int(dst.h), up);
 }

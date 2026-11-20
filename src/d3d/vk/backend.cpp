@@ -477,6 +477,7 @@ constexpr uint32_t kQuadVertices = 6;
 extern "C" int ngb_pc_setting(int which);
 extern "C" int nv2a_dirty_stamp(const void* host, size_t len, uint64_t* stamp);   // xboxrecomp nv2a_dirty.c
 extern "C" float ngb_hud_shape(void);   // src/pc_menu.c: the menus' and HUD's narrowing
+extern "C" double ngb_aspect_21_9(void);   // src/pc_menu.c: the screen's shape with "21:9" (2:1 to 12:5)
 extern "C" int ngb_2d_stretched(void);
 static bool hud_picture(float x0, float x1, float y0, float y1, float w, float h);   // (below, HudPlace)
 extern "C" [[noreturn]] void ngb_renderer_fatal(const char* detail);  // src/ingame_menu.c  // src/pc_menu.c: the game in its widescreen mode, its 2D as drawn
@@ -4024,12 +4025,15 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 const float small = compact ? 0.8f : 1.0f;
                 // HUD Aspect Corrected (#220, setting 42; NGB_HUD_FIXED=1 too): the game kept in its widescreen mode as
                 // with Stretched, every screen drawn alike -- only the HUD's elements, each about its side or corner, in
-                // their own 4:3 shape (k of the screen's width) and no taller. Play in the 4:3 mode, its screens in the
+                // their own shape (ks, of the screen's width) and no taller. Play in the 4:3 mode, its screens in the
                 // widescreen mode, drew the messages, the letters and Game Over another size for a frame either way (#219)
                 static const bool hud_env = std::getenv("NGB_HUD_FIXED") != nullptr;
                 // (in play only, as Compact: the first frame of a 2D screen, Game Over or a chapter's card, before it is
                 // known as one, is not narrowed where the HUD was -- hud_piece)
                 const bool shaped = (hud_env || ngb_pc_setting(42)) && play3d;
+                // (their own shape is 3:2, not 4:3: the HUD's art was drawn in square pixels on the 720 x 480 screen --
+                // the ninpo orb 21 x 22 there, a circle -- and the console's 4:3 TV narrowed it; 1.125 times k, #266)
+                const float ks = std::min(1.0f, k * 1.125f);
                 if (n && ky < 0.999f && !paused && !spans) {
                     float ax = w / 2, ay = h / 2;
                     if (live && !centred) {
@@ -4041,7 +4045,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     // (what keeps to the bottom -- the "Interact" prompt -- as Stretched draws it: the game draws over it
                     // where it put it, Muramasa's board as Interact is pressed, over the held picture, #219)
                     const bool shape = cornered && !hud_bottom_;
-                    c.ext[0] = shape && shaped ? k * small : shape && small < 1 ? small : 1;
+                    c.ext[0] = shape && shaped ? ks * small : shape && small < 1 ? small : 1;
                     c.ext[1] = shape && (small < 1 || shaped) ? ax : w / 2;
                     c.ext[2] = shape && shaped ? small : ky * (shape ? small : 1);
                     c.ext[3] = ay;
@@ -4059,7 +4063,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                         c.ext[1] = ax;
                         if ((small < 1 || shaped) && ax != w / 2 && !hud_bottom_ && hud_piece()) {
-                            c.ext[0] = (shaped ? k : km) * small;
+                            c.ext[0] = (shaped ? ks : km) * small;
                             c.ext[2] = small;
                             c.ext[3] = ay;
                         }
@@ -4077,7 +4081,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                         hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
                     if (ax != w / 2 && !hud_bottom_ && hud_piece()) {
-                        c.ext[0] = (shaped ? k : 1.0f) * small;
+                        c.ext[0] = (shaped ? ks : 1.0f) * small;
                         c.ext[1] = ax;
                         c.ext[2] = small;
                         c.ext[3] = ay;

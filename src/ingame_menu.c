@@ -67,7 +67,7 @@ static void apply_aspect(NgbSettings *s, bool window)
         nv2a_window_request(s->width, s->height, s->fullscreen);
 }
 
-/* 21:9's shape is the window's (64:27, 43:18 or 12:5, ngb_settings_aspect_ratio): taken again when the window
+/* 21:9's shape is the window's (from a phone's 2:1 to 12:5, ngb_settings_aspect_ratio): taken again when the window
  * changes size -- fullscreen and back, a size from a menu, the display's shape once the window is up (#233).
  * Each frame, from src/pc_menu.c. */
 void ngb_aspect_follow_window(void)

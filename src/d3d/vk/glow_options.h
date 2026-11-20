@@ -69,7 +69,7 @@ inline GlowFootprintValues GlowFootprint() {
     switch (ngb_pc_setting(7)) {
     case 1: result.aspect=16.0/9.0;break;
     case 2: result.aspect=16.0/10.0;break;
-    case 3: result.aspect=64.0/27.0;break;
+    case 3: result.aspect=ngb_aspect_21_9();break;
     case 4: result.aspect=32.0/9.0;break;
     default: break;
     }

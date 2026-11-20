@@ -2161,6 +2161,15 @@ void sub_00220870(void)
     esp += 4; return; /* ret */
 }
 
+/* The screen's shape with "21:9": the window's own, 2:1 (a phone) to 12:5 (ngb_settings_aspect_ratio), as the 3D is
+ * drawn for it; 64:27 before it is known (and for the frame another setting's shape is still there). For the
+ * renderer's drawings in the screen's shape (the quick menu, its letters, the glow, the sparks' strokes). */
+double ngb_aspect_21_9(void)
+{
+    double a = s_view_a;
+    return a > 2.0 - 0.01 && a < 12.0 / 5 + 0.02 ? a : 64.0 / 27;
+}
+
 /* The menus' and HUD's narrowing: the game lays them out for 4:3 and draws
  * them over the 3D whatever the screen's shape, stretched at 16:9. The
  * Direct3D renderer draws its screen-space draws into the back buffer
@@ -2176,7 +2185,9 @@ float ngb_hud_shape(void)
     if (stretch)
         return 1.0f;
     int a = ngb_pc_setting(7);
-    return a == 1 ? 0.75f : a == 2 ? 0.8333333f : a == 3 ? 0.5625f : a == 4 ? 0.375f : 1.0f;
+    if (a == 3)   /* "21:9": the screen's own, 2:1 (a phone) to 12:5 */
+        return (float)(4.0 / 3 / ngb_aspect_21_9());
+    return a == 1 ? 0.75f : a == 2 ? 0.8333333f : a == 4 ? 0.375f : 1.0f;
 }
 
 /* The camera in use copied into the view the frame is drawn with (0x977E00..), its vertical field

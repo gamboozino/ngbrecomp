@@ -5,7 +5,7 @@ inline double SparkAspect() {
     switch (ngb_pc_setting(7)) {
     case 1: return 16.0/9.0;
     case 2: return 16.0/10.0;
-    case 3: return 64.0/27.0;
+    case 3: return ngb_aspect_21_9();
     case 4: return 32.0/9.0;
     default: return 4.0/3.0;
     }
