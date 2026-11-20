@@ -736,9 +736,11 @@ private:
         uint64_t key3;                             // the key without the target's slot
         uint64_t key4;                             // its look alone: shaders, textures, target (another mesh of it)
         uint64_t key5;                             // the key without the textures (a texture animated by turns)
+        uint64_t key6;                             // ... nor the vertex buffer (one look drawn from several)
         const std::bitset<192>* reads;             // a vertex shader's: the constants its program reads (Reads)
         uint32_t vb, fvf;                          // stream 0's buffer, the vertex format
         bool copied;                               // its vertices kept (cur_vb_)
+        bool divides;                              // a vertex shader's program divides by a vertex's value (Divides)
         uint32_t dbg[18];                          // (NGB_INTERP_LOG) what its key was made of
         uint64_t vhash;   // samples of its vertices, as drawn
     };
@@ -923,6 +925,25 @@ private:
         if (reads_.size() >= 4096) return nullptr;   // (never in play, a few dozen programs: then all, as before)
         return &reads_.emplace(h, m).first->second;
     }
+    // Whether a vertex shader's program takes a reciprocal (ILU RCP) of its own: it divides by a value of each vertex.
+    // Zarkhan Falls' water does, for the screen texture its refraction samples: each vertex's place on the screen,
+    // divided by its w. Its constants part of the way (two cameras' matrices number by number) can take the w of a
+    // vertex beside the camera, behind it in one frame and in front in the next, through 0 -- its coordinates
+    // thousands of screens wide, and the picture between showed the water as streaks and a flat patch (#259). Of the
+    // game's programs only such effects use RCP (the position's own divide is the hardware's, RCC).
+    std::unordered_map<uint64_t, bool> divides_;
+    bool Divides(const VertexShader& vs, uint64_t h) {
+        auto it = divides_.find(h);
+        if (it != divides_.end()) return it->second;
+        bool rcp = false;
+        for (size_t i = 0; i + 4 <= vs.program.size() && !rcp; i += 4)
+            rcp = ((vs.program[i + 1] >> 25) & 7) == 2;
+        if (divides_.size() < 4096) divides_.emplace(h, rcp);
+        if (rcp && interp_log_)
+            std::fprintf(stderr, "[INTERP] program %016llx divides by a vertex's value: its constants as now\n",
+                         (unsigned long long)h);
+        return rcp;
+    }
     // How far apart two draws of one kind are: what tells several of a kind apart (six pots of one mesh, three
     // enemies of one model) when each is paired with the last frame's nearest. Only by what the draw itself uses:
     // a vertex shader's constants its program reads, a fixed-function draw's worlds, as many as it blends.
@@ -1094,6 +1115,7 @@ private:
         d.key3 = DrawKey(state_, prim, start, count, sh.both);
         d.key4 = (LookKey(state_, prim, sh.both) ^ (slot + 1)) * 0x100000001b3ull;
         d.key5 = (DrawKey(state_, prim, start, count, sh.both, true, false) ^ (slot + 1)) * 0x100000001b3ull;
+        d.key6 = (DrawKey(state_, prim, start, count, sh.both, false, false) ^ (slot + 1)) * 0x100000001b3ull;
         d.vb = state_.streams[0].vb;
         d.fvf = state_.vs_handle;
         d.copied = KeepVertices(start, count, idx);
@@ -1111,6 +1133,7 @@ private:
                             : (d.key3 ^ (slot + 1)) * 0x100000001b3ull;
         d.vs = (state_.vs_handle & 1) != 0;
         d.reads = d.vs && state_.vs ? Reads(*state_.vs, sh.vs) : nullptr;
+        d.divides = d.vs && state_.vs && Divides(*state_.vs, sh.vs);
         for (int i = 0; i < 6; i++) d.m[size_t(i)] = state_.transforms[kLerpMatrices[i]];
         d.c = state_.vsc;
         for (size_t t = 0; t < 4; t++) d.tm[t] = state_.transforms[16 + t];
@@ -1287,6 +1310,90 @@ private:
                 used[size_t(x)] = used[cs.size() + size_t(y)] = 1;
                 match_[size_t(cs[size_t(x)])] = ps[size_t(y)];
                 matched++;
+            }
+        }
+        // Several of one look whose textures are flip-books at their own pages (the flames on the imps' heads in
+        // Chapter 15: layers of one quad, each from its own buffer, any of them on any imp from frame to frame):
+        // by the whole key one imp's flame now was paired with another's a frame ago, at the page and layer this
+        // one has now, and drawn half the way between the two, a flame in the air between them (#259). Where draws
+        // differ only by texture or buffer (more than one key to one key6), the pairs are made again among them all
+        // by the nearest.
+        if (!(dbg_ & 2048) && !(dbg_ & 64)) {   // (64: whole keys without the slot, the groups not closed)
+            std::unordered_map<uint64_t, std::vector<int32_t>> prev6, cur6;
+            for (int32_t j = 0; j < int32_t(prev_draws_.size()); j++) prev6[prev_draws_[size_t(j)].key6].push_back(j);
+            for (int32_t i = 0; i < int32_t(cur_draws_.size()); i++) cur6[cur_draws_[size_t(i)].key6].push_back(i);
+            for (auto& [k6, cs] : cur6) {
+                auto pit = prev6.find(k6);
+                if (pit == prev6.end()) continue;
+                const std::vector<int32_t>& ps = pit->second;
+                if (cs.size() + ps.size() < 3 || cs.size() * ps.size() > 1024) continue;
+                bool pages = false;   // (more than one key among them)
+                const uint64_t k0 = cur_draws_[size_t(cs[0])].key;
+                for (int32_t i : cs) pages |= cur_draws_[size_t(i)].key != k0;
+                for (int32_t j : ps) pages |= prev_draws_[size_t(j)].key != k0;
+                if (!pages) continue;
+                {   // (out of the frame's budget, as the whole key's groups are: only for a group worked on, or one of
+                    // many pots, its key6 group its key's, was paid for twice and the passes after went short)
+                    const int64_t cost = int64_t(cs.size() * ps.size()) * (cur_draws_[size_t(cs[0])].vs ? 768 : 64);
+                    if (cost > budget) continue;
+                    budget -= cost;
+                }
+                // (a pair a pass before made by the whole key is in here, both ends of it: the group is closed)
+                std::vector<int32_t> was(cs.size());
+                for (size_t x = 0; x < cs.size(); x++) {
+                    was[x] = match_[size_t(cs[x])];
+                    if (was[x] >= 0) match_[size_t(cs[x])] = -1, matched--;
+                }
+                pairs.clear();
+                for (size_t x = 0; x < cs.size(); x++)
+                    for (size_t y = 0; y < ps.size(); y++)
+                        pairs.emplace_back(distance(cs[x], ps[y]) + (x == y ? 0.0f : 1e-6f), int32_t(x), int32_t(y));
+                std::sort(pairs.begin(), pairs.end());
+                used.assign(cs.size() + ps.size(), 0);
+                for (auto& [d, x, y] : pairs) {
+                    if (used[size_t(x)] || used[cs.size() + size_t(y)]) continue;
+                    const InterpDraw& c = cur_draws_[size_t(cs[size_t(x)])];
+                    const InterpDraw& p = prev_draws_[size_t(ps[size_t(y)])];
+                    if (c.key != p.key && !StandAlike(c, p)) continue;
+                    if (c.copied && p.copied && c.vb != p.vb) continue;   // (a CPU-moved mesh's: the key2 pass's)
+                    used[size_t(x)] = used[cs.size() + size_t(y)] = 1;
+                    match_[size_t(cs[size_t(x)])] = ps[size_t(y)];
+                    how_[size_t(cs[size_t(x)])] = c.key == p.key ? 0 : 5;
+                    matched++;
+                }
+                // ... only where a pair by the whole key was such a mix-up: one of them a good deal farther than
+                // the one it has now. Else (all of them still where they were: a draw of another texture new in
+                // this frame as one of a third went) as they were, the new one not lerped from the one gone.
+                bool mixed = false;
+                for (size_t x = 0; x < cs.size() && !mixed; x++) {
+                    const int32_t now = match_[size_t(cs[x])];
+                    if (was[x] < 0 || now < 0 || now == was[x]) continue;
+                    const float before = distance(cs[x], was[x]), after = distance(cs[x], now);
+                    mixed = before > 1e-3f && after < before * 0.25f;
+                }
+                // ... and a draw new in this frame (no pair before) keeps its new one only when it is plainly its own:
+                // nearer than a quarter of the way to any other of the group now not on the same spot, and drawn
+                // by a fixed-function draw (a vertex shader one's constants say nothing of which mesh it is)
+                if (mixed)
+                    for (size_t x = 0; x < cs.size(); x++) {
+                        const int32_t now = match_[size_t(cs[x])];
+                        if (was[x] >= 0 || now < 0) continue;
+                        const InterpDraw& c = cur_draws_[size_t(cs[x])];
+                        bool own = !c.vs;
+                        const float d = distance(cs[x], now);
+                        for (size_t z = 0; z < cs.size() && own; z++) {
+                            if (z == x) continue;
+                            const float n = Distance(c, cur_draws_[size_t(cs[z])]);
+                            if (n > 1e-3f && d * 4 >= n) own = false;
+                        }
+                        if (!own) match_[size_t(cs[x])] = -1, matched--;
+                    }
+                if (!mixed)
+                    for (size_t x = 0; x < cs.size(); x++) {
+                        if (match_[size_t(cs[x])] >= 0) matched--;
+                        match_[size_t(cs[x])] = was[x], how_[size_t(cs[x])] = 0;
+                        if (was[x] >= 0) matched++;
+                    }
             }
         }
         // A target drawn into in this frame and not the last (or the other way) moved every later one's slot: the
@@ -1649,13 +1756,15 @@ private:
         // NGB_INTERP_DBG (tests): 1 vertex shader constants as now, 2 the view number by number, 4 worlds number
         // by number, 8 fixed-function draws' worlds as now, 16 texture matrices as now, 32 worlds always turned
         // (128 blended draws' worlds as now, 256 the others'; 512 CPU-moved meshes as now, 1024 no pairs by
-        // the key without the textures)
+        // the key without the textures, 2048 no flip-book regrouping, 4096 the texture factor as now,
+        // 8192 a dividing program's constants part of the way too)
         const int matrices = (snap_[i] || (dbg_ & 8) || ((dbg_ & 128) && now.vblend) || ((dbg_ & 256) && !now.vblend)) ? 2 : 6;
         for (int k = 0; k < matrices; k++)
             LerpMatrix(was.m[size_t(k)], now.m[size_t(k)], t,
                        k == 0 ? ((dbg_ & 2) ? 0 : 2) : k == 1 ? 0 : (dbg_ & 4) ? 0 : (dbg_ & 32) ? 3 : 1,
                        state_.transforms[kLerpMatrices[k]]);
-        if (now.vs && !(dbg_ & 1))
+        // (a program dividing by a vertex's value: its constants as now, Divides)
+        if (now.vs && !(dbg_ & 1) && (!now.divides || (dbg_ & 8192)))
             for (size_t r = 0; r < 192; r++)
                 for (size_t e = 0; e < 4; e++) state_.vsc[r][e] = lerp(was.c[r][e], now.c[r][e]);
         // texture matrices. Only its place moved (a scroll, or a sprite sheet's next cell): the short way across a
@@ -1687,7 +1796,13 @@ private:
             if (!scroll) continue;
             for (int k = 0; k < 4; k++) o[at[k]] = now.tm[m][at[k]] - d[k] * (1.0f - t);
         }
-        if (was.tfactor != now.tfactor && !snap_[i]) {
+        // The texture factor part of the way, for a fade (a puff of mist); a jump of over a quarter in a frame as now:
+        // a save statue's words brighten step by step to full, then the factor is 0x0F for one frame (drawn as
+        // bright: the game's flash), and halfway between the two they were dim in that picture alone (#259)
+        bool tf_step = was.tfactor != now.tfactor && !snap_[i] && !(dbg_ & 4096);
+        for (int sh = 0; sh < 32 && tf_step; sh += 8)
+            if (std::abs(int((was.tfactor >> sh) & 0xFF) - int((now.tfactor >> sh) & 0xFF)) > 64) tf_step = false;
+        if (tf_step) {
             uint32_t v = 0;
             for (int sh = 0; sh < 32; sh += 8) {
                 float a0 = float((was.tfactor >> sh) & 0xFF), b0 = float((now.tfactor >> sh) & 0xFF);
