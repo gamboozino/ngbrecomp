@@ -181,10 +181,11 @@ of the pause menu. Changes apply at once and are saved.
   thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC), Frame
   Interpolation (experimental: pictures made between the game's 60 frames a second, for displays of 120 Hz
   and up; Full Rate, Half Rate or 2x)
-- **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9, 32:9), window size, windowed / fullscreen /
-  borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, HUD Style
-  (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the game's widescreen
-  mode, or Corrected: the HUD in its own 4:3 shape on a wide screen), skip the warnings and intro movies
+- **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9 which also fits phones from 18:9, 32:9), window size,
+  windowed / fullscreen / borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on
+  or off, HUD Style (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the
+  game's widescreen mode, or Corrected: the HUD in the shape it was drawn on a wide screen), skip the warnings
+  and intro movies
 - **Sound**: Positional Audio (3D sounds placed left and right: Mixed, the default, half the sound chip's
   filters and half panned by direction, the easiest to place; Clear, by level only; Console, through the sound
   chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo
