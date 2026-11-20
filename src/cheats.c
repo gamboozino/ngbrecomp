@@ -1332,8 +1332,10 @@ static void pos_tick(void)
     int ok = fscanf(f, "%f %f %f", &x, &y, &z) == 3;
     fclose(f);
     remove(tp);
-    if (!ok)
+    if (!ok) {   /* anything else ("?"): only where he is */
+        fprintf(stderr, "[POS] at %.3f %.3f %.3f\n", MEMF(0x4B5710), MEMF(0x4B5714), MEMF(0x4B5718));
         return;
+    }
     float ox = MEMF(0x4B5710), oy = MEMF(0x4B5714), oz = MEMF(0x4B5718);
     int n = 0;
     for (uint32_t a = 0x4B5000; a < 0x4B8000; a += 16)
