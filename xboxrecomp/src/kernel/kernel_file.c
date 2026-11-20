@@ -746,9 +746,14 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
         }
     }
 
-    /* FATX enumeration never exposes the host's dot directories. */
+    /* FATX enumeration never exposes the host's dot directories. Nor can a console's folder hold
+     * a file of 2 GiB or more as a title counts sizes: one in the game's folder (the disc image
+     * it was installed from, left or put there) made Ninja Gaiden Black's file layer fail its
+     * scan of the folder and the game wait on it for good, a black window from the start. */
     while (!wcscmp(ctx->find_data.cFileName, L".") ||
-           !wcscmp(ctx->find_data.cFileName, L"..")) {
+           !wcscmp(ctx->find_data.cFileName, L"..") ||
+           (!(ctx->find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            (ctx->find_data.nFileSizeHigh || ctx->find_data.nFileSizeLow >= 0x80000000u))) {
         if (!FindNextFileW(ctx->find_handle, &ctx->find_data)) {
             FindClose(ctx->find_handle);
             ctx->find_handle = NULL;
@@ -1354,6 +1359,7 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
     struct dirent* de;
     const char* dpath = w32_handle_path(FileHandle);
     struct stat st;
+    char full[4096];   /* (a host path: longer than MAX_PATH in a deep folder, then never cut short) */
     for (;;) {
         de = readdir(ctx->dir);
         if (!de) {
@@ -1366,12 +1372,15 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
         }
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
             continue;
-        if (fnmatch(ctx->pattern, de->d_name, FNM_CASEFOLD) == 0)
-            break;
+        if (fnmatch(ctx->pattern, de->d_name, FNM_CASEFOLD) != 0)
+            continue;
+        /* (a file of 2 GiB or more is left out: see the Windows side) */
+        snprintf(full, sizeof(full), "%s/%s", dpath ? dpath : ".", de->d_name);
+        if (stat(full, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0x80000000LL)
+            continue;
+        break;
     }
 
-    char full[MAX_PATH];
-    snprintf(full, sizeof(full), "%s/%s", dpath ? dpath : ".", de->d_name);
     {
         char mod[MAX_PATH];   /* a mod's size in place of the file's (CRI sizes a file this way) */
         if (stat(xbox_mod_path(full, mod, MAX_PATH) ? mod : full, &st) != 0)
