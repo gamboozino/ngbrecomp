@@ -251,8 +251,9 @@ weapon Black gives in the bag, or raises it, at its highest level (a weapon's co
 and Kitetsu are one item a level, 0x12B/0x133/0x134 and 0x182/0x0CC/0x183, and a lower one held
 becomes the top one), with a full stack of what it fires once a game is loaded: the Strongbow, the
 bows for explosive arrows (0x0E2) and APFSDS cores (0x029), the Spear Gun, both shuriken, incendiary
-shuriken and smoke bombs. The original's Bow (0x08D) and Plasma Saber (0x0CE) are left out, as
-Black replaces them with the Strongbow and the Mk.II. Turned off, it takes them back: what the player had
+shuriken and smoke bombs, and the Plasma Saber (0x0CE), otherwise only Ninja of the Future's (#268). Level 1
+gives each weapon not held at its first level instead, the Wooden Sword (0x0CB) and the original's Bow (0x08D)
+in place of the Unlabored Flawlessness and the Strongbow. Turned off, it takes them back: what the player had
 of each before is kept, with what the game gives meanwhile (sub_00154300: a Lunar picked up goes into
 the cheat's while it is on), and put back -- a weapon held is put back once Ryu holds another, nothing
 under the pause menu. The slots it writes carry a mark in their fourth byte (the game leaves it alone and

@@ -210,7 +210,7 @@ of the pause menu. Changes apply at once and are saved.
   hit kill (any hit that hurts an enemy or a boss kills it).
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
   mission), Arcade Ninja Gaiden and Movie Theater without earning them (saved); All Weapons (every melee and
-  projectile weapon at its highest level), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,
+  projectile weapon at Level 1 or at its highest level, the Plasma Saber in any costume), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,
   Counter Attack and Guillotine Throw technique scrolls; the story's own can still be picked up while it is on),
   for the session: turned off, each takes back what it gave and puts back your own pickups; a save made while one
   is on keeps what it gave
