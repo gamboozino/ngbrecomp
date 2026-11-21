@@ -330,13 +330,32 @@ static uint64_t mono_ms(void)
 }
 
 static volatile uint64_t s_tab_seen;      /* last frame the tab was shown */
+static volatile uint32_t s_tab_seen_frame = (uint32_t)-2;   /* and the game's frame count then (not shown at boot) */
+static volatile uint32_t s_game_frames;   /* the frames the game drew (Swap) */
 static volatile int s_tab_focus;          /* its page has the pad */
 static volatile int s_tab_keys[16];
 static volatile unsigned s_tab_head, s_tab_tail;
 
+/* Each frame the game draws (Swap, src/cheats.c's ngb_frame_tick) */
+void ngb_tab_game_frame(void)
+{
+    __atomic_add_fetch(&s_game_frames, 1, __ATOMIC_RELEASE);
+}
+
+static void tab_mark(uint64_t now)
+{
+    s_tab_seen_frame = __atomic_load_n(&s_game_frames, __ATOMIC_ACQUIRE);
+    s_tab_seen = now;
+}
+
+/* Gone only after 250 ms AND a whole game frame without the tab: on a slow
+ * phone the renderer presented a frame over 250 ms late (the game waiting on
+ * it, the tab marked before), and the page let go of the pad while still shown,
+ * a "back" nobody pressed (#261). */
 static bool tab_shown(void)
 {
-    return mono_ms() - s_tab_seen < 250;
+    return mono_ms() - s_tab_seen < 250 ||
+           __atomic_load_n(&s_game_frames, __ATOMIC_ACQUIRE) - s_tab_seen_frame < 2;
 }
 
 static void tab_push(int k)
@@ -397,7 +416,7 @@ int ngb_pause_tab_key(int *focus)
     {
         extern int ngb_bind_capturing(void);   /* src/bindings.c: the page waits for a key to bind */
         if (ngb_bind_capturing() && *focus) {
-            s_tab_seen = now;
+            tab_mark(now);
             s_tab_prev = pad_bits();           /* what is pressed meanwhile is the binding's */
             while (tab_pop())
                 ;
@@ -406,12 +425,12 @@ int ngb_pause_tab_key(int *focus)
     }
     if (*focus && !s_tab_focus)            /* given back meanwhile */
         *focus = 0;
-    if (now - s_tab_seen > 250) {          /* just shown: what is held does nothing */
+    if (!tab_shown()) {                    /* just shown: what is held does nothing */
         s_tab_prev = pad_bits();
         while (tab_pop())
             ;
     }
-    s_tab_seen = now;
+    tab_mark(now);
     uint32_t b = pad_bits(), pressed = b & ~s_tab_prev;
     if (xbox_InputKeyboardActive())
         pressed &= ~XBOX_GAMEPAD_START;    /* Enter's: the keys come as keys (nv2a_window_event_hook) */
@@ -471,6 +490,15 @@ int ngb_pause_tab_key(int *focus)
         s_wait_release = true;             /* the game gets the pad once let go */
     }
     if (pressed & (3u << 18)) {            /* L or R: to the next tab, as the game's pages do */
+        if (getenv("NGB_TAB_LOG")) {       /* (#261: the triggers' values, a cheap pad's may drift) */
+            XBOX_INPUT_STATE st;
+            int lt = -1, rt = -1;
+            if (xbox_InputGetState(0, &st) == 0) {
+                lt = st.Gamepad.bAnalogButtons[6];
+                rt = st.Gamepad.bAnalogButtons[7];
+            }
+            fprintf(stderr, "[TAB] let go: L/R pad %08X pressed %08X (triggers %d %d)\n", b, pressed, lt, rt);
+        }
         *focus = s_tab_focus = 0;
         s_wait_release = false;
         usb_gamepad_block = 0;             /* now: the game sees the press */
@@ -486,7 +514,7 @@ void ngb_tab_take_pad(void)
     s_tab_focus = 1;
     usb_gamepad_block = 1;
     s_wait_release = false;
-    s_tab_seen = mono_ms();
+    tab_mark(mono_ms());
     s_tab_prev = pad_bits();               /* what is held now does nothing */
 }
 
@@ -1239,6 +1267,9 @@ static bool game_mouse(const SDL_Event *ev)
             ngb_pause_tab_page() != 2) {
             game_point(ev->button.windowID, ev->button.x, ev->button.y, &gx, &gy);
             if (tab_item_at(gx, gy)) {            /* a tab along the top: the page lets go, hover_tick goes there */
+                if (s_tab_focus && getenv("NGB_TAB_LOG"))
+                    fprintf(stderr, "[TAB] let go: click on a tab at %.0f,%.0f (touch %d)\n", gx, gy,
+                            ev->button.which == SDL_TOUCH_MOUSEID);
                 if (s_tab_focus) {
                     s_tab_focus = 0;
                     s_wait_release = false;
@@ -1273,6 +1304,8 @@ static bool game_mouse(const SDL_Event *ev)
                 return true;
             }
             if (ev->button.button == SDL_BUTTON_RIGHT && s_tab_focus) {
+                if (getenv("NGB_TAB_LOG"))
+                    fprintf(stderr, "[TAB] back: right click (touch %d)\n", ev->button.which == SDL_TOUCH_MOUSEID);
                 tab_push(KEY_BACK);
                 return true;
             }
