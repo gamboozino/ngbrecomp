@@ -133,7 +133,7 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_INTERP   0x20208            /* Frame Interpolation (src/d3d/gpu/threaded.cpp, #226) */
 #define D_INTERP   0x20209
 #define T_INTERP0  0x2020A            /* + 0..3: Off, Full Rate, Half Rate, 2x */
-#define T_GLOW0    0x2020E            /* + 0..3: Bloom's Original, Reduced, Corrected, Off */
+#define T_GLOW0    0x2020E            /* + 0..3: Bloom's (Original, Reduced: no longer offered), On, Off */
 #define T_ALLWEAP0 0x20212            /* + 0..2: All Weapons' Off, Level 1, Level 3 (#268) */
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
@@ -257,7 +257,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { D_INTERP, "Experimental. Pictures between the game's frames, on a 120 Hz or faster display." },
     { T_INTERP0 + 0, "Off" }, { T_INTERP0 + 1, "Full Rate" }, { T_INTERP0 + 2, "Half Rate" }, { T_INTERP0 + 3, "2x" },
     { T_ALLWEAP0 + 0, "Off" }, { T_ALLWEAP0 + 1, "Level 1" }, { T_ALLWEAP0 + 2, "Level 3" },
-    { T_GLOW0 + 0, "Original" }, { T_GLOW0 + 1, "Reduced" }, { T_GLOW0 + 2, "Corrected" }, { T_GLOW0 + 3, "Off" },
+    { T_GLOW0 + 0, "Original" }, { T_GLOW0 + 1, "Reduced" }, { T_GLOW0 + 2, "On" }, { T_GLOW0 + 3, "Off" },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
     { D_AUDIOOUT, "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game." },
@@ -291,7 +291,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_MSAA,    "Anti-Aliasing (MSAA)" },
     { D_MSAA,    "Smooths the edges of the 3D; 2x to 8x samples a pixel." },
     { T_GLOW,    "Bloom" },
-    { D_GLOW,    "Original: the console's. Corrected: the same bloom, steady and even at any resolution. Off: none." },
+    { D_GLOW,    "The game's glow around bright things, steady and even at any resolution." },
     { T_LOADDETAIL, "Lower Detail Under Load" },
     { D_LOADDETAIL, "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker." },
     { T_RTHREAD, "Multithreaded Renderer" },

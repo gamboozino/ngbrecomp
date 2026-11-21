@@ -100,7 +100,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * 11-13 the cheats (src/cheats.c: infinite health, ninpo, essence), 14 every
  * difficulty from the start (src/cheats.c, saved), 15 the golden scarabs
  * cheat, 16 every costume (saved), 17 an extra costume (0-3, saved), 18 Bloom
- * (0 Original, 2 Corrected, 3 Off: src/d3d/vk/glow_options.h), 19 quick-menu pause, 20 quick-menu scale (100..0
+ * (2 On, 3 Off: src/d3d/vk/glow_options.h), 19 quick-menu pause, 20 quick-menu scale (100..0
  * percent, in tens), 21 infinite items, 22 infinite projectiles (cheats, src/cheats.c), 23 positional
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
@@ -126,14 +126,11 @@ int ngb_positional_step(int v, int step)
     return order[((i < 4 ? i : 0) + (step > 0 ? 1 : 3)) % 4];
 }
 
-/* Bloom's next value: Original, Corrected, Off (0, 2, 3; 1 was Reduced, now only by NGB_BLOOM=1, for comparing) */
+/* Bloom's next value: On, Off (2, 3; 0 Original and 1 Reduced only by NGB_BLOOM, for comparing) */
 int ngb_glow_step(int v, int step)
 {
-    static const int order[3] = { 0, 2, 3 };
-    int i = 0;
-    while (i < 3 && order[i] != v)
-        i++;
-    return order[((i < 3 ? i : 0) + (step > 0 ? 1 : 2)) % 3];
+    (void)step;
+    return v == 3 ? 2 : 3;
 }
 
 int ngb_pc_setting(int which)
@@ -222,7 +219,7 @@ void ngb_pc_set_setting(int which, int value)
     case 5: s_running.show_fps = value; nv2a_present_set_show_fps(value); break;
     case 8: s_running.skip_intro = value; break;        /* both at the next start */
     case 9: s_running.show_launcher = value; break;
-    case 18: s_running.smooth_glow = value == 1 ? 2 : value < 0 ? 0 : value > 3 ? 3 : value; break;
+    case 18: s_running.smooth_glow = value == 3 ? 3 : 2; break;
     case 23: s_running.positional_audio = value < 0 ? 0 : value > 3 ? 3 : value; ngb_audio_set_positional(s_running.positional_audio); break;
     case 24: s_running.show_hud = !!value; break;
     case 41: s_running.hud_style = !!value; break;

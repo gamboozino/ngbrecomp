@@ -147,6 +147,7 @@ void ngb_settings_load(NgbSettings *s)
     s->positional_audio = 3;  /* mixed: half the filters, half a pan by direction -- easiest to place (#126); clear
                                * (2) was the default from 0.9.40 to 0.9.51 */
     s->show_hud = 1;
+    s->smooth_glow = 2;   /* Bloom On (#270): the game's bloom, steady at any render scale */
     s->talisman = 1;
     s->quick_menu_scale = 0;    /* the quick menu off unless chosen (Gameplay) */
     s->skip_intro = 0;
@@ -221,10 +222,10 @@ void ngb_settings_load(NgbSettings *s)
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
             s->positional_audio = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
-        } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: its softer glow on is Corrected now */
-            s->smooth_glow = atoi(val) != 0 ? 2 : 0;
-        } else if (!strcmp(key, "bloom")) {   /* 0 Original, 2 Corrected, 3 Off (1 was Reduced: Corrected now) */
-            s->smooth_glow = atoi(val) == 1 ? 2 : atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);
+        } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: On either way now (#270) */
+            s->smooth_glow = 2;
+        } else if (!strcmp(key, "bloom")) {   /* 2 On, 3 Off; 0 Original and 1 Reduced are On now (#270) */
+            s->smooth_glow = atoi(val) == 3 ? 3 : 2;
         } else if (!strcmp(key, "detail_under_load")) {
             s->detail_under_load = atoi(val) != 0;
         } else if (!strcmp(key, "defaults")) {
@@ -299,7 +300,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "unlock_movie_theater = %d\n", s->unlock[2]);
     fprintf(f, "movie_ratio = %s\n", s->movie_43 ? "4:3" : "16:9");
     fprintf(f, "shadow_resolution = %d\n", s->shadow_scale);
-    fprintf(f, "bloom = %d\n", s->smooth_glow);   /* 0 Original, 2 Corrected, 3 Off */
+    fprintf(f, "bloom = %d\n", s->smooth_glow);   /* 2 On, 3 Off */
     fprintf(f, "detail_under_load = %d\n", s->detail_under_load);
     fprintf(f, "render_thread = %d\n", s->render_thread);
     fprintf(f, "intercept = %d\n", s->intercept);

@@ -116,7 +116,7 @@ static const char *const s_help[S_COUNT] = {
     "All 50: Muramasa gives every reward. For this session only.",
     "Every costume at the Costume Selection, and three it never offers.",
     "Costumes in the game it never offers. From the next area.",
-    "Original: the console's. Corrected: the same bloom, steady and even at any resolution. Off: none.",
+    "The game's glow around bright things, steady and even at any resolution.",
     "The game pauses while the quick menu is open (once Ryu's action ends).",
     "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size.",
     "Healing items, talismans and jewels are not used up. For this session only.",
@@ -238,7 +238,7 @@ static void value_text(int row, char *out, size_t n)
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
     case S_INTERCEPT: snprintf(out, n, "%s", v == 2 ? "Hurricane" : v ? "Black" : "Off"); break;
     case S_HUDSTYLE: snprintf(out, n, "%s", v ? "Compact" : "Original"); break;
-    case S_GLOW: snprintf(out, n, "%s", v == 3 ? "Off" : v ? "Corrected" : "Original"); break;
+    case S_GLOW: snprintf(out, n, "%s", v == 3 ? "Off" : "On"); break;
     case S_INTERP: snprintf(out, n, "%s", v == 3 ? "2x" : v == 2 ? "Half Rate" : v ? "Full Rate" : "Off"); break;
     case S_HUDASPECT: snprintf(out, n, "%s", v ? "Corrected" : "Stretched"); break;
     case S_ALLWEAP: snprintf(out, n, "%s", v == 2 ? "Level 3" : v ? "Level 1" : "Off"); break;
