@@ -1191,6 +1191,8 @@ static void costume_swords(void)
 
 void sub_002EC9A0(void)
 {
+    extern void ngb_cheats_area_started(void);   /* src/cheats.c: All Weapons waits for it (#268) */
     area_start_items();
     costume_swords();
+    ngb_cheats_area_started();
 }

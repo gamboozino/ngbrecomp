@@ -1160,8 +1160,10 @@ static void scrolls_carry(void)
 /* Not before the player starts playing (#268): the attract demo is play too, Ryu with health, and the cheat put
  * everything in the demo's bag -- its record (and the ammunition, given once) went on into the New Game after it, which
  * then had no incendiary shuriken nor smoke bombs and the arrows at 0. Idle from the start and whenever the main menu
- * shows; a fresh record when New Game, Load Game or Missions is chosen (src/main_menu.c). */
-static int s_weapons_idle = 1, s_weapons_fresh;
+ * shows; a fresh record when New Game, Load Game or Missions is chosen (src/main_menu.c), from the first area start
+ * after it (sub_002EC9A0, src/costume_menu.c): a New Game makes its bag anew before that, and a record begun earlier
+ * (on a fast PC, 3 s after the menu, still in the bag the demo left) had its ammunition wiped with it, given once. */
+static int s_weapons_idle = 1, s_weapons_fresh, s_area_started;
 static uint64_t s_chosen_ms, s_menu_ms;
 static uint64_t mono_ms(void)
 {
@@ -1179,7 +1181,13 @@ void ngb_cheats_play_chosen(void)
 {
     s_weapons_idle = 0;
     s_weapons_fresh = 1;
+    s_area_started = 0;
     s_chosen_ms = mono_ms();
+}
+
+void ngb_cheats_area_started(void)   /* src/costume_menu.c: each area start (sub_002EC9A0) */
+{
+    s_area_started = 1;
 }
 
 static void weapons_tick(void)
@@ -1189,7 +1197,7 @@ static void weapons_tick(void)
     /* (the record starts once the menu is gone -- its fade-out, and the bag of the game before still in memory -- a
      * fresh one, after the choice) */
     if (s_weapons_fresh) {
-        if (mono_ms() - s_menu_ms < 3000)
+        if (!s_area_started || mono_ms() - s_menu_ms < 3000)
             return;
         memset(s_had, 0, sizeof s_had);
         s_weapons_fresh = 0;
