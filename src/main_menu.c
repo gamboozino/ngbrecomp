@@ -168,6 +168,10 @@ void sub_0017A010(void)
             MEM8(list + 8 * i + 4) = MEM8(list + 8 * i + 5) = 1;
     else if (n == 8)
         unlocks_tick(list);
+    if (n == 8) {
+        extern void ngb_cheats_menu_shown(void);               /* src/cheats.c: All Weapons waits (#268) */
+        ngb_cheats_menu_shown();
+    }
     if (n == 8 && !ENV_ONCE("NGB_KEEP_RANKING")) {
         MEM8(list + 8 * 3 + 4) = MEM8(list + 8 * 3 + 5) = 1;   /* "RECOMP SETTINGS": shown and chosen */
         MEM8(list + 8 * 6 + 4) = MEM8(list + 8 * 6 + 5) = 1;   /* OPTIONS, in COMING ATTRACTIONS' place */
@@ -1387,6 +1391,10 @@ void sub_0017B010(void)
 {
     if (getenv("NGB_MENU_LOG"))
         fprintf(stderr, "[MAINMENU] chosen: entry %u id %u\n", MEM32(esi + 0x94), MEM32(esi + 0x90));
+    if (esi == 0xC075C0 && MEM32(esi + 0x94) <= 2) {    /* New Game, Load Game, Missions: play (src/cheats.c, #268) */
+        extern void ngb_cheats_play_chosen(void);
+        ngb_cheats_play_chosen();
+    }
     if (esi == 0xC075C0 && MEM32(esi + 0x94) == 3 && !getenv("NGB_KEEP_RANKING")) {
         s_back_to = 3;
         ngb_recomp_menu_enter();

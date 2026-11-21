@@ -106,8 +106,8 @@ void ngb_cheat_set(int which, int on)
                                                 "all armlets", "all technique scrolls", "one hit kill" };
     if (which < 0 || which >= N_CHEATS)
         return;
-    s_cheat[which] = !!on;
-    fprintf(stderr, "[CHEAT] %s %s\n", name[which], on ? "on" : "off");
+    s_cheat[which] = which == 6 ? (on < 0 ? 0 : on > 2 ? 2 : on) : !!on;   /* All Weapons: 1 Level 1, 2 Level 3 */
+    fprintf(stderr, "[CHEAT] %s %s\n", name[which], !s_cheat[which] ? "off" : which == 6 ? (s_cheat[6] == 1 ? "level 1" : "level 3") : "on");
 }
 
 /* A cheat changed the game's state: its checksums taken anew, not compared (see above). */
@@ -1152,10 +1152,43 @@ static void scrolls_carry(void)
     }
 }
 
+/* Not before the player starts playing (#268): the attract demo is play too, Ryu with health, and the cheat put
+ * everything in the demo's bag -- its record (and the ammunition, given once) went on into the New Game after it, which
+ * then had no incendiary shuriken nor smoke bombs and the arrows at 0. Idle from the start and whenever the main menu
+ * shows; a fresh record when New Game, Load Game or Missions is chosen (src/main_menu.c). */
+static int s_weapons_idle = 1, s_weapons_fresh;
+static uint64_t s_chosen_ms, s_menu_ms;
+static uint64_t mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+void ngb_cheats_menu_shown(void)
+{
+    s_menu_ms = mono_ms();
+    if (!s_chosen_ms || mono_ms() - s_chosen_ms > 10000)   /* (not the menu fading out after the choice) */
+        s_weapons_idle = 1;
+}
+void ngb_cheats_play_chosen(void)
+{
+    s_weapons_idle = 0;
+    s_weapons_fresh = 1;
+    s_chosen_ms = mono_ms();
+}
+
 static void weapons_tick(void)
 {
-    if (!MEM16(0x58A564))
+    if (!MEM16(0x58A564) || s_weapons_idle)
         return;
+    /* (the record starts once the menu is gone -- its fade-out, and the bag of the game before still in memory -- a
+     * fresh one, after the choice) */
+    if (s_weapons_fresh) {
+        if (mono_ms() - s_menu_ms < 3000)
+            return;
+        memset(s_had, 0, sizeof s_had);
+        s_weapons_fresh = 0;
+    }
     int wrote = 0, marked = 0, seen = 0;
     for (size_t i = 0; i < N_WEAPONS; i++)
         wrote |= s_had[i].wrote, seen |= s_had[i].seen;
@@ -1174,6 +1207,24 @@ static void weapons_tick(void)
     }
     if (MEM8(0xDB9AD5))                                /* under the pause menu: its lists stay true */
         return;
+    /* Level 1 and Level 3 one for the other (or through Off, as the pause tab's cycle goes): what the level before gave
+     * back first -- a weapon in Ryu's hands when he holds another -- and nothing of the new level given meanwhile, so
+     * none is doubled. s_weapons_level: the level the record's weapons were given at. */
+    static int s_weapons_level;
+    if (s_weapons_level && s_cheat[6] != s_weapons_level) {
+        int keep = s_cheat[6], left = 0;
+        s_cheat[6] = 0;
+        weapons_restore();
+        s_cheat[6] = keep;
+        for (size_t i = 0; i < N_WEAPONS; i++)
+            left |= s_weapons[i].group == 0 && s_had[i].seen;
+        if (left && keep)
+            return;                                    /* (the rest when he holds another) */
+        if (!left)
+            s_weapons_level = 0;                       /* (Off with one still in his hands: kept until it is back) */
+    }
+    if (s_cheat[6])
+        s_weapons_level = s_cheat[6];
     if (!seen && (s_cheat[6] || s_cheat[7] || s_cheat[8])) {   /* a new record, a new mark (before
                                                                   * scrolls_left_over adopts with it) */
         static unsigned n;
@@ -1200,12 +1251,36 @@ static void weapons_tick(void)
         } else if (s_weapons[i].stack) {
             continue;                                  /* given once */
         }
+        /* Level 1 (#268): a weapon not held at all, at its first level -- the lowest of Lunar's and Kitetsu's items, the
+         * others' count 1; one held stays as it is, a higher one too (the player's or found). Ammunition as at Level 3. */
+        if (s_weapons[i].group == 0 && s_cheat[6] == 1 && !s_weapons[i].stack) {
+            if (family_slot(i))
+                continue;
+            uint16_t give = item;
+            for (int k = 0; k < 2 && s_weapons[i].also[k]; k++)
+                if (item_record(s_weapons[i].also[k]) && item_level(s_weapons[i].also[k]) < item_level(give))
+                    give = s_weapons[i].also[k];
+            if (!item_record(give))
+                continue;
+            uint32_t to = 0;
+            for (uint32_t a = 0x5891D0; !to && a < 0x5891D0 + 4 * 0x80; a += 4)
+                if (!MEM8(a + 2) || MEM16(a) == 0xFFFF)
+                    to = a;
+            if (!to)
+                continue;                              /* the bag is full */
+            MEM16(to) = give;
+            MEM8(to + 2) = 1;
+            weapons_mark(i, to);
+            weapons_log("given", give, 1);
+            continue;
+        }
         /* a lower one picked up beside the top one (weapons_seen has it as the player's): into it */
         for (int k = 0; k < 2 && s_weapons[i].also[k]; k++) {
             uint32_t lower = inventory_slot(s_weapons[i].also[k]);
             if (!lower || equipped(s_weapons[i].also[k]))
                 continue;
-            if (s_had[i].seen && (!s_had[i].count || item_level(MEM16(lower)) > item_level(s_had[i].item)))
+            if (s_had[i].seen && MEM8(lower + 3) != s_mark &&   /* (not one of the cheat's own) */
+                (!s_had[i].count || item_level(MEM16(lower)) > item_level(s_had[i].item)))
                 s_had[i].item = MEM16(lower), s_had[i].count = MEM8(lower + 2);
             uint32_t top = inventory_slot(item);
             if (top) {
@@ -1272,7 +1347,7 @@ static void cheat_tick(void)
     if (!env_read) {                                   /* NGB_CHEATS=111: debugging, on at start */
         const char *e = getenv("NGB_CHEATS");
         for (int i = 0; e && i < N_CHEATS && e[i]; i++)
-            s_cheat[i] = e[i] == '1';
+            s_cheat[i] = e[i] == '1' || (i == 6 && e[i] == '2') ? e[i] - '0' : 0;   /* (All Weapons: 2 Level 3) */
         env_read = 1;
     }
     if (health_fill()) {                               /* Infinite Health */

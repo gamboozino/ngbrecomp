@@ -130,7 +130,7 @@ static const char *const s_help[S_COUNT] = {
     "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker.",
     "Drawing on a thread of its own, for slower CPUs. May have bugs. Needs restart.",
     "Tap guard as a hit lands to turn it aside (the Hurricane Pack's move Black left out).",
-    "Every weapon, at its highest level. Turned off, they are taken back.",
+    "Every weapon, at Level 1 or at its highest level (Level 3), with its ammunition. Turned off, they are taken back.",
     "Holding attack no longer charges an Ultimate Technique: only absorbing essence does.",
     "Start skips any movie or in-game cutscene, watched before or not. Off: as on the Xbox.",
     "",
@@ -241,6 +241,7 @@ static void value_text(int row, char *out, size_t n)
     case S_GLOW: snprintf(out, n, "%s", v == 3 ? "Off" : v ? "Corrected" : "Original"); break;
     case S_INTERP: snprintf(out, n, "%s", v == 3 ? "2x" : v == 2 ? "Half Rate" : v ? "Full Rate" : "Off"); break;
     case S_HUDASPECT: snprintf(out, n, "%s", v ? "Corrected" : "Stretched"); break;
+    case S_ALLWEAP: snprintf(out, n, "%s", v == 2 ? "Level 3" : v ? "Level 1" : "Off"); break;
     case S_UNLOCKS: snprintf(out, n, "%s", ""); break;
     case S_SKIP:
     case S_ALLDIFF:
@@ -302,6 +303,7 @@ static void change(int row, int step)
         break;
     case S_AUDIOOUT:
     case S_INTERCEPT:
+    case S_ALLWEAP:                                   /* Off, Level 1, Level 3 */
         ngb_pc_set_setting(row, (v + (step > 0 ? 1 : 2)) % 3);
         break;
     case S_INTERP:

@@ -134,6 +134,7 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define D_INTERP   0x20209
 #define T_INTERP0  0x2020A            /* + 0..3: Off, Full Rate, Half Rate, 2x */
 #define T_GLOW0    0x2020E            /* + 0..3: Bloom's Original, Reduced, Corrected, Off */
+#define T_ALLWEAP0 0x20212            /* + 0..2: All Weapons' Off, Level 1, Level 3 (#268) */
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -255,6 +256,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_INTERP, "Frame Interpolation" },
     { D_INTERP, "Experimental. Pictures between the game's frames, on a 120 Hz or faster display." },
     { T_INTERP0 + 0, "Off" }, { T_INTERP0 + 1, "Full Rate" }, { T_INTERP0 + 2, "Half Rate" }, { T_INTERP0 + 3, "2x" },
+    { T_ALLWEAP0 + 0, "Off" }, { T_ALLWEAP0 + 1, "Level 1" }, { T_ALLWEAP0 + 2, "Level 3" },
     { T_GLOW0 + 0, "Original" }, { T_GLOW0 + 1, "Reduced" }, { T_GLOW0 + 2, "Corrected" }, { T_GLOW0 + 3, "Off" },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
@@ -297,7 +299,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_INTERCEPT, "Intercept" },
     { D_INTERCEPT, "Tap guard as a hit lands to turn it aside (the Hurricane Pack's move Black left out)." },
     { T_ALLWEAP, "All Weapons" },
-    { D_ALLWEAP, "Every weapon, at its highest level. Turned off, they are taken back." },
+    { D_ALLWEAP, "Every weapon, at Level 1 or at its highest level (Level 3), with its ammunition. Turned off, they are taken back." },
     { T_ESSCHARGE, "Essence-Only Charging" },
     { D_ESSCHARGE, "Holding attack no longer charges an Ultimate Technique: only absorbing essence does." },
     { T_CUTSKIP, "Skip Any Cutscene" },
@@ -898,7 +900,7 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
     case ROW_INTERCEPT: return T_INTERCEPT0 + (uint32_t)ngb_pc_setting(31);
     case ROW_INFITEMS: return ngb_pc_setting(21) ? T_ON : T_OFF;
     case ROW_INFAMMO: return ngb_pc_setting(22) ? T_ON : T_OFF;
-    case ROW_ALLWEAP: return ngb_pc_setting(32) ? T_ON : T_OFF;
+    case ROW_ALLWEAP: return T_ALLWEAP0 + (uint32_t)ngb_pc_setting(32);
     case ROW_ESSCHARGE: return ngb_pc_setting(33) ? T_ON : T_OFF;
     case ROW_CUTSKIP: return ngb_pc_setting(34) ? T_ON : T_OFF;
     case ROW_RESPONSIVE: return ngb_pc_setting(36) ? T_ON : T_OFF;
@@ -973,7 +975,7 @@ static int pc_value_change(int row, int delta)
     case ROW_INTERCEPT: ngb_pc_set_setting(31, (ngb_pc_setting(31) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_INFITEMS: ngb_pc_set_setting(21, !ngb_pc_setting(21)); break;
     case ROW_INFAMMO: ngb_pc_set_setting(22, !ngb_pc_setting(22)); break;
-    case ROW_ALLWEAP: ngb_pc_set_setting(32, !ngb_pc_setting(32)); break;
+    case ROW_ALLWEAP: ngb_pc_set_setting(32, (ngb_pc_setting(32) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_ESSCHARGE: ngb_pc_set_setting(33, !ngb_pc_setting(33)); break;
     case ROW_CUTSKIP: ngb_pc_set_setting(34, !ngb_pc_setting(34)); break;
     case ROW_RESPONSIVE: ngb_pc_set_setting(36, !ngb_pc_setting(36)); break;
