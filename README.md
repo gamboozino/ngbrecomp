@@ -184,8 +184,8 @@ of the pause menu. Changes apply at once and are saved.
 - **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9 which also fits phones from 18:9, 32:9), window size,
   windowed / fullscreen / borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on
   or off, HUD Style (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the
-  game's widescreen mode, or Corrected: the HUD in the shape it was drawn on a wide screen), skip the warnings
-  and intro movies
+  game's widescreen mode, or Corrected: the HUD in the shape it was drawn, where Stretched puts it), skip the
+  warnings and intro movies
 - **Sound**: Positional Audio (3D sounds placed left and right: Mixed, the default, half the sound chip's
   filters and half panned by direction, the easiest to place; Clear, by level only; Console, through the sound
   chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo
@@ -197,8 +197,10 @@ of the pause menu. Changes apply at once and are saved.
   Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
   ignores it for a while (#116); **Bow Crosshair**, a dot where the arrow will land while aiming a bow in first
-  person, the game's own glow from an arrow's head (#228)
-- **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
+  person, the game's own glow from an arrow's head (#228). The Talisman of Rebirth is equipped or unequipped on the
+  pause menu's Item page (unequipped, Ryu dies and keeps his talismans)
+- **Cheats** (for the session only; locked until "Do you want to use cheats?" is answered Yes in RECOMP SETTINGS,
+  and only then in the pause menu): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
   hit kill (any hit that hurts an enemy or a boss kills it).
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
   mission), Arcade Ninja Gaiden and Movie Theater without earning them (saved); All Weapons (every melee and
