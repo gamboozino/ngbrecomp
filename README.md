@@ -151,6 +151,11 @@ packages are signed ad hoc, without Developer ID signing or notarization.
 **Text language:** the game's text follows the system's language, Japanese on a Japanese system and English
 otherwise (the disc has only these two). `text_language = japanese` or `english` in `settings.ini` overrides it.
 
+**Options (`env.txt`):** a text file named `env.txt` beside the saves (the first row above), or next to the
+program, with one option a line (`NAME=value`), for the options that have no menu, like `NV2A_TEX_DUMP` for
+texture packs. Each one can also be set in the environment, which wins (and the one beside the saves wins over the
+one next to the program). The log says which files were read.
+
 **Portable mode:** with a file named `portable.txt` next to `NinjaGaidenBlack.exe` (or the AppImage or Mac app),
 all of these go into a `userdata` folder next to it instead. The first-run setup offers this as a
 checkbox. The folder must be writable, so not inside Program Files. Delete `portable.txt` to go back.
