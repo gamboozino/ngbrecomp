@@ -1414,7 +1414,7 @@ private:
             }
         }
         prev_targets_ = frame_targets_.size();
-        // the draws of CPU-moved meshes (KeepVertices) left without a pair: by key2, in order
+        // the draws of CPU-moved meshes (KeepVertices) left without a pair: by key6, nearest first
         dyn_.assign(cur_draws_.size(), 0);
         {
             std::vector<uint8_t> taken(prev_draws_.size(), 0);
@@ -1422,16 +1422,53 @@ private:
                 if (m >= 0) taken[size_t(m)] = 1;
             std::unordered_map<uint64_t, std::vector<int32_t>> free_prev;
             for (int32_t j = int32_t(prev_draws_.size()) - 1; j >= 0; j--)
-                if (!taken[size_t(j)] && prev_draws_[size_t(j)].copied) free_prev[prev_draws_[size_t(j)].key2].push_back(j);
-            for (size_t i = 0; i < cur_draws_.size(); i++) {
-                if (match_[i] >= 0 || !cur_draws_[i].copied) continue;
-                auto it = free_prev.find(cur_draws_[i].key2);
-                if (it == free_prev.end() || it->second.empty()) continue;
-                // (only the buffers' turn: with the same buffer it was left without a pair on purpose, a puff of many)
-                match_[i] = TakeNearest(cur_draws_[i], it->second, true), how_[i] = 4;
-                if (match_[i] < 0) continue;
-                dyn_[i] = 1;
-                matched++;
+                if (!taken[size_t(j)] && prev_draws_[size_t(j)].copied) free_prev[prev_draws_[size_t(j)].key6].push_back(j);
+            // By group -- the key without the buffer nor the textures (key6): the barrier's ripples in the Underworld-like
+            // room (#259) take one of two ripple maps in turn, each the other's the frame after -- and the nearest pairs
+            // first (a pair's distance as TakeNearest's), not each in its turn with the nearest left. A ripple new this
+            // frame took the place of the one that was there, which was left without a pair; each showed the scene
+            // through it from the other's place, a copy of Ryu and the chains beside them. (Large groups, a puff of
+            // many: in turn, as before.)
+            std::unordered_map<uint64_t, std::vector<int32_t>> cur_dyn;
+            for (size_t i = 0; i < cur_draws_.size(); i++)
+                if (match_[i] < 0 && cur_draws_[i].copied && free_prev.count(cur_draws_[i].key6))
+                    cur_dyn[cur_draws_[i].key6].push_back(int32_t(i));
+            struct Cand { float d; int32_t i, j; };
+            std::vector<Cand> cand;
+            std::vector<uint8_t> used(prev_draws_.size(), 0), done(cur_draws_.size(), 0);   // (groups share nothing)
+            for (auto& [k6, cs] : cur_dyn) {
+                std::vector<int32_t>& ps = free_prev[k6];
+                if (cs.size() * ps.size() > 1024) {
+                    for (int32_t i : cs) {
+                        // (only the buffers' turn: with the same buffer it was left without a pair on purpose, a puff of many)
+                        match_[size_t(i)] = TakeNearest(cur_draws_[size_t(i)], ps, true), how_[size_t(i)] = 4;
+                        if (match_[size_t(i)] < 0) continue;
+                        dyn_[size_t(i)] = 1;
+                        matched++;
+                    }
+                    continue;
+                }
+                cand.clear();
+                for (int32_t i : cs)
+                    for (int32_t j : ps) {
+                        const InterpDraw &c = cur_draws_[size_t(i)], &p = prev_draws_[size_t(j)];
+                        if (p.vb == c.vb || p.vs != c.vs) continue;   // (as TakeNearest's)
+                        cand.push_back({Distance(c, p), i, j});
+                    }
+                // (ties as TakeNearest broke them: the earlier draws first, each with the earliest of the last frame's --
+                // pieces built in world space all stand at the world's middle, every distance 0)
+                std::sort(cand.begin(), cand.end(), [](const Cand& x, const Cand& y) {
+                    return x.d != y.d ? x.d < y.d : x.i != y.i ? x.i < y.i : x.j < y.j;
+                });
+                for (const Cand& c : cand) {
+                    if (match_[size_t(c.i)] >= 0 || done[size_t(c.i)] || used[size_t(c.j)]) continue;
+                    done[size_t(c.i)] = 1;   // (its nearest left: that one or none, as TakeNearest's StandAlike)
+                    if (!StandAlike(cur_draws_[size_t(c.i)], prev_draws_[size_t(c.j)])) continue;
+                    match_[size_t(c.i)] = c.j, how_[size_t(c.i)] = 4;
+                    used[size_t(c.j)] = 1;
+                    dyn_[size_t(c.i)] = 1;
+                    matched++;
+                }
             }
         }
         // A mesh whose texture is a flip-book (Chapter 16's lava, a frame of its animation every third frame): by its
