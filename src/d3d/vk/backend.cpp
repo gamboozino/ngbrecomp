@@ -761,7 +761,9 @@ private:
     float mid_left_now_ = -1e30f, mid_left_own_ = -1e30f, mid_left_prev_ = -1e30f;   // and the line under the karma window
     // The HUD in play on a screen not 16:9 (HudPlace): this frame's pieces, and the elements -- pieces near
     // each other, together -- of the frame before, each with the side it keeps to
-    struct HudBox { float x0, x1, y0, y1; uint32_t at; };   // (at: the draw's number in its frame)
+    struct HudBox { float x0, x1, y0, y1; uint32_t at; float edge = -1; float bottom = -1; };   // (at: the draw's number in its frame;
+                                                                            // edge, bottom: HudPlace's hud_edge_ and, for a
+                                                                            // prompt, hud_bottom_y_ for it)
     struct HudElem { float x0, x1, y0, y1, ax, ay; uint32_t seen; bool gauge; };
     std::vector<HudBox> hud_boxes_;
     std::vector<HudBox> hud_boxes_prev_;   // the frame before's (a piece drawn before the frame's 3D: the same quad, #219)
@@ -790,6 +792,20 @@ private:
     HudBox hud_panel_box_{}, hud_panel_seen_{};   // the panel's box (the union of the frames it was seen in)
     void HudPlace(float x0, float x1, float y0, float y1, float w, float h, float& ax, float& ay);
     bool hud_bottom_ = false;  // HudPlace's last piece: of an element kept to the bottom, not a gauge (a prompt)
+    float hud_edge_ = -1;      // HudPlace's last piece: its element's outer edge on the side it keeps to (-1 none)
+    float hud_bottom_y_ = -1;  // and its element's bottom (the prompt's: Compact shrinks it toward it)
+    uint32_t play_present_ = 0;   // the last frame with play's 3D (presents_): the prompt's frames just after it
+    // The top left's topmost element (the health bar's, with the karma window once it joins): its edge for HUD
+    // Aspect Corrected's anchor, taken once it has held for half a second (HudGroup, once a frame) -- the karma window
+    // slides in from the left past the bar, the element's edge moving with it, and the bar moved left and back. Other
+    // elements keep their own edges; after 10 frames without it (a load, the HUD hidden) the next one is taken at once
+    bool tl_held_ok_ = false;
+    float tl_held_ = 0, tl_cand_ = 0, tl_y0_ = 0;   // (tl_y0_: the held element's top, to find it again)
+    uint32_t tl_since_ = 0, tl_seen_ = 0;
+    float tl_box_[4] = {1e30f, 1e30f, 1e30f, 1e30f};   // that element's box this frame (as hud_elems_ has it)
+    bool TlHeldElem(const HudElem& e) const {
+        return e.x0 == tl_box_[0] && e.x1 == tl_box_[1] && e.y0 == tl_box_[2] && e.y1 == tl_box_[3];
+    }
     bool hud_known_ = false;   // HudPlace's last piece: part of an element of the frames before (the HUD's)
     void HudGroup(float w, float h);
     int gauges_now_ = 0;
@@ -4007,6 +4023,19 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 return (hud_known_ || (last3d_prev_ && st_.drawn >= last3d_prev_)) &&
                        (threed_ >= 30 || (hud_known_ && threed_prev_ >= 30 && same_quad()));
             };
+            // The prompt (Interact) in play, with Compact and Corrected as the rest of the HUD -- also on a frame without
+            // 3D: as it is pressed at Muramasa's the game draws the held picture and the prompt's flash over it, and the
+            // flash, failing hud_piece and play3d there, was drawn full size; and on the first frame after a load
+            // -- for up to 4 frames after play's last (a menu, Game Over or a card comes later, after a fade)
+            if (play3d) play_present_ = presents_;
+            const bool p_near = presents_ - play_present_ <= 4;
+            static const bool p_env = std::getenv("NGB_HUD_FIXED") != nullptr;
+            const bool p_shaped = (p_env || ngb_pc_setting(42)) && live && p_near;
+            const float p_small = ngb_pc_setting(41) && live && p_near ? 0.8f : 1.0f;
+            auto prompt_ok = [&] {
+                return hud_bottom_ && live && p_near &&
+                       (hud_piece() || hud_known_ || (threed_ >= 30 && !last3d_prev_));   // (last: a load's first frame)
+            };
             if (pk_.stretched) {
                 // The game's 2D in its widescreen mode, the console's 16:9 look, kept 16:9: on a wider screen
                 // (21:9) narrowed to the middle 16:9 (kx), on a narrower one (16:10) shortened to it (ky);
@@ -4034,21 +4063,47 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 // (their own shape is 3:2, not 4:3: the HUD's art was drawn in square pixels on the 720 x 480 screen --
                 // the ninpo orb 21 x 22 there, a circle -- and the console's 4:3 TV narrowed it; 1.125 times k, #266)
                 const float ks = std::min(1.0f, k * 1.125f);
+                // and where Stretched puts it (as Sigma has its HUD, #266): its outer edge -- the left one of an element at
+                // the left, the right one at the right -- where Stretched draws it, the element narrowed toward it, not
+                // toward the screen's edge (they went into the corners, out of sight to the side). s_str: Stretched's
+                // narrowing of the piece about ax; s_sh: Corrected's. The piece narrowed about the anchor returned.
+                auto edge_anchor = [&](float ax, float s_str, float s_sh) {
+                    if (hud_edge_ < 0 || s_sh >= 0.999f || (ax != 0.0f && ax != w)) return ax;
+                    float e = ax + (hud_edge_ - ax) * s_str;   // the edge as Stretched draws it
+                    return (e - hud_edge_ * s_sh) / (1 - s_sh);
+                };
+                // The prompt (Interact; hud_bottom_), its whole box: as Stretched draws it (sx_str across about ax, sy_str
+                // down about ay_str), and with Compact smaller, with Corrected in its own shape -- toward its own outer
+                // edge and its bottom, inside where Stretched has it: the game draws a board over that spot as it is
+                // pressed (Muramasa's, #219), and a prompt moved toward the corner showed beside it
+                auto prompt_ext = [&](float ax, float sx_str, float ay_str, float sy_str) {
+                    float sy = sy_str * p_small, sx = p_shaped ? ks * sy : sx_str * p_small;
+                    auto keep = [](float a, float s_str, float s_new, float at) {   // at drawn where Stretched has it
+                        if (at < 0 || s_new >= 0.999f) return a;
+                        return (a + (at - a) * s_str - at * s_new) / (1 - s_new);
+                    };
+                    c.ext[0] = sx;
+                    c.ext[1] = (ax == 0.0f || ax == w) ? keep(ax, sx_str, sx, hud_edge_) : ax;
+                    c.ext[2] = sy;
+                    c.ext[3] = keep(ay_str, sy_str, sy, hud_bottom_y_);
+                };
                 if (n && ky < 0.999f && !paused && !spans) {
                     float ax = w / 2, ay = h / 2;
                     if (live && !centred) {
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                         if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
-                            hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
+                            hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
                     }
                     bool cornered = live && !centred && ax != w / 2 && hud_piece();
                     // (what keeps to the bottom -- the "Interact" prompt -- as Stretched draws it: the game draws over it
                     // where it put it, Muramasa's board as Interact is pressed, over the held picture, #219)
                     const bool shape = cornered && !hud_bottom_;
                     c.ext[0] = shape && shaped ? ks * small : shape && small < 1 ? small : 1;
-                    c.ext[1] = shape && (small < 1 || shaped) ? ax : w / 2;
+                    c.ext[1] = shape && shaped ? edge_anchor(ax, small, ks * small) : shape && small < 1 ? ax : w / 2;
                     c.ext[2] = shape && shaped ? small : ky * (shape ? small : 1);
                     c.ext[3] = ay;
+                    if (live && !centred && ax != w / 2 && prompt_ok() && (p_shaped || p_small < 1))
+                        prompt_ext(ax, 1.0f, ay, ky);   // the prompt (Stretched: ky down about ay)
                     if (ax == w / 2 && ay == h / 2) {
                         hud_clipy0 = h / 2 * (1 - ky);
                         hud_clipy1 = h / 2 * (1 + ky);
@@ -4064,27 +4119,32 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         c.ext[1] = ax;
                         if ((small < 1 || shaped) && ax != w / 2 && !hud_bottom_ && hud_piece()) {
                             c.ext[0] = (shaped ? ks : km) * small;
+                            if (shaped) c.ext[1] = edge_anchor(ax, km * small, ks * small);
                             c.ext[2] = small;
                             c.ext[3] = ay;
+                        } else if ((p_shaped || p_small < 1) && ax != w / 2 && prompt_ok()) {
+                            prompt_ext(ax, km, ay, 1.0f);   // the prompt (Stretched: km across)
                         }
                         if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
-                            hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
+                            hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
                     }
                     if (c.ext[1] == w / 2) {   // (a corner's piece is on the screen as narrowed: not clipped)
                         hud_clip0 = w / 2 * (1 - km);
                         hud_clip1 = w / 2 * (1 + km);
                     }
-                } else if (n && (small < 1 || shaped) && !paused && !spans && !centred && live) {
+                } else if (n && (small < 1 || shaped || p_small < 1 || p_shaped) && !paused && !spans && !centred && live) {
                     // 16:9: nothing to narrow, the HUD's elements only smaller toward their sides (and Corrected, narrower)
                     float ax = w / 2, ay = h / 2;
                     HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                     if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
-                        hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
+                        hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
                     if (ax != w / 2 && !hud_bottom_ && hud_piece()) {
                         c.ext[0] = (shaped ? ks : 1.0f) * small;
-                        c.ext[1] = ax;
+                        c.ext[1] = shaped ? edge_anchor(ax, small, ks * small) : ax;
                         c.ext[2] = small;
                         c.ext[3] = ay;
+                    } else if (ax != w / 2 && prompt_ok()) {
+                        prompt_ext(ax, 1.0f, ay, 1.0f);   // the prompt (Stretched: as drawn)
                     }
                 }
             } else if (n && k < 0.999f && !paused &&
@@ -4169,7 +4229,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     c.ext[2] = 0.8f;
                     c.ext[3] = y1 < h * 0.3f || reach ? 0.0f : h / 2;   // (what reaches lower with its corner: #219)
                 }
-            } else if (n && compact && !rt_tex && !paused && !ScreenFrame(threed_) && x1 - x0 < w * 0.89f &&
+            } else if (n && (compact || p_small < 1) && !rt_tex && !paused && !ScreenFrame(threed_) && x1 - x0 < w * 0.89f &&
                        x1 > 0 && x0 < w) {
                 // HUD Style Compact (#121) on the game's own 4:3 screen, nothing narrowed: the HUD's elements (as
                 // HudPlace groups them, the karma window whole) kept to a side or a corner smaller toward it; those
@@ -4177,12 +4237,19 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 float ax = w / 2, ay = h / 2;
                 HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                 if (keep_box && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
-                    hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
-                if (ax != w / 2 && !hud_bottom_ && hud_piece()) {   // (the bottom's prompt as drawn, as above)
+                    hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
+                if (ax != w / 2 && !hud_bottom_ && hud_piece()) {
                     c.ext[0] = 0.8f;
                     c.ext[1] = ax;
                     c.ext[2] = 0.8f;
                     c.ext[3] = ay;
+                } else if (ax != w / 2 && prompt_ok()) {
+                    // the prompt, smaller toward its own outer edge and bottom: inside where it is drawn (#219, above)
+                    float ex = hud_edge_, ey = hud_bottom_y_;
+                    c.ext[0] = 0.8f;
+                    c.ext[1] = (ax == 0.0f || ax == w) && ex >= 0 ? ex : ax;
+                    c.ext[2] = 0.8f;
+                    c.ext[3] = ey >= 0 ? ey : ay;
                 }
             }
         }
@@ -4747,6 +4814,8 @@ static bool hud_gauge_piece(float x0, float x1, float y0, float y1, float w, flo
 void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, float h, float& ax, float& ay) {
     hud_known_ = false;
     hud_bottom_ = false;
+    hud_edge_ = -1;
+    hud_bottom_y_ = -1;
     // a screen of panels drawn over the game (a chapter's clear, an item's picture) whole, about the middle, as
     // a 2D screen
     float cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, best = 1e30f;
@@ -4827,10 +4896,66 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
         ax = hit->ax;
         ay = hit->ay;
         hud_known_ = true;
+        hud_edge_ = ax == 0.0f ? (tl_held_ok_ && TlHeldElem(*hit) ? std::max(tl_held_, 0.0f) : hit->x0)
+                  : ax == w ? hit->x1 : -1;
+        hud_bottom_y_ = hit->y1;
         return;
     }
     hud_side(x0, x1, y0, y1, w, h, ax, ay);
+    // a prompt new this frame (Interact: not seen in the last half minute), at the bottom by a side: as HudGroup will
+    // group it at the frame's end -- with this frame's pieces of it so far, each keeping the side, edge and bottom
+    // the first was given -- so it is drawn from its first frame as from the next (it showed full size for a frame)
+    if (y0 > h * 0.5f && !gauge) {
+        float u0 = x0, u1 = x1, v0 = y0, v1 = y1;
+        for (const HudBox& b : hud_boxes_)
+            if (b.at >= last3d_now_ && b.x1 >= x0 - 10 && b.x0 <= x1 + 10 && b.y1 >= y0 - 14 && b.y0 <= y1 + 14) {
+                u0 = std::min(u0, b.edge >= 0 ? std::min(b.x0, b.edge) : b.x0);
+                u1 = std::max(u1, b.edge >= 0 ? std::max(b.x1, b.edge) : b.x1);
+                v0 = std::min(v0, b.y0);
+                v1 = std::max(v1, b.bottom >= 0 ? std::max(b.y1, b.bottom) : b.y1);
+            }
+        float bx = w / 2, by = h / 2;
+        hud_side(u0, u1, v0, v1, w, h, bx, by);
+        const float ucx = (u0 + u1) / 2;   // (by a side, not just off the middle: a centred line's first words are not one)
+        if (by == h && bx != w / 2 && !hud_picture(u0, u1, v0, v1, w, h) &&
+            (bx == 0.0f ? ucx <= w * 0.35f : ucx >= w * 0.65f)) {
+            ax = bx;
+            ay = by;
+            hud_bottom_ = true;
+            hud_edge_ = ax == 0.0f ? u0 : u1;
+            hud_bottom_y_ = v1;
+            return;
+        }
+    }
     if (y1 >= h * 0.3f) ax = w / 2;
+    // (an element new this frame, not grouped yet: its outer edge so far -- this frame's pieces before this one that
+    // touch it -- so its pieces keep together on its first frame too, as from the next)
+    // (each box keeps the edge it was given, so a chain of pieces drawn one after another shares the first one's;
+    // only the HUD's, drawn after the 3D)
+    float e0 = x0, e1 = x1;
+    if (ax == 0.0f || ax == w)
+        for (const HudBox& b : hud_boxes_)
+            if (b.at >= last3d_now_ && b.x1 >= x0 - 4 && b.x0 <= x1 + 4 && b.y1 >= y0 - 4 && b.y0 <= y1 + 4) {
+                e0 = std::min(e0, b.edge >= 0 && ax == 0.0f ? std::min(b.x0, b.edge) : b.x0);
+                e1 = std::max(e1, b.edge >= 0 && ax == w ? std::max(b.x1, b.edge) : b.x1);
+            }
+    // and the element of the frame before it will join at the frame's end, within HudGroup's distances (the karma
+    // window, coming in under the health bar, joins the bar's: on its first frame it took its own edge, then the
+    // bar's, a jump with HUD Aspect Corrected)
+    if ((ax == 0.0f || ax == w) && !gauge)
+        for (const HudElem& e : hud_elems_)
+            if (!e.gauge && e.ax == ax && !hud_picture(e.x0, e.x1, e.y0, e.y1, w, h) && e.x1 >= x0 - 10 &&
+                e.x0 <= x1 + 10 && e.y1 >= y0 - 14 && e.y0 <= y1 + 14) {
+                e0 = std::min(e0, ax == 0.0f && tl_held_ok_ && TlHeldElem(e) ? std::max(tl_held_, 0.0f) : e.x0);
+                e1 = std::max(e1, e.x1);
+            }
+    hud_edge_ = ax == 0.0f ? e0 : ax == w ? e1 : -1;
+    // (a piece coming in under the bar -- the karma window, sliding in from off the screen, joins the bar's element
+    // within a frame or two: its edge from the first)
+    if (ax == 0.0f && ay == 0.0f && !gauge && tl_held_ok_ && tl_box_[0] < 1e29f && y0 >= tl_box_[2] &&
+        y0 <= tl_box_[3] + 14 && x0 <= tl_box_[0] + 10)
+        hud_edge_ = std::max(tl_held_, 0.0f);
+    hud_bottom_y_ = y1;
 }
 
 // Each frame's end: this frame's HUD pieces into elements -- pieces within a few pixels of each other (the
@@ -5014,6 +5139,39 @@ void VulkanBackend::HudGroup(float w, float h) {
                          e.ax == 0 ? "left" : e.ax == w ? "right" : "middle", e.ay == 0 ? "top" : e.ay == h ? "bottom" : "centre");
     hud_elems_ = std::move(elems);
     hud_boxes_.clear();
+    // the top left's outermost element: its edge held (tl_held_, above)
+    const HudElem* tl = nullptr;
+    // (the topmost: the bar's, the karma window joined below it or not -- joined, the element is as tall as a picture)
+    // (the one held before if it is still there, by its top -- something else at the very top, another mode's
+    // figures, takes the hold only once the held one has been gone for 10 frames)
+    if (tl_held_ok_ && presents_ - tl_seen_ <= 10) {   // (the held one only, or none this frame)
+        for (const HudElem& e : hud_elems_)
+            if (!e.gauge && e.ax == 0.0f && e.ay == 0.0f && std::fabs(e.y0 - tl_y0_) <= 4) {
+                tl = &e;
+                break;
+            }
+    } else {
+        for (const HudElem& e : hud_elems_)
+            if (!e.gauge && e.ax == 0.0f && e.ay == 0.0f && (!tl || e.y0 < tl->y0))
+                tl = &e;
+    }
+    if (tl) {
+        tl_box_[0] = tl->x0; tl_box_[1] = tl->x1; tl_box_[2] = tl->y0; tl_box_[3] = tl->y1;
+        if (!tl_held_ok_ || presents_ - tl_seen_ > 10) {
+            tl_held_ = tl_cand_ = tl->x0;
+            tl_since_ = presents_;
+            tl_held_ok_ = true;
+        } else if (std::fabs(tl->x0 - tl_cand_) >= 0.5f) {
+            tl_cand_ = tl->x0;
+            tl_since_ = presents_;
+        } else if (presents_ - tl_since_ >= 30) {
+            tl_held_ = tl->x0;
+        }
+        tl_seen_ = presents_;
+        tl_y0_ = tl->y0;
+    } else {
+        tl_box_[0] = tl_box_[1] = tl_box_[2] = tl_box_[3] = 1e30f;
+    }
 }
 
 void VulkanBackend::TraceFrame(Target& t) {
