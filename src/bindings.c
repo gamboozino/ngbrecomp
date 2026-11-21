@@ -221,11 +221,24 @@ int ngb_bind_pad_combo_slot(int a)
 }
 unsigned ngb_bind_generation(void) { return s_gen; }
 
+/* A pair bound to a two-button action that is its own two buttons, in either order (Ninpo on B + Y, a hand-made
+ * "default" -- pairs are kept in the buttons' order, B before Y): with every other binding as it is by default, the
+ * controller as it is (identity_check). Taken for a rebinding it made every Y wait a moment for a B to join it, and
+ * fast Y after X was lost (#263). The binding itself is kept: with Special Attack moved, B + Y is still Ninpo's. */
+static int own_pair(int a, int in)
+{
+    static const unsigned char ai[8] = { P_A, P_B, P_X, P_Y, P_BLACK, P_WHITE, P_LT, P_RT };
+    if (s_act[a].kind != T_AN2 || !(in & BIND_PAD) || s_act[a].a >= 8 || s_act[a].b >= 8)
+        return 0;
+    int f = in & 0xFF, b = BIND_PAD_SECOND(in), p1 = ai[s_act[a].a], p2 = ai[s_act[a].b];
+    return b >= 0 && ((f == p1 && b == p2) || (f == p2 && b == p1));
+}
+
 static void identity_check(void)
 {
     s_pad_identity = 1;
     for (int a = 0; a < A_COUNT; a++)
-        if (s_bind[a][2] != s_act[a].pad)
+        if (s_bind[a][2] != s_act[a].pad && !own_pair(a, s_bind[a][2]))
             s_pad_identity = 0;
 }
 
