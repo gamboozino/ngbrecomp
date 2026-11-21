@@ -82,7 +82,8 @@ static const uint8_t s_rows_gfx[] = { ROW_RENDER, ROW_TEXTURE, ROW_MSAA, ROW_SHA
 static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_HUDASPECT, ROW_SKIP,
                                        ROW_BACK };
 static const uint8_t s_rows_sound[] = { ROW_POSAUDIO, ROW_AUDIOOUT, ROW_BACK };
-static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_INTERCEPT, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_TALISMAN, ROW_CROSSHAIR, ROW_BACK };
+static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_INTERCEPT, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_CROSSHAIR,
+                                      ROW_BACK };   /* (Talisman of Rebirth: equipped from the item page, src/talisman.c) */
 static const uint8_t s_rows_cheat[] = { ROW_HEALTH, ROW_NINPO, ROW_ESSENCE, ROW_SCARABS, ROW_INFITEMS, ROW_INFAMMO,
                                         ROW_ONEHIT, ROW_UNLOCKS, ROW_BACK };
 static const uint8_t s_rows_ctrl[] = { ROW_BACK };
@@ -1032,9 +1033,28 @@ static void menu_sound(uint32_t which)
  * CC: cdecl, 0 params, returns int_or_void
  * Frame: fpo_leaf
  */
+/* PC: RECOMP SETTINGS' Cheats asks first (src/pause_tab.c "Use cheats?") over the page as it opens, the box
+ * with the pad: Yes leaves the page open, No goes back to the categories as B does. (The categories open the
+ * page in sub_00184AE0, the game's own: asked here, in the page's.) */
+int ngb_cheats_unlocked(void);    /* src/ingame_menu.c */
+int ngb_cheats_ask_open(void);    /* src/pause_tab.c */
+int ngb_cheats_ask_tick(void);
+static int s_cheat_asking, s_cheat_back;
+
 void sub_0017F4E0(void)
 {
     RECOMP_ENTRY(0x0017F4E0u);
+    /* (as the page opens -- sub_00184AE0 sets +0x18 to 2 and +0x11 to 1 -- not while it closes: the page stays 14) */
+    if (s_recomp && page_now() == PAGE_CHEAT && (MEM32(MENU_STATE + 0x18) & 2) && MEM8(MENU_STATE + 0x11) == 1 &&
+        !s_cheat_asking && !s_cheat_back && !ngb_cheats_unlocked() && ngb_cheats_ask_open())
+        s_cheat_asking = 1;
+    if (s_cheat_asking) {
+        int r = ngb_cheats_ask_tick();
+        if (r >= 0) {
+            s_cheat_asking = 0;
+            s_cheat_back = r == 0;
+        }
+    }
     uint32_t ebp = 0;
     ebp = g_ebp;  /* frameless: caller's frame */
     int _flags = 0; /* fallback flag var */
@@ -1102,6 +1122,14 @@ loc_0017F535: ;
     goto loc_0017F681;
 
 loc_0017F540: ;
+    if (s_cheat_back) {           /* PC: Use cheats? No: out as the page's Exit row (loc_0017F647's), to its parent */
+        s_cheat_back = 0;
+        if (s_recomp && page_now() == PAGE_CHEAT) {
+            MEM32(edi + 0x1C) = ZX8(MEM8(MEM32(edi + 0x28) + 6));
+            MEM32(0xDA4808) = 0x81;
+            goto loc_0017F681;
+        }
+    }
     _fa = (uint32_t)(MEM8(edi + 0xD)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
     _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(edi + 0xD), LO8(ebx) (8-bit) */
     if (CMP_EQ(_fa, _fb)) goto loc_0017F567; /* je: equal / zero */

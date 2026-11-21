@@ -182,6 +182,7 @@ int ngb_pc_setting(int which)
     case 43: return s_running.talisman;
     case 44: return s_running.bow_crosshair;
     case 45: return s_running.frame_interp;
+    case 46: return s_running.cheats_unlocked;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 31: return s_running.intercept;
@@ -229,6 +230,7 @@ void ngb_pc_set_setting(int which, int value)
     case 43: s_running.talisman = !!value; break;
     case 44: s_running.bow_crosshair = !!value; break;
     case 45: s_running.frame_interp = value < 0 ? 0 : value > 3 ? 3 : value; break;   /* at the next frame (src/d3d/hle.cpp) */
+    case 46: s_running.cheats_unlocked = !!value; break;
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 31: s_running.intercept = value < 0 ? 0 : value > 2 ? 2 : value; break;
@@ -255,6 +257,22 @@ void ngb_pc_set_setting(int which, int value)
         nv2a_set_quality(s_running.scale, s_running.anisotropy, s_running.shadow_scale, s_running.msaa);
     if (!getenv("NGB_NO_SETTINGS"))
         ngb_settings_save(&s_running);
+}
+
+/* The Cheats open to use: asked once ("Do you want to use cheats?", src/pause_tab.c), or one already on -- a cheat
+ * (NGB_CHEATS too), or an unlock saved before the question was there -- so nothing is taken from a player who used
+ * them; that kept as the answer (turning the last one off hid the tab under the player's cursor). */
+int ngb_cheats_unlocked(void)
+{
+    if (ngb_pc_setting(46))
+        return 1;
+    int on = ngb_pc_setting(14) || ngb_pc_setting(16) || ngb_pc_setting(26) || ngb_pc_setting(27) ||
+             ngb_pc_setting(28);
+    for (int i = 0; i < 10 && !on; i++)
+        on = ngb_cheat(i);
+    if (on)
+        ngb_pc_set_setting(46, 1);
+    return on;
 }
 
 /* Opens the recomp settings menu at the next frame (the main menu's "RECOMP SETTINGS"). */

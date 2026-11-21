@@ -157,6 +157,7 @@ add_library(ngb_gen OBJECT ${RECOMP_GEN_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/intercept.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ut_charge.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cutscene_skip.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/talisman.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/responsive.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fiber_delete.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/kitetsu_levels.c

@@ -82,7 +82,7 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
        S_HUDSTYLE, S_HUDASPECT, S_TALISMAN, S_CROSSHAIR, S_INTERP,
-       S_COUNT };
+       S_COUNT };   /* (46 is taken, with no row: cheats_unlocked, src/ingame_menu.c -- a new setting here is 47) */
 
 static const char *const s_label[S_COUNT] = {
     "Render Resolution", "Anisotropic Filtering", "Shadow Resolution",
@@ -158,7 +158,8 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, S_INTERP, -1 },   /* -1 ends a page shorter than CAT_ROWS */
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_HUDASPECT, S_SKIP },   /* (a full page) */
     { S_POSAUDIO, S_AUDIOOUT, -1 },
-    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_TALISMAN, S_CROSSHAIR, -1 },
+    /* (no Talisman of Rebirth: equipped from the item page, src/talisman.c) */
+    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_CROSSHAIR, -1 },
     { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
     { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },
@@ -834,6 +835,10 @@ static int set_row_h(int n) { return n > 8 ? SET_ROW_H - 1 : SET_ROW_H; }
 
 /* The strip's words: where each starts and ends, in page units. */
 static float s_cat_x[CATS][2];
+/* Cheats on the strip only once they are unlocked: "Do you want to use cheats?" Yes in RECOMP SETTINGS
+ * (src/pc_menu.c), or one already on (ngb_cheats_unlocked). Until then the pause menu has no Cheats at all. */
+int ngb_cheats_unlocked(void);        /* src/ingame_menu.c */
+static int cat_shown(int c) { return c != CAT_CHEAT || ngb_cheats_unlocked(); }
 
 /* row -1 is the strip. */
 /* ---------- Controls ---------- */
@@ -1005,9 +1010,13 @@ static void draw_page(int focused, int cat, int row)
     float x = STRIP_X0, words = 0, gap = STRIP_GAP, fs = 17;
     for (;;) {
         words = 0;
+        int shown = 0;
         for (int c = 0; c < CATS; c++)
-            words += text_width(&s_font_body, s_cat_name[c], fs * k, 1.0f) / k;
-        gap = (440 - 2 * STRIP_X0 - words) / (CATS - 1);
+            if (cat_shown(c)) {
+                words += text_width(&s_font_body, s_cat_name[c], fs * k, 1.0f) / k;
+                shown++;
+            }
+        gap = (440 - 2 * STRIP_X0 - words) / (shown - 1);
         if (gap >= 16 || fs <= 13)
             break;
         fs -= 1;
@@ -1015,6 +1024,10 @@ static void draw_page(int focused, int cat, int row)
     if (gap > STRIP_GAP)
         gap = STRIP_GAP;
     for (int c = 0; c < CATS; c++) {
+        if (!cat_shown(c)) {
+            s_cat_x[c][0] = s_cat_x[c][1] = -1;     /* (no place for the mouse either) */
+            continue;
+        }
         float w = text_width(&s_font_body, s_cat_name[c], fs * k, 1.0f) / k;
         int on = c == (cat == CAT_UNL ? CAT_CHEAT : cat), sel = focused && row < 0 && on;
         if (sel)
@@ -1340,6 +1353,7 @@ int xbox_InputKeyboardActive(void);
 int ngb_menu_up(void);
 
 #include <SDL_scancode.h>
+#include <SDL_timer.h>
 #include "stb_image.h"            /* the decoder is the renderer's (texpack.c) */
 extern const struct { const char *name; const unsigned char *data; const unsigned int *len; } ngb_key_pngs[];
 extern const int ngb_key_png_count;
@@ -2196,6 +2210,10 @@ static void ctl_mouse(int r, int *row)
  * then the page. */
 static void pt_draw(void)
 {
+    if (!cat_shown(s_cat == CAT_UNL ? CAT_CHEAT : s_cat)) {   /* (on Cheats, now locked: the next one) */
+        s_cat = CAT_CHEAT + 1;
+        s_row = -1;
+    }
     int was = s_focus, vals[S_COUNT], n = cat_count(s_cat);
     int key = ngb_pause_tab_key(&s_focus);
     if (key == K_CLEAR && !(s_cat == CAT_CTL && s_row >= 0))
@@ -2267,7 +2285,9 @@ static void pt_draw(void)
         if (s_row < 0 && key == K_OK) {
             s_row = 0;                                /* into the category */
         } else if (s_row < 0) {
-            s_cat = (s_cat + (key == K_LEFT ? CATS - 1 : 1)) % CATS;
+            do
+                s_cat = (s_cat + (key == K_LEFT ? CATS - 1 : 1)) % CATS;
+            while (!cat_shown(s_cat));                /* (past Cheats while they are locked) */
         } else {
             change(s_cat_rows[s_cat][s_row], key == K_LEFT ? -1 : 1);
         }
@@ -2283,7 +2303,7 @@ static void pt_draw(void)
     /* what is drawn, each part in bits of its own (the list's top, past 15 since the quick menu's actions,
      * ran into the column's: a scroll could leave the page as it was) */
     int shown = (s_cat & 7) << 28 | ((s_row + 1) & 0xFF) << 20 | (s_ctl_col & 3) << 18 |
-                (s_cat == CAT_CTL ? s_ctl_top & 0x3F : 0) << 12;
+                (s_cat == CAT_CTL ? s_ctl_top & 0x3F : 0) << 12 | (int)((unsigned)cat_shown(CAT_CHEAT) << 31);
     if (s_cat == CAT_CTL)                             /* and the bindings, and waiting for one, and the pad's set */
         shown ^= (int)(ngb_bind_generation() & 0x7FF) << 1 ^ ngb_bind_capturing() ^ ngb_pad_set_pad() << 25;
     if (s_drawn.page != 0 || s_focus != s_drawn.focused || shown != s_drawn.row ||
@@ -2316,6 +2336,7 @@ void ngb_pause_resume(void);
 #define DLG_TH 256
 static GuestTex s_dlg_tex;
 static int s_dlg_open, s_dlg_sel, s_dlg_focus, s_dlg_drawn = -1, s_dlg_back;
+static int s_dlg_z = 0x1CC;           /* its depth: over the pause menu; over the Options menu's plates (0x1F8) there */
 static const char *s_dlg_q;
 
 static void dlg_fill(uint32_t *px, float x, float y, float w, float h, uint32_t rgb, float a)
@@ -2422,6 +2443,7 @@ static int ngb_confirm_open(const char *q, int pad_taken)
     if (!dlg_ready())
         return 0;
     s_dlg_q = q;
+    s_dlg_z = 0x1CC;
     s_dlg_sel = 1;
     s_dlg_open = 1;
     s_dlg_drawn = -1;
@@ -2474,7 +2496,7 @@ static int ngb_confirm_tick(void)
         dlg_draw();
         s_dlg_drawn = s_dlg_sel;
     }
-    sprite(DLG_SPRITE, 360 - DLG_W / 2, 240 - DLG_H / 2, 0x1CC, 0, 1.0f, 1.0f, 1.0f, 1.0f);
+    sprite(DLG_SPRITE, 360 - DLG_W / 2, 240 - DLG_H / 2, s_dlg_z, 0, 1.0f, 1.0f, 1.0f, 1.0f);
     return -1;
 }
 
@@ -2767,6 +2789,121 @@ int ngb_main_menu_exit_tick(void)
     else
         ngb_tab_give_pad();
     return 0;
+}
+
+/* RECOMP SETTINGS' Cheats (src/pc_menu.c): "Do you want to use cheats?" over the game's menu as the page opens,
+ * No chosen, the pad taken while it is open; each frame -1 while it is, then 1 Yes (settings.ini cheats_unlocked:
+ * the pause menu's Cheats too) or 0 No (locked, asked again next time). */
+static const char s_cheat_q[] = "Do you want to use cheats?";
+static int s_mm_cheat;
+int ngb_cheats_ask_open(void)
+{
+    if (!s_mm_cheat && ngb_confirm_open(s_cheat_q, 0)) {
+        s_mm_cheat = 1;
+        s_dlg_z = 0x1FA;                              /* over the page's rows and plates */
+    }
+    return s_mm_cheat;
+}
+
+int ngb_cheats_ask_tick(void)
+{
+    if (!s_mm_cheat)
+        return 0;
+    int r = ngb_confirm_tick();
+    if (r < 0)
+        return -1;
+    s_mm_cheat = 0;
+    ngb_tab_give_pad();
+    if (r == 1)
+        ngb_pc_set_setting(46, 1);
+    return r;
+}
+
+/* ---------- the Talisman of Rebirth, equipped from the item page ----------
+ *
+ * The item page lists the Talisman of Rebirth but gives it no Select (src/talisman.c gives it one): A or X on
+ * it equips or unequips it -- the Talisman of Rebirth setting (43, settings.ini talisman_of_rebirth; src/cheats.c
+ * sub_002FD3E0 reads it as Ryu falls) -- and "Equipped" or "Not Equipped" is shown over the page, by its count.
+ * Each frame the page's hint is drawn with the talisman chosen. */
+#define TL_SPRITE (PT_SPRITE + 15)
+#define TL_TEX    (PT_TEX + 15)
+#define TL_W 150                      /* in the menu's 720x480 */
+#define TL_H 24
+#define TL_TW 512                     /* its texture */
+#define TL_TH 128
+static GuestTex s_tl_tex;
+static uint32_t s_tl_def, s_tl_entry;
+
+static int tl_ready(void)
+{
+    if (s_tl_def)
+        return 1;
+    if (!s_font_body.data && !stbtt_InitFont(&s_font_body, ngb_font_body, 0))
+        return 0;
+    if (!make_texture(&s_tl_tex, TL_TW, TL_TH, 0x2A))
+        return 0;
+    s_tl_entry = xbox_HeapAlloc(8, 8);
+    MEM32(s_tl_entry) = s_tl_tex.hdr;
+    MEM32(s_tl_entry + 4) = s_tl_tex.hdr;
+    uint32_t d = xbox_HeapAlloc(0x18, 8);
+    MEMF(d) = 0; MEMF(d + 4) = 0; MEMF(d + 8) = 1; MEMF(d + 12) = 1;
+    MEM32(d + 0x10) = TL_TEX;
+    MEM16(d + 0x14) = TL_W;
+    MEM16(d + 0x16) = TL_H;
+    s_tl_def = d;
+    return 1;
+}
+
+/* The word in the game's menu font, right-aligned in the texture, in rgb over a dark edge. */
+static void tl_draw(int on)
+{
+    static uint32_t px[TL_TW * TL_TH];
+    static uint8_t m[TL_TW * TL_TH];
+    const float k = (float)TL_TW / TL_W;
+    const char *t = on ? "Equipped" : "Not Equipped";
+    uint32_t rgb = on ? 0xF0F0F0 : 0x9A9A9A;
+    memset(px, 0, sizeof px);
+    memset(m, 0, sizeof m);
+    int game = s_game_font;
+    s_game_font = game_font_ready();
+    float w = text_width(&s_font_body, t, 19 * k, 1.0f);
+    draw_text(m, TL_TW, TL_TH, &s_font_body, t, 19 * k, 1.0f, TL_TW - 4 - w, 18 * k);
+    s_game_font = game;
+    for (int Y = 3; Y < TL_TH; Y++)                    /* the dark edge under, then the letters */
+        for (int X = 3; X < TL_TW; X++)
+            if (m[(Y - 3) * TL_TW + X - 3])
+                px[Y * TL_TW + X] = (uint32_t)(m[(Y - 3) * TL_TW + X - 3] * 0.8f) << 24;
+    for (int i = 0; i < TL_TW * TL_TH; i++)
+        if (m[i]) {
+            uint32_t c = px[i];
+            float a = m[i] / 255.0f, ca = (c >> 24) / 255.0f, oa = a + ca * (1 - a);
+            px[i] = (uint32_t)lroundf(oa * 255) << 24 | (mix(c, rgb, oa > 0 ? a / oa : 1) & 0xFFFFFF);
+        }
+    upload(&s_tl_tex, px);
+}
+
+void ngb_talisman_item_page(void)
+{
+    static int pad_was = -1, drawn = -1;
+    static uint64_t last_ms;
+    int pad = (MEM32(MEM8(0xDB932E) * 0x78 + 0xD219A8) & 0x500) != 0;   /* A or X (0x10, Start, closes the menu) */
+    uint64_t now = SDL_GetTicks64();
+    if (now - last_ms > 100)
+        pad_was = 1;                                   /* (just come onto it: a press held from before is not one) */
+    last_ms = now;
+    if (pad && pad_was == 0) {
+        ngb_pc_set_setting(43, !ngb_pc_setting(43));
+        play_sound(ngb_pc_setting(43) ? 6 : 3);
+    }
+    pad_was = pad;
+    if (!tl_ready())
+        return;
+    int on = ngb_pc_setting(43) != 0;
+    if (drawn != on) {
+        tl_draw(on);
+        drawn = on;
+    }
+    sprite(TL_SPRITE, 650 - TL_W, 292, 0x1F8, 0, 1.0f, 1.0f, 1.0f, 1.0f);   /* over the count's box, by its right */
 }
 
 /* ---------- Exit's page ---------- */
@@ -4098,6 +4235,10 @@ loc_0021A960: ;
     /* Settings: our sprites. */
     if ((eax & 0xFFFF) >= PT_SPRITE && (eax & 0xFFFF) < PT_SPRITE + PT_N && s_ready == 1) {
         eax = s_defs + ((eax & 0xFFFF) - PT_SPRITE) * 0x18;
+        esp += 4; return;
+    }
+    if ((eax & 0xFFFF) == TL_SPRITE && s_tl_def) {     /* the item page: the talisman equipped or not */
+        eax = s_tl_def;
         esp += 4; return;
     }
     if ((eax & 0xFFFF) == DLG_SPRITE && s_dlg_def) {   /* Settings: the Are you sure? box */
@@ -5495,6 +5636,10 @@ loc_002216CD: ;
     ecx = MEM32(eax + 0x10);
     if (ecx >= PT_TEX && ecx < PT_TEX + PT_N && s_ready == 1) { /* Settings: ours */
         ecx = s_entries + (ecx - PT_TEX) * 8;
+        goto pt_entry;
+    }
+    if (ecx == TL_TEX && s_tl_entry) {                 /* the item page's talisman word */
+        ecx = s_tl_entry;
         goto pt_entry;
     }
     if (ecx == DLG_TEX && s_dlg_entry) {               /* Settings: the box's */
