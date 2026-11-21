@@ -1087,11 +1087,16 @@ loc_002ECB02: ;
 
 
 /* Load Game's Costume (#253): the game gives items through a costume's remap (sub_002FE290: the table at 0x447520,
- * {kind, item, costume, item}; costume 2's Dragon Sword is the Plasma Saber, the True Dragon Sword the Mk.II) --
+ * {kind, item, costume, item}; costume 2's Dragon Sword is the Plasma Saber, the True Dragon Sword the Mk.II, and
+ * the sheath on Ryu's back, 0x84, the saber's, 0xFC) --
  * New Game's first area gives the starting sword that way, but a loaded save keeps the bag it had (its "started"
  * flag, 0x589753, set), so a save made in another costume kept its sword. At each area start of a game under way,
  * the bag and the sword in Ryu's hands follow the costume worn now (0x589760): the remap's swords, and back (the
- * Plasma Saber only: the game has it from the costume alone; the Mk.II and 0x0FC are earned too). */
+ * Plasma Saber only: the game has it from the costume alone; the Mk.II is earned too). The sheath follows the sword
+ * (#269), in the bag and in its slot of that copy (0x5895C0), and only when the sword itself changed: left as the
+ * saber's with the Dragon Sword, a weapon change asks for the saber's sheath model, which that area never loaded, and
+ * waits for it forever (as it would if the sheath alone changed: costume 2 with All Weapons' own Plasma Saber in the
+ * bag keeps the player's Dragon Sword). */
 static int rename_item(uint16_t from, uint16_t to)
 {
     int n = 0, has_from = 0;
@@ -1130,20 +1135,54 @@ static int rename_item(uint16_t from, uint16_t to)
     return n;
 }
 
+/* The sheath slot (hand + 6) matched to the sword in that hand slot: the game writes the saber's (0xFC) when the Plasma
+ * Saber is drawn, the plain one (0x84) with the Dragon Sword. A mismatch (#269: from 0.9.75 to 0.9.78, a save of the
+ * saber's loaded in another costume kept the Dragon Sword with the saber's sheath, and a save made then keeps it) is
+ * mended whatever the bag did. Only a slot holding one of the two sheaths is touched. */
+static int sheath_follow(uint32_t hand)
+{
+    const uint16_t sword = MEM16(hand), sheath = MEM16(hand + 6);
+    const uint16_t want = sword == 0x1 ? 0x84 : sword == 0xCE ? 0xFC : sheath;
+    if ((sheath != 0x84 && sheath != 0xFC) || sheath == want)
+        return 0;
+    MEM16(hand + 6) = want;
+    return 1;
+}
+
 static void costume_swords(void)
 {
     if (!MEM8(0x589753) || MEM16(0xDB9C6E) == 0x19)   /* (a new game: given as the game does; 0x19: its own skip) */
         return;
     const unsigned worn = MEM8(0x589760);
-    int n = 0;
+    int n = 0, saber = 0;   /* saber: the Dragon Sword became the Plasma Saber (1), or back (-1) */
     for (uint32_t e = 0x447520; e < 0x447520 + 8 * 32 && MEM16(e) != 0xFF; e += 8) {
         if (MEM16(e) != 2)
             continue;
         const uint16_t from = MEM16(e + 2), costume = MEM16(e + 4), to = MEM16(e + 6);
-        if (worn == costume)
-            n += rename_item(from, to);
-        else if (to == 0xCE)
-            n += rename_item(to, from);
+        if (to == 0xFC)
+            continue;                                  /* (the sheath: with its sword, below) */
+        int k = 0;
+        if (worn == costume) {
+            if ((k = rename_item(from, to)) && to == 0xCE)
+                saber = 1;
+        } else if (to == 0xCE && (k = rename_item(to, from))) {
+            saber = -1;
+        }
+        n += k;
+    }
+    if (saber) {                                       /* (the sheath in the bag, and in its slot when the
+                                                          hand holds neither sword: as the bag's went) */
+        const uint16_t from = saber > 0 ? 0x84 : 0xFC, to = saber > 0 ? 0xFC : 0x84;
+        n += rename_item(from, to);
+        if (MEM16(0x5895C0) == from && MEM16(0x5895BA) != 0x1 && MEM16(0x5895BA) != 0xCE) {
+            MEM16(0x5895C0) = to;
+            n++;
+        }
+    }
+    n += sheath_follow(0x5895BA);
+    if (MEM8(0x4B7640) < 0x20 && sheath_follow(0x58A570 + MEM8(0x4B7640) * 0x210u)) {
+        MEM8(0x7F1A9C) = 1;                            /* (Ryu's own, when he is there already) */
+        n++;
     }
     if (n) {
         fprintf(stderr, "[COSTUME] costume %u: %d of its swords changed\n", worn, n);
