@@ -43,7 +43,7 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 - Android (arm64), **experimental**, with Xbox 360 touch controls
 - Render resolution up to 10x, anisotropic filtering, MSAA, sharper shadows
 - 16:9, 16:10, 21:9 and 32:9 as well as 4:3: the 3D fills the screen, the HUD goes to the screen's
-  corners, optional HUD-free view, menus keep the game's own 16:19
+  corners, optional HUD-free view, menus keep the game's own 16:9
 - Keyboard and mouse with key prompts in the game, Xbox, PlayStation and Nintendo button prompts,
   rebindable controls for keyboard, mouse and controller (Ninpo and Wind Run on any two buttons),
   mouse support in the menus
@@ -56,6 +56,7 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 - Sound mixed on the PC: positional 3D sound, the console's room reverb, and 5.1 surround on a 5.1 or
   7.1 output
 - Smooth frame pacing and low input latency; shaders prepared in the background
+- Frame Interpolation (experimental): higher frame rates while the game logic stays at 60 Hz
 
 ## Getting started
 
