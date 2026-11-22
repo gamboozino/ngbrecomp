@@ -192,9 +192,9 @@ of the pause menu. Changes apply at once and are saved.
   or off, HUD Style (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the
   game's widescreen mode, or Corrected: the HUD in the shape it was drawn, where Stretched puts it), skip the
   warnings and intro movies
-- **Sound**: Positional Audio (3D sounds placed left and right: Mixed, the default, half the sound chip's
-  filters and half panned by direction, the easiest to place; Clear, by level only; Console, through the sound
-  chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo
+- **Sound**: Positional Audio (3D sounds placed left and right: Console, the default, through the sound
+  chip's filters and its speaker crosstalk, as on the Xbox; Mixed, half the filters and half panned by direction;
+  Clear, by level only; Off, centred), Audio Output (Auto, Stereo
   or 5.1; Auto is 5.1 on a 5.1 or 7.1 output; a change needs a restart of the game)
 - **Gameplay** (each off unless chosen): the Quick Menu, an NG2-style d-pad menu for weapons, Ninpo
   and items, and whether the game pauses while it is open; **Intercept** (Black or Hurricane), the Hurricane

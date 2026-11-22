@@ -8,7 +8,7 @@
 // 5.1 by Audio Output, on Auto when the default output device has six channels or more (the title is told its
 // speakers are surround, and mixes for them); NGB_AUDIO_CHANNELS=2 or 6 overrides it. NGB_DSOUND_LOG=1 logs the
 // calls as they first come (2 every volume change too, 3 every Lock); NGB_DSOUND_WAV=<file> writes what plays
-// (48 kHz, 16-bit); NGB_DSOUND_REVERB=0 leaves the reverb out, NGB_DSOUND_XTALK=1 adds the crosstalk effect (comparing).
+// (48 kHz, 16-bit); NGB_DSOUND_REVERB=0 leaves the reverb out, NGB_DSOUND_XTALK=0 the crosstalk effect ("Console": comparing).
 #include <SDL.h>
 
 #include <algorithm>
@@ -147,6 +147,7 @@ struct Voice {
     // 3D
     bool is3d = false;
     float p[3] = {}, min_dist = 1, max_dist = 1e9f, rolloff = 1;
+    float vel[3] = {}, distance_factor = 1;  // SetVelocity (the title's: its movement over the last game frame)
     float lf = 1, hf = 1, room = 1;  // I3DL2 source (not set by this title: the defaults)
     // the filter (SetFilter, DLS2 mode): the sound chip's state variable low pass, per channel
     bool lpf = false;
@@ -180,6 +181,7 @@ std::vector<uint32_t> g_free_objects;  // released buffers' objects, for the nex
 std::multimap<uint32_t, uint32_t> g_spare_memory;
 std::vector<uint32_t> g_events;        // notifications reached, set at the next DirectSoundDoWork (the title's thread)
 float g_listener[3] = {}, g_front[3] = {0, 0, 1}, g_top[3] = {0, 1, 0};
+float g_listener_vel[3] = {};
 // IDirectSound_SetMixBinHeadroom: a step halves the bin; the library starts bins 0..30 at 1 and 31 at 0
 uint8_t g_bin_headroom[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                               1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0};
@@ -395,10 +397,10 @@ struct Reverb {
 // SCDA-XBERecomp has it from the image: each side of a pair takes the other side's output of 11 samples before
 // through a one pole filter, -0.77 of it at low frequencies -- what keeps the HRTF's two ears apart on speakers
 // (the filters give the far ear the more bass, this takes it back out of the near one). It runs on the reverb
-// as well, which the image writes into the same bins. Off unless NGB_DSOUND_XTALK=1, and then for "Console" alone:
-// 0.9.40 ran it, and its bass came out mostly out of phase between the speakers (#126); xemu running the image on
-// its DSP sounds as "Console" does without it (level, width and tone within 0.3 dB over the attract demo), so the
-// library leaves it switched off there or never reaches it.
+// as well, which the image writes into the same bins. "Console" alone (NGB_DSOUND_XTALK=0 leaves it out): against a
+// capture of a console (Chapter 1's opening, #270) the bass is 17 dB wider than "Console" without it -- the effect's
+// own figure -- and with it 7 to 10 dB of that comes back, the tone unchanged. (0.9.40 ran it too, with the taps
+// read as plain bytes, whose far ear has 12 dB more bass than the near one: its bass came out mostly out of phase.)
 struct CrossFeed {
     static constexpr uint32_t kDelay = 11;
     static constexpr float kPole = 0.924f, kFeed = -0.0585f;  // image coefficients 0x7645A1, 0xF88313
@@ -451,8 +453,19 @@ uint32_t HrtfEntry(float azimuth, float elevation) {
     return static_cast<const uint16_t*>(HostPtr(g_hrtf_index))[a * kHrtfElevations + e];
 }
 
+// A filter tap as the sound chip reads it (for "Console"): a small float, the sign, 3 bits of exponent and 4 of
+// mantissa, in 2048ths -- 0x01 is 1/2048, 0x40 1/16, 0x7F 31/32. Read so, the table's filters are the plausible
+// ones: the near ear flat, the far ear delayed and dulled, a few dB below unity. "Clear" and "Mixed" were made by ear
+// from the taps read as plain sign and magnitude in 128ths (a different shape: more bass, the near ear quieter than
+// the far one for a sound to the side) and keep that reading.
+float ChipTap(uint8_t b) {
+    int e = (b >> 4) & 7, m = b & 15;
+    float v = float(e ? (16 + m) << (e - 1) : m) / 2048.0f;
+    return b & 0x80 ? -v : v;
+}
+
 // the two ears' filters for a direction: the table's far ear is the left for a sound on the right
-EarPair Ears(float azimuth, float elevation) {
+EarPair Ears(float azimuth, float elevation, bool chip) {
     EarPair p;
     if (!(std::fabs(azimuth) <= 180) || !(std::fabs(elevation) <= 90)) return p;
     const uint8_t* f = static_cast<const uint8_t*>(HostPtr(g_hrtf_filters)) + HrtfEntry(azimuth, elevation) * 32u;
@@ -460,7 +473,8 @@ EarPair Ears(float azimuth, float elevation) {
     for (int k = 0; k < 2; k++) {
         const uint8_t* t = f + k * 32;
         Ear& ear = p.e[k == 0 ? far : 1 - far];
-        for (int i = 0; i < kHrtfTaps; i++) ear.tap[i] = (t[i] & 0x80 ? -float(t[i] & 0x7F) : float(t[i])) / 128.0f;
+        for (int i = 0; i < kHrtfTaps; i++)
+            ear.tap[i] = chip ? ChipTap(t[i]) : (t[i] & 0x80 ? -float(t[i] & 0x7F) : float(t[i])) / 128.0f;
         ear.delay = t[31];
         for (int i = 1; i < kHrtfTaps; i++)
             if (std::fabs(ear.tap[i]) > std::fabs(ear.tap[ear.peak])) ear.peak = i;
@@ -536,6 +550,29 @@ Place Locate(const Voice& v) {
     at.centre = at.front;
     if (v.nbins >= 5 && v.bin[4] == kBinCentre) ShareCentre(at);
     return at;
+}
+
+// Doppler, as the console's DirectSound library works it out for a 3D voice (in every Positional Audio choice: the
+// console shifts the pitch before its filters): the source's speed away from the listener -- its velocity less the
+// listener's, along the line from the listener to it -- times the distance factor (the doppler factors are the
+// library's 1), as a pitch of 4096 log2(1 - x / 342) in 4096ths of an octave, rounded; +4096 from x <= -342 and
+// -32767 from x >= 342. The voice's own pitch (4096 log2 of its rate over 48 kHz) adds it, and the sum stays within
+// -32767..8191. The title sets the velocities as its movement over one game frame, so the shift is small except for
+// what moves fast.
+double DopplerRate(const Voice& v, double rate) {
+    if (!v.is3d || !(rate > 0)) return rate;
+    float d[3] = {v.p[0] - g_listener[0], v.p[1] - g_listener[1], v.p[2] - g_listener[2]};
+    float len = std::sqrt(Dot(d, d));
+    if (len <= 0) return rate;
+    float rel[3] = {v.vel[0] - g_listener_vel[0], v.vel[1] - g_listener_vel[1], v.vel[2] - g_listener_vel[2]};
+    float x = Dot(rel, d) / len * v.distance_factor;
+    int shift;
+    if (x == 0 || !std::isfinite(x)) return rate;
+    if (x >= 342.0f) shift = -32767;
+    else if (x <= -342.0f) shift = 4096;
+    else shift = int(std::lrint(4096.0 * std::log2(1.0 - x * (1.0 / 342.0))));
+    double pitch = std::clamp(4096.0 * std::log2(rate) + shift, -32767.0, 8191.0);
+    return std::exp2(pitch / 4096.0);
 }
 
 // a 3D voice's level in a bin besides its distance: the 3D submixes' pairs and the centre take their shares
@@ -709,7 +746,7 @@ void MixVoice(Voice& v, float* out, float* send, uint32_t frames, int mode) {
     bool ears = at.on && v.channels == 1 && mode != 0 && g_hrtf_index;
     EarPair now, then;
     if (ears) {
-        now = Ears(at.azimuth, at.elevation);
+        now = Ears(at.azimuth, at.elevation, mode == 1);
         then = v.has_hrtf ? v.hrtf : now;
     }
     if (!v.has_gain) {
@@ -720,7 +757,7 @@ void MixVoice(Voice& v, float* out, float* send, uint32_t frames, int mode) {
     float dg[2][kLanes], dw[2] = {(w[0] - v.send_gain[0]) / frames, (w[1] - v.send_gain[1]) / frames};
     for (int c = 0; c < 2; c++)
         for (uint32_t k = 0; k < kLanes; k++) dg[c][k] = (g[c][k] - v.gain[c][k]) / float(frames);
-    double rate = double(v.freq ? v.freq : v.rate) / kRate;
+    double rate = DopplerRate(v, double(v.freq ? v.freq : v.rate) / kRate);
     for (uint32_t i = 0; i < frames; i++) {
         std::optional<Cursor> cur = BufferFrame(v);
         if (!cur) break;
@@ -784,7 +821,7 @@ void Render(float* out, uint32_t frames) {
         static const bool reverb = !(std::getenv("NGB_DSOUND_REVERB") && *std::getenv("NGB_DSOUND_REVERB") == '0');
         if (reverb) g_reverb.Run(send.data(), lanes.data(), frames);
     }
-    static const bool xtalk = std::getenv("NGB_DSOUND_XTALK") && *std::getenv("NGB_DSOUND_XTALK") == '1';
+    static const bool xtalk = !(std::getenv("NGB_DSOUND_XTALK") && *std::getenv("NGB_DSOUND_XTALK") == '0');
     for (uint32_t i = 0; xtalk && g_positional.load() == 1 && i < frames; i++) {
         float* m = &lanes[size_t(i) * kLanes];
         g_front_feed.Run(m[kBinCrosstalkFrontLeft], m[kBinCrosstalkFrontRight]);
@@ -1097,7 +1134,9 @@ extern "C" int dsound_hle_call(int fn, uint32_t va, const uint32_t* a, uint32_t*
     case DSF_IDirectSound_Release:
     case DSF_DirectSoundUseFullHRTF:
     case DSF_IDirectSound_CommitDeferredSettings:  // the settings apply as they come
-    case DSF_IDirectSound_SetVelocity:             // no Doppler
+        return 1;
+    case DSF_IDirectSound_SetVelocity:
+        for (int i = 0; i < 3; i++) g_listener_vel[i] = F32(a[1 + i]);
         return 1;
     case DSF_IDirectSound_GetSpeakerConfig:
         // DSSPEAKER_SURROUND with DSSPEAKER_ENABLE_AC3 (the dashboard's Dolby Digital) on 5.1, else DSSPEAKER_STEREO
@@ -1283,8 +1322,11 @@ extern "C" int dsound_hle_call(int fn, uint32_t va, const uint32_t* a, uint32_t*
     case DSF_IDirectSoundBuffer_SetRolloffFactor:
         v.rolloff = F32(a[1]);
         return 1;
-    case DSF_IDirectSoundBuffer_SetVelocity:       // no Doppler
-    case DSF_IDirectSoundBuffer_SetDistanceFactor:  // the units: Doppler only
+    case DSF_IDirectSoundBuffer_SetVelocity:
+        for (int i = 0; i < 3; i++) v.vel[i] = F32(a[1 + i]);
+        return 1;
+    case DSF_IDirectSoundBuffer_SetDistanceFactor:  // metres to a unit: Doppler only
+        v.distance_factor = F32(a[1]);
         return 1;
     default:
         return 0;

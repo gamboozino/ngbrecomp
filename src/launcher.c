@@ -144,8 +144,8 @@ void ngb_settings_load(NgbSettings *s)
     s->msaa = 1;
     s->shadow_scale = 1;   /* the console's (Original): 0.9.45; 4x before */
     s->quick_menu_freeze = 1;
-    s->positional_audio = 3;  /* mixed: half the filters, half a pan by direction -- easiest to place (#126); clear
-                               * (2) was the default from 0.9.40 to 0.9.51 */
+    s->positional_audio = 1;  /* console: the sound chip's filters and crosstalk, as a console sounds (#270); mixed (3)
+                               * was the default from 0.9.52 to 0.9.80, clear (2) from 0.9.40 to 0.9.51 */
     s->show_hud = 1;
     s->smooth_glow = 2;   /* Bloom On (#270): the game's bloom, steady at any render scale */
     s->talisman = 1;
@@ -159,7 +159,7 @@ void ngb_settings_load(NgbSettings *s)
     if (!f)
         return;
     s->width = s->height = 0;
-    int defaults = 0;   /* the defaults the file was written under (0: before 0.9.40, 3: 0.9.40, 4: 0.9.44, 5: 0.9.52) */
+    int defaults = 0;   /* the defaults the file was written under (0: before 0.9.40, 3: 0.9.40, 4: 0.9.44, 5: 0.9.52, 6: 0.9.81) */
     while (fgets(line, sizeof line, f)) {
         char key[64], val[128];
         if (sscanf(line, " %63[^= ] = %127[^\r\n]", key, val) != 2)
@@ -269,6 +269,10 @@ void ngb_settings_load(NgbSettings *s)
      * once (a Clear chosen on purpose included: the file cannot tell, and it is one change back) */
     if (defaults < 5 && s->positional_audio == 2)
         s->positional_audio = 3;
+    /* 0.9.81 made Console the default for everyone (#270: it now matches a console's capture): every file from before
+     * gets it once, whatever it had */
+    if (defaults < 6)
+        s->positional_audio = 1;
     snap_size(s);
 }
 
@@ -284,7 +288,7 @@ void ngb_settings_save(const NgbSettings *s)
         return;
     }
     fprintf(f, "# Ninja Gaiden Black settings (the settings screen writes this file)\n");
-    fprintf(f, "defaults = 5\n");
+    fprintf(f, "defaults = 6\n");
     fprintf(f, "aspect = %s\n", ASPECT_NAMES[s->aspect]);
     fprintf(f, "window = %dx%d\n", s->width, s->height);
     fprintf(f, "fullscreen = %d\n", s->fullscreen);

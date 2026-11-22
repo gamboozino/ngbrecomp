@@ -51,12 +51,16 @@ none, the arcade leaves it), position notifications (the arcade's double buffer:
 `DirectSoundDoWork`, on its own thread), the library's 3D pass (distance, rolloff, the direction by its own octant estimate), and dsstdfx's
 I3DL2 reverb on the send bin 10 with the room the game sets per area. dsstdfx's crosstalk effect on the 3D
 submixes (each side takes the other's output of 11 samples before through a one pole filter: 0x7645A1, 0xF88313 in the
-image's code, which the library decrypts as it loads it) ran for "Console" in 0.9.40 only: its bass came out mostly out
-of phase, and xemu running the image on its DSP matches "Console" without it (#126). The sound chip is not emulated.
+image's code, which the library decrypts as it loads it) runs for "Console": a capture of a console (Chapter 1's
+opening) has the wider bass it gives (0.9.40 ran it with the taps misread, and its bass came out out of phase, #126).
+3D sounds take Doppler as the library works it out: a pitch of 4096 log2(1 - v / 342) in 4096ths of an octave, v the
+speed away from the listener times the distance factor, within +1 octave and the voice pitch's -32767..8191 (the
+game passes each sound's movement over one game frame as its velocity, so it is slight). The sound chip is not emulated.
 Positional Audio places a mono 3D sound through the library's own HRTF tables (0x395430 the filter per
-direction, 0x383E70 the filters: 31 sign and magnitude taps per ear, the far ear's delay in its last
-byte): "Console" filters it as the chip does, "Clear" (the default from 0.9.40 to 0.9.51; "Panning" before 0.9.40)
-takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Mixed" (the default since 0.9.52) is half Console's filters (brought to Clear's power) and half a level pan by the direction, the far ear 6 dB down for a sound straight to one side (`NGB_MIX_PAN_DB`; Clear's levels a few dB apart left sounds hard to place, #126), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
+direction, 0x383E70 the filters: 31 taps per ear, the far ear's delay in its last byte): "Console" filters it as
+the chip does, each tap a small float in 2048ths (sign, 3 bits of exponent, 4 of mantissa: before 0.9.81 read as sign
+and magnitude in 128ths, which gave the far ear the more bass and dulled it all; the capture's tone now within 1 dB), "Clear" (the default from 0.9.40 to 0.9.51; "Panning" before 0.9.40)
+takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Mixed" (the default from 0.9.52 to 0.9.80; "Console" since 0.9.81) is half Console's filters (brought to Clear's power) and half a level pan by the direction, the far ear 6 dB down for a sound straight to one side (`NGB_MIX_PAN_DB`; Clear's levels a few dB apart left sounds hard to place, #126), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
 Stereo, 5.1, or Auto: 5.1 when the default output device has six channels or more. On 5.1 the program is
 told its speakers are surround (with Dolby Digital) and mixes for them, and the output is FL FR C LFE BL
 BR; on stereo the centre is folded into the front pair at -3 dB, and the back pairs into their sides at -3 dB too
@@ -64,7 +68,7 @@ BR; on stereo the centre is folded into the front pair at -3 dB, and the back pa
 `NGB_AUDIO_ENGINE=apu` goes back to the recompiled library on the emulated chip (xemu's voice
 processor, 0.9.29 and before: no reverb, no 5.1). `NGB_DSOUND_LOG=1` logs the calls (`=3` every Lock, `=2` every volume
 change too), `NGB_DSOUND_WAV=<file>` records what plays (either engine), `NGB_DSOUND_REVERB=0` leaves the
-reverb out, `NGB_DSOUND_XTALK=1` adds the crosstalk effect.
+reverb out, `NGB_DSOUND_XTALK=0` the crosstalk effect.
 
 `kill -USR1 <pid>` (Linux) prints the guest thread's host backtrace, every lifted function a named
 `sub_XXXXXXXX`, and its guest registers -- use it instead of gdb, which swallows the TF single-steps
