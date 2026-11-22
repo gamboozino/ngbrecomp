@@ -1299,11 +1299,33 @@ typedef struct {
     HANDLE handle;
     DIR*   dir;
     char   pattern[64];
+    int    entries;   /* names this search's listing gave (not . and ..) */
+    int    retries;   /* readings of it again */
 } DIR_CONTEXT;
 
 static DIR_CONTEXT s_dir_contexts[MAX_DIR_CONTEXTS];
 static CRITICAL_SECTION s_dir_cs;
 static BOOL s_dir_cs_init = FALSE;
+
+/* A listing that failed or came back empty is read again (#242). The game's own
+ * folders are never empty, and CRI's file-info cache walks one twice: once to size
+ * its table, once to fill it. On a phone the first walk once found nothing (its
+ * FindFirstFile failing reads as "no files"), the second found the movies, the
+ * table had no room for the first one, and CRI returned without releasing its lock:
+ * the main and loader threads then waited on it for good, a black screen. A truly
+ * empty folder costs DIR_RETRIES short waits. */
+#define DIR_RETRIES 5
+
+static DIR *dir_open_retry(const char *dpath)
+{
+    for (int i = 0;; i++) {
+        DIR *d = opendir(dpath);
+        if (d || i >= DIR_RETRIES || errno == ENOENT || errno == ENOTDIR)
+            return d;
+        fprintf(stderr, "[FILE] opening the folder %s failed (errno %d), again\n", dpath, errno);
+        usleep(2000);
+    }
+}
 
 NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
     HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
@@ -1339,7 +1361,9 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
         if (ctx->dir) { closedir(ctx->dir); ctx->dir = NULL; }
         const char* dpath = w32_handle_path(FileHandle);
         if (!dpath) { LeaveCriticalSection(&s_dir_cs); return STATUS_UNSUCCESSFUL; }
-        ctx->dir = opendir(dpath);
+        ctx->dir = dir_open_retry(dpath);
+        ctx->entries = 0;
+        ctx->retries = 0;
         if (!ctx->dir) {
             LeaveCriticalSection(&s_dir_cs);
             IoStatusBlock->Status = STATUS_NO_MORE_FILES;
@@ -1361,7 +1385,29 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
     struct stat st;
     char full[4096];   /* (a host path: longer than MAX_PATH in a deep folder, then never cut short) */
     for (;;) {
+        errno = 0;
         de = readdir(ctx->dir);
+        if (!de && (errno || ctx->entries == 0) && ctx->retries < DIR_RETRIES) {
+            int err = errno;
+            ctx->retries++;
+            if (err)
+                fprintf(stderr, "[FILE] listing %s failed (errno %d), again\n", dpath ? dpath : "?", err);
+            usleep(2000);
+            if (ctx->entries == 0 && dpath) {   /* nothing given yet: from the start (after an error the
+                                                 * position is kept, and names given are not given twice) */
+                closedir(ctx->dir);
+                ctx->dir = dir_open_retry(dpath);
+                if (!ctx->dir) {
+                    ctx->handle = NULL;
+                    LeaveCriticalSection(&s_dir_cs);
+                    IoStatusBlock->Status = STATUS_NO_MORE_FILES;
+                    return STATUS_NO_MORE_FILES;
+                }
+            }
+            continue;
+        }
+        if (de && ctx->retries && ctx->entries == 0 && strcmp(de->d_name, ".") && strcmp(de->d_name, ".."))
+            fprintf(stderr, "[FILE] listing %s gave names at reading %d\n", dpath ? dpath : "?", ctx->retries + 1);
         if (!de) {
             closedir(ctx->dir);
             ctx->dir = NULL;
@@ -1372,6 +1418,7 @@ NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
         }
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
             continue;
+        ctx->entries++;
         if (fnmatch(ctx->pattern, de->d_name, FNM_CASEFOLD) != 0)
             continue;
         /* (a file of 2 GiB or more is left out: see the Windows side) */
