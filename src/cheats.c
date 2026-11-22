@@ -155,6 +155,9 @@ static void item_count_change(void);
 static void weapons_seen(uint16_t item, int change);
 static void scroll_given(uint16_t item, int change);
 static uint16_t weapon_held_again(uint16_t item);
+static uint32_t inventory_slot(uint16_t item);
+static uint8_t s_mark;
+static int s_weapons_level;   /* the level the record's weapons were given at (weapons_tick) */
 
 void sub_00154300(void)
 {
@@ -182,6 +185,13 @@ void sub_00154300(void)
         item_count_change();
         ebx = keep;
         weapons_seen(item, change);
+        /* found now: the cheat's one is the player's (its mark off, so turning the cheat off leaves it and the levels
+         * Muramasa raised it to since, as scroll_given does for a scroll) */
+        uint32_t slot = inventory_slot(held);
+        if (slot && MEM8(slot + 3) == s_mark && s_weapons_level == 1) {   /* (not one Max Level gave, still to go back) */
+            MEM8(slot + 3) = 0;
+            cheat_wrote();
+        }
         return;
     }
     item_count_change();
@@ -1292,7 +1302,6 @@ static void weapons_tick(void)
     /* Level 1 and Max Level one for the other (or through Off, as the pause tab's cycle goes): what the level before gave
      * back first -- a weapon in Ryu's hands when he holds another -- and nothing of the new level given meanwhile, so
      * none is doubled. s_weapons_level: the level the record's weapons were given at. */
-    static int s_weapons_level;
     if (s_weapons_level && s_cheat[6] != s_weapons_level) {
         int keep = s_cheat[6], left = 0;
         s_cheat[6] = 0;
