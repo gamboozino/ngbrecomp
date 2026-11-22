@@ -121,7 +121,7 @@ static const char *const s_help[S_COUNT] = {
     "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size.",
     "Healing items, talismans and jewels are not used up. For this session only.",
     "Shuriken, smoke bombs, arrows and spears are not used up. For this session only.",
-    "Sounds placed left and right. Clear: by level only. Console: as the Xbox, duller. Mixed: between the two.",
+    "Sounds placed around you. Console: as on the Xbox. Mixed: easier to place. Clear: by level only.",
     "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen.",
     "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game.",
     "MISSIONS in the main menu without earning it.",

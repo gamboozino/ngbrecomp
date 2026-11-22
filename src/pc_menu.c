@@ -264,7 +264,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_AUTO, "Auto" },
     { T_STEREO, "Stereo" },
     { T_SURROUND, "5.1" },
-    { D_POSAUDIO, "Sounds placed left and right. Console: as the Xbox. Clear: by level only. Mixed: between the two." },
+    { D_POSAUDIO, "Sounds placed around you. Console: as on the Xbox. Mixed: easier to place. Clear: by level only." },
     { T_QUICKSCALE, "Quick Menu" },
     { D_QUICKSCALE, "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size." },
     { D_GAMEPLAY, "Optional changes to how the game plays, each off unless chosen: the Quick Menu." },
