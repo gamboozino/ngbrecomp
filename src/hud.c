@@ -832,3 +832,179 @@ loc_001FE9FA: ;
 
 }
 
+/**
+ * sub_001FB230
+ * Original: 0x001FB230 - 0x001FB2B4 (132 bytes, 35 insns)
+ * CC: cdecl, 0 params, returns int_or_void
+ * Frame: fpo_leaf
+ */
+void sub_001FB230(void)
+{
+    RECOMP_ENTRY(0x001FB230u);
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+
+loc_001FB230: ;
+    /* The half-black square behind the Ninpo orb (#272), sub_001FA3F0's second call (returning to 0x1FA70F;
+     * the first is the bar's backing): the game puts it 10 right and 19 down of the bar's corner, 29 square
+     * (the first stack word across, ecx down, edx wide, the second word high), in the 720 x 480 HUD -- (60,50) to
+     * (90,80) as drawn, lower and further left than the frame's hole (65..89 x 52..76), and its corner below the
+     * frame's left edge showed as black pixels on a bright background (the original game's too). Cut to (64,50)
+     * to (90,78): the hole still covered, all of it under the frame's opaque part. */
+    if (MEM32(esp) == 0x001FA70Fu) {
+        MEM32(esp + 4) += 4;
+        edx -= 4;
+        MEM32(esp + 8) -= 2;
+    }
+    _fb = (uint32_t)(0x28) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* sub source, before the write */
+    esp = esp - 0x28;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */
+    xmm0.f[0] = xmm0.f[0] * MEMF(0x4148C0); /* mulss */
+    eax = 0xFF000000u;
+    MEM32(esp + 0xC) = eax;
+    MEM32(esp + 8) = eax;
+    MEM32(esp + 4) = eax;
+    SET_LO16(eax, MEM16(esp + 0x2C));
+    PUSH32(esp, ebx);
+    MEM16(esp + 0x14) = LO16(eax);
+    SET_LO16(eax, MEM16(esp + 0x34));
+    PUSH32(esp, esi);
+    PUSH32(esp, edi);
+    MEM16(esp + 0x22) = LO16(eax);
+    eax = 0; /* xor self */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    PUSH32(esp, ecx);
+    edi = esp + 0x10;
+    MEM16(esp + 0x22) = LO16(ecx);
+    MEM16(esp + 0x24) = LO16(edx);
+    MEM8(esp + 0x2C) = LO8(eax);
+    MEM32(esp + 0x30) = eax;
+    MEM32(esp + 0x34) = eax;
+    MEM16(esp + 0x28) = LO16(eax);
+    MEM32(esp + 0x10) = 0xBF000000u;
+    MEM16(esp + 0x2A) = 0x1CC;
+    MEMF(esp) = xmm0.f[0]; /* movss */
+    PUSH32(esp, 0x001FB29Eu); RECOMP_ABI_CALL(0x00175860u, sub_00175860); /* call 0x00175860 */
+
+loc_001FB29E: ;
+    _fb = (uint32_t)(4) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 4;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    esi = edi;
+    ebx = 0x8F7DF0;
+    PUSH32(esp, 0x001FB2ADu); RECOMP_ABI_CALL(0x00222250u, sub_00222250); /* call 0x00222250 */
+
+loc_001FB2AD: ;
+    POP32(esp, edi);
+    POP32(esp, esi);
+    POP32(esp, ebx);
+    _fb = (uint32_t)(0x28) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0x28;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    esp += 4; return; /* ret */
+
+}
+
+/**
+ * sub_001FB8D0
+ * Original: 0x001FB8D0 - 0x001FB981 (177 bytes, 46 insns)
+ * CC: cdecl, 0 params, returns int_or_void
+ * Frame: standard_frame
+ */
+void sub_001FB8D0(void)
+{
+    RECOMP_ENTRY(0x001FB8D0u);
+    uint32_t ebp = 0;
+    ebp = g_ebp;  /* prologue saves caller's frame */
+    int _flags = 0; /* fallback flag var */
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+
+loc_001FB8D0: ;
+    PUSH32(esp, ebp);
+    ebp = esp;
+    g_ebp = ebp; /* publish frame for frameless callees */
+    g_seh_ebp = ebp;
+    esp = esp & 0xFFFFFFF0u;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */
+    _fb = (uint32_t)(0x38) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* sub source, before the write */
+    esp = esp - 0x38;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */
+    _fa = (uint32_t)(LO16(eax)) & 0xFFFFu; _fb = (uint32_t)(MEM16(ebp + 8)) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(eax), MEM16(ebp + 8) (16-bit) */
+    xmm1 = XMM_SCALAR(MEMF(0x4148C8)); /* movss */
+    PUSH32(esp, esi);
+    esi = MEM32(ebp + 0xC);
+    PUSH32(esp, edi);
+    if (CMP_AE(_fa, _fb)) goto loc_001FB8F4; /* jae: above or equal (unsigned >=) */
+
+loc_001FB8EC: ;
+    xmm1 = XMM_SCALAR(MEMF(0x414BB4)); /* movss */
+
+loc_001FB8F4: ;
+    xmm0 = XMM_ZERO(); /* xorps self = zero */
+    SET_LO8(eax, 1);
+    MEM8(esp + 0x1F) = LO8(eax);
+    MEM8(esp + 0x20) = LO8(eax);
+    SET_LO8(eax, MEM8(0xBCDF78));
+    MEM32(esp + 0x14) = ecx;
+    ecx = 0; /* xor self */
+    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(2) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 2 (8-bit) */
+    MEM16(esp + 0x1C) = 0x1CD;
+    MEM8(esp + 0x1E) = LO8(ecx);
+    MEM32(esp + 0x24) = ecx;
+    MEMF(esp + 0x38) = xmm0.f[0]; /* movss */
+    MEM32(esp + 0x3C) = 0xFFFFFFFFu;
+    if (CMP_NE(_fa, _fb)) goto loc_001FB93D; /* jne: not equal / not zero */
+
+loc_001FB92D: ;
+    xmm0 = XMM_SCALAR(MEMF(0x4149D8)); /* movss */
+    _fb = (uint32_t)(0xFFFFFFFCu) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + 0xFFFFFFFCu;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fb = (uint32_t)(0xFFFFFFFDu) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    edx = edx + 0xFFFFFFFDu;
+    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    goto loc_001FB94B;
+
+loc_001FB93D: ;
+    xmm0 = XMM_SCALAR(MEMF(0x414BF4)); /* movss */
+    _fb = (uint32_t)(9) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + 9;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fb = (uint32_t)(6) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    edx = edx + 6;
+    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    /* HUD Aspect Corrected (setting 42): the Ninpo icon a pixel left (#272). The game draws it 1.35 pixels of
+     * the 720 x 480 HUD right of the middle of the frame's hole (the icon's disc at 78.85 across, the hole's
+     * at 77.5); in their own shape that shows, the icon against the hole's right edge. Stretched as the game
+     * draws it. */
+    if (ngb_pc_setting(42))
+        esi -= 1;
+
+loc_001FB94B: ;
+    MEMF(esp + 0x28) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x2C) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(ebp + 0x10)); /* movss */
+    edi = esp + 0x14;
+    MEM16(esp + 0x18) = LO16(esi);
+    MEM16(esp + 0x1A) = LO16(edx);
+    MEMF(esp + 0x34) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x30) = xmm1.f[0]; /* movss */
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x001FB97Bu); RECOMP_ABI_CALL(0x00221340u, sub_00221340); /* call 0x00221340 */
+
+loc_001FB97B: ;
+    POP32(esp, edi);
+    POP32(esp, esi);
+    esp = ebp;
+    POP32(esp, ebp);
+    esp += 4; return; /* ret */
+
+}
+
