@@ -115,15 +115,15 @@ void ngb_set_all_difficulties(int on);   /* src/cheats.c */
 void ngb_set_all_costumes(int on);
 void ngb_set_unlock(int which, int on);
 
-/* Positional Audio's next value in the menus' order -- Off, Clear, Mixed, Console -- not the values' (0 off, 1 console,
- * 2 clear, 3 mixed: the saved numbers kept) */
+/* Positional Audio's next value in the menus' order -- Console, Clear, Off -- not the values' (0 off, 1 console,
+ * 2 clear: the saved numbers kept; 3 was Mixed, gone in 0.9.83) */
 int ngb_positional_step(int v, int step)
 {
-    static const int order[4] = { 0, 2, 3, 1 };
+    static const int order[3] = { 1, 2, 0 };
     int i = 0;
-    while (i < 4 && order[i] != v)
+    while (i < 3 && order[i] != v)
         i++;
-    return order[((i < 4 ? i : 0) + (step > 0 ? 1 : 3)) % 4];
+    return order[((i < 3 ? i : 0) + (step > 0 ? 1 : 2)) % 3];
 }
 
 /* Bloom's next value: On, Off (2, 3; 0 Original and 1 Reduced only by NGB_BLOOM, for comparing) */
@@ -220,7 +220,7 @@ void ngb_pc_set_setting(int which, int value)
     case 8: s_running.skip_intro = value; break;        /* both at the next start */
     case 9: s_running.show_launcher = value; break;
     case 18: s_running.smooth_glow = value == 3 ? 3 : 2; break;
-    case 23: s_running.positional_audio = value < 0 ? 0 : value > 3 ? 3 : value; ngb_audio_set_positional(s_running.positional_audio); break;
+    case 23: s_running.positional_audio = value < 0 || value > 2 ? 1 : value; ngb_audio_set_positional(s_running.positional_audio); break;
     case 24: s_running.show_hud = !!value; break;
     case 41: s_running.hud_style = !!value; break;
     case 42: s_running.hud_aspect = !!value; break;
@@ -556,7 +556,7 @@ void ngb_karma_window_press(void)
         pulse_push(0x100 | (1u << b));
 }
 
-/* Exit to Desktop: as closing the window does. */
+/* Exit Game: as closing the window does. */
 void ngb_quit_to_desktop(void)
 {
     SDL_Event e = { .type = SDL_QUIT };

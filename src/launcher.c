@@ -144,8 +144,8 @@ void ngb_settings_load(NgbSettings *s)
     s->msaa = 1;
     s->shadow_scale = 1;   /* the console's (Original): 0.9.45; 4x before */
     s->quick_menu_freeze = 1;
-    s->positional_audio = 1;  /* console: the sound chip's filters and crosstalk, as a console sounds (#270); mixed (3)
-                               * was the default from 0.9.52 to 0.9.80, clear (2) from 0.9.40 to 0.9.51 */
+    s->positional_audio = 1;  /* console: the sound chip's filters and crosstalk, as a console sounds (#270); mixed (3,
+                               * gone in 0.9.83) was the default from 0.9.52 to 0.9.80, clear (2) from 0.9.40 to 0.9.51 */
     s->show_hud = 1;
     s->smooth_glow = 2;   /* Bloom On (#270): the game's bloom, steady at any render scale */
     s->talisman = 1;
@@ -221,7 +221,7 @@ void ngb_settings_load(NgbSettings *s)
         } else if (!strcmp(key, "show_hud")) {
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
-            s->positional_audio = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
+            s->positional_audio = atoi(val) < 0 || atoi(val) > 2 ? 1 : atoi(val);   /* 0 off, 1 console, 2 clear (3 was mixed: console) */
         } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: On either way now (#270) */
             s->smooth_glow = 2;
         } else if (!strcmp(key, "bloom")) {   /* 2 On, 3 Off; 0 Original and 1 Reduced are On now (#270) */
@@ -265,10 +265,6 @@ void ngb_settings_load(NgbSettings *s)
     /* 0.9.43 had Skip Any Cutscene on unless turned off, and wrote it on into every file it saved: off unless chosen */
     if (defaults == 3)
         s->skip_cutscenes = 0;
-    /* 0.9.52 made Mixed the Positional Audio default (#126): a file from before with Clear, the old default, gets it
-     * once (a Clear chosen on purpose included: the file cannot tell, and it is one change back) */
-    if (defaults < 5 && s->positional_audio == 2)
-        s->positional_audio = 3;
     /* 0.9.81 made Console the default for everyone (#270: it now matches a console's capture): every file from before
      * gets it once, whatever it had */
     if (defaults < 6)

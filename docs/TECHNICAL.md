@@ -59,8 +59,8 @@ game passes each sound's movement over one game frame as its velocity, so it is 
 Positional Audio places a mono 3D sound through the library's own HRTF tables (0x395430 the filter per
 direction, 0x383E70 the filters: 31 taps per ear, the far ear's delay in its last byte): "Console" filters it as
 the chip does, each tap a small float in 2048ths (sign, 3 bits of exponent, 4 of mantissa: before 0.9.81 read as sign
-and magnitude in 128ths, which gave the far ear the more bass and dulled it all; the capture's tone now within 1 dB), "Clear" (the default from 0.9.40 to 0.9.51; "Panning" before 0.9.40)
-takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Mixed" (the default from 0.9.52 to 0.9.80; "Console" since 0.9.81) is half Console's filters (brought to Clear's power) and half a level pan by the direction, the far ear 6 dB down for a sound straight to one side (`NGB_MIX_PAN_DB`; Clear's levels a few dB apart left sounds hard to place, #126), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
+and magnitude in 128ths, which gave the far ear the more bass and dulled it all; the capture's tone now within 1 dB), 9.5 dB up so its 3D sounds are as loud against the music as those of "Mixed" (below) were (#270: the chip's own level, within 2 dB of the capture, was heard as too quiet; `NGB_DSOUND_CHIP_GAIN=<dB>`, 0 for that), "Clear" (the default from 0.9.40 to 0.9.51; "Panning" before 0.9.40)
+takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Off" plays it centred. ("Mixed", the default from 0.9.52 to 0.9.80, half the filters read the old way and half a level pan by the direction, went in 0.9.83 with Console at its loudness; a saved Mixed reads as Console.) Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
 Stereo, 5.1, or Auto: 5.1 when the default output device has six channels or more. On 5.1 the program is
 told its speakers are surround (with Dolby Digital) and mixes for them, and the output is FL FR C LFE BL
 BR; on stereo the centre is folded into the front pair at -3 dB, and the back pairs into their sides at -3 dB too
@@ -68,7 +68,8 @@ BR; on stereo the centre is folded into the front pair at -3 dB, and the back pa
 `NGB_AUDIO_ENGINE=apu` goes back to the recompiled library on the emulated chip (xemu's voice
 processor, 0.9.29 and before: no reverb, no 5.1). `NGB_DSOUND_LOG=1` logs the calls (`=3` every Lock, `=2` every volume
 change too), `NGB_DSOUND_WAV=<file>` records what plays (either engine), `NGB_DSOUND_REVERB=0` leaves the
-reverb out, `NGB_DSOUND_XTALK=0` the crosstalk effect.
+reverb out, `NGB_DSOUND_XTALK=0` the crosstalk effect, `NGB_DSOUND_ONLY=3d` or `2d` mixes only those sounds (for
+measuring; the others stop where they are).
 
 `kill -USR1 <pid>` (Linux) prints the guest thread's host backtrace, every lifted function a named
 `sub_XXXXXXXX`, and its guest registers -- use it instead of gdb, which swallows the TF single-steps
@@ -154,7 +155,7 @@ before, which shimmered at ratios like 1.8:1; `NV2A_AREA_DOWNSCALE=0` goes back 
 ## Settings, menus and features
 
 The settings are in the game's own menus, in its style: the main menu's RECOMP SETTINGS
-(where Ranking was) opens the Options screen on them -- Graphics, Display, Sound, Gameplay
+(below OPTIONS) opens the Options screen on them -- Graphics, Display, Sound, Gameplay
 and Cheats, each a page of rows like Video Settings', and Controls (the bindings' panel,
 below), under a SETTINGS header (`src/pc_menu.c`;
 the header and category words are drawn in Liberation Serif in the game's pictures' style,
@@ -277,8 +278,9 @@ Debugging aids there: `NGB_CHEATS=111` turns them on at start, `NGB_POKE=addr:by
 writes guest memory every frame (only while the file `NGB_POKE_GATE` names exists, if set) and
 `NGB_MEMDUMP=<dir>` dumps the 64 MB of guest memory each time `<dir>/dump.now` appears.
 
-Back from OPTIONS or RECOMP SETTINGS the main menu's cursor returns to the entry chosen (the
-game puts it where OPTIONS was before it moved, the last entry: now EXIT TO DESKTOP). With All
+Back from OPTIONS, RECOMP SETTINGS, ARCADE or MOVIE THEATER the main menu's cursor returns to
+the entry chosen (the game puts it on the place it was handed: ARCADE 4, MOVIE THEATER 5, OPTIONS and RECOMP
+SETTINGS 7). With All
 Difficulties' Ninja Dog the difficulty selection has five rows, a case the game never shows
 there: they are spaced closer (38 instead of 44) so the first clears the header.
 
@@ -344,10 +346,9 @@ cut cross-fade's). F8 appends Ryu's position to `ngb_positions.txt`
 in the save directory.
 
 The pause menu's Exit tab has a page of its own: Return to Game (the game's Exit: the menu
-closes), Return to Main Menu and Exit to Desktop, the last two after an "Are you sure?"
+closes), Return to Main Menu and Exit Game, the last two after an "Are you sure?"
 Yes/No box in the game's menus' style (a near-black panel between gold rules, the game's own
-letters, the chosen answer white in the violet haze of its menu items). The main menu's last entry is EXIT TO DESKTOP, behind the same box (OPTIONS moved
-up into the never-shown COMING ATTRACTIONS' place). The game has no way back to its title
+letters, the chosen answer white in the violet haze of its menu items). The main menu's last entry is EXIT GAME, behind the same box. The game has no way back to its title
 from play but the console's reset, so Return to Main Menu starts the program again in the
 same process (Steam and the like see one game running throughout), skips the intros and
 presses Start at the title; the window closes and opens again on the way.
@@ -460,8 +461,9 @@ nothing in the menus; moving it makes the keyboard and mouse the device in use a
 The button prompts ("Select", "Back") can be clicked: the button they show. Esc is B (back) in
 the game's menus.
 
-The main menu has RECOMP SETTINGS in Ranking's place (Xbox Live's scoreboards, gone; choosing it
-sent the game to the dashboard's account setup, which closed the program) and Options > General Settings no Flag
+The main menu has no Ranking (Xbox Live's scoreboards, gone; choosing it sent the game to the
+dashboard's account setup, which closed the program): it reads NEW GAME, LOAD GAME, MISSIONS,
+ARCADE NINJA GAIDEN, MOVIE THEATER, OPTIONS, RECOMP SETTINGS, EXIT GAME, as NG2's title menu. And Options > General Settings no Flag
 Select (the country the scoreboards wanted) -- `src/main_menu.c`; `NGB_KEEP_RANKING=1` keeps
 both.
 

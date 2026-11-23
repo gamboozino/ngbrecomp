@@ -60,12 +60,11 @@ int dsound_hook(int fn)
 void mcpx_apu_set_hrtf(int mode);              /* xboxrecomp/src/apu */
 void dsound_hle_set_positional(int mode);      /* src/audio/dsound_hle.cpp */
 
-/* Positional Audio (0 off, 1 the HRTF filters, 2 panning, 3 the two mixed; #30, #86, #126), for whichever engine plays
- * (the old one has no mix: 3 is its filters) */
+/* Positional Audio (0 off, 1 the HRTF filters, 2 panning; #30, #86), for whichever engine plays */
 void ngb_audio_set_positional(int mode)
 {
-    static const char *const name[] = { "Off", "Console", "Clear", "Mixed" };
-    fprintf(stderr, "[AUDIO] Positional Audio: %s\n", mode >= 0 && mode <= 3 ? name[mode] : "?");
+    static const char *const name[] = { "Off", "Console", "Clear" };
+    fprintf(stderr, "[AUDIO] Positional Audio: %s\n", mode >= 0 && mode <= 2 ? name[mode] : "?");
     mcpx_apu_set_hrtf(mode);
     dsound_hle_set_positional(mode);
 }
