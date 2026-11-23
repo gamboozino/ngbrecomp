@@ -61,6 +61,11 @@ void vcpu_yield_any(void);
  * (vcpu_yield_any) between its sleeps. */
 void vcpu_quiet_begin(void);
 void vcpu_quiet_end(void);
+/* Around a host wait at host depth 0 that holds no lock of a library's while it sleeps (a condition variable's
+ * wait): a preemption may yield in it, as it does in guest code. Elsewhere on Linux and macOS a preemption that
+ * lands outside the executable waits for the next quantum (#275). No-op on Windows. */
+void vcpu_yield_anywhere_begin(void);
+void vcpu_yield_anywhere_end(void);
 
 void vcpu_set_priority(vcpu_thread *t, int priority);
 int  vcpu_get_priority(vcpu_thread *t);

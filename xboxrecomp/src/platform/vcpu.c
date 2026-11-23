@@ -39,6 +39,8 @@ void compat_park_if_pending(void);
 
 #define VCPU_MAX_THREADS 256
 #define VCPU_QUANTUM_MS  10
+/* Preemptions put off in libc in a row (each re-sent at the next tick, ~5 ms) before one yields there anyway */
+#define VCPU_DEFER_MAX   10
 /* A thread ready this long without the CPU gets it for one quantum, whatever
  * its priority: NT-family schedulers boost starved threads the same way, and
  * titles that spin at raised priority on work a lower thread has to finish
@@ -63,6 +65,8 @@ struct vcpu_thread {
     int in_vcpu;            /* inside this file: a preempt signal must wait */
     int held_blocked;       /* released the CPU in vcpu_block_begin */
     int detached;
+    volatile int deferred;  /* last preemption landed outside the executable */
+    int deferrals;          /* ... so many in a row (the signal handler's alone) */
 #if defined(_WIN32)
     HANDLE host;            /* this thread, for suspending it */
     DWORD tid;
@@ -84,6 +88,7 @@ static unsigned long s_seq;
 static int64_t s_holder_since_ms;
 static int s_enabled = -1;
 static __thread vcpu_thread *t_self;
+static __thread volatile int t_yield_anywhere;   /* vcpu_yield_anywhere_begin's count */
 
 
 int vcpu_enabled(void)
@@ -181,10 +186,17 @@ static void dispatch(void)
 
 static void request_preempt(vcpu_thread *h)
 {
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
     /* A prior signal may have landed in libc and deferred. Do not leave a
-     * guest spin loop holding the CPU forever with preempt already set. */
+     * guest spin loop holding the CPU forever with preempt already set.
+     * Linux sends again only after such a skip: a holder in host code keeps
+     * the flag up for compat_host_leave, and a signal every quantum would cut
+     * its sleeps short. */
+#ifdef __APPLE__
     if (h && h->preempt && !pthread_equal(h->thread, pthread_self())) {
+#else
+    if (h && h->preempt && h->deferred && !pthread_equal(h->thread, pthread_self())) {
+#endif
         pthread_kill(h->thread, SIG_PREEMPT);
         return;
     }
@@ -233,6 +245,7 @@ static void acquire_locked_ex(vcpu_thread *t, int polite)
     while (s_holder != t)
         pthread_cond_wait(&t->cv, &s_lock);
     t->preempt = 0;
+    t->deferred = 0;
 }
 
 static void acquire_locked(vcpu_thread *t)
@@ -253,6 +266,7 @@ static void yield_now(vcpu_thread *t)
     t->in_vcpu = 1;
     pthread_mutex_lock(&s_lock);
     t->preempt = 0;
+    t->deferred = 0;
     if (s_holder == t) {
         vcpu_thread *b = best_ready();
         if (b && (b->priority >= t->priority || starved_ready())) {
@@ -265,36 +279,124 @@ static void yield_now(vcpu_thread *t)
 }
 
 #if !defined(_WIN32)
+/* The executable's code, where guest code runs. A signal that lands anywhere
+ * else (libc, the vDSO, a driver) may have interrupted a thread holding a
+ * library lock -- stdio's around fprintf, malloc's, Darwin's even in getenv.
+ * Yielding there strands the next thread that takes the lock, and with it
+ * the CPU (#275). Such a preemption is skipped; request_preempt sends it again
+ * next quantum. Ranges not found: every preemption yields, as before. */
+#define VCPU_TEXT_MAX 4
+static uintptr_t s_text_lo[VCPU_TEXT_MAX], s_text_hi[VCPU_TEXT_MAX];
+static int s_text_n;
+
+static int pc_in_text(uintptr_t pc)
+{
+    if (s_text_n == 0)
+        return 1;
+    for (int i = 0; i < s_text_n; i++)
+        if (pc >= s_text_lo[i] && pc < s_text_hi[i])
+            return 1;
+    return 0;
+}
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 #include <sys/ucontext.h>
-static uintptr_t s_text_lo, s_text_hi;
-static void preempt_signal(int sig, siginfo_t *si, void *opaque)
+
+static void find_text(void)
+{
+    unsigned long text_size = 0;
+    const uint8_t *text = getsegmentdata((const struct mach_header_64 *)_dyld_get_image_header(0), "__TEXT", &text_size);
+    if (text && text_size) {
+        s_text_lo[0] = (uintptr_t)text;
+        s_text_hi[0] = s_text_lo[0] + text_size;
+        s_text_n = 1;
+    }
+}
+
+static uintptr_t signal_pc(void *opaque)
+{
+    return ((ucontext_t *)opaque)->uc_mcontext->__ss.__pc;
+}
+#elif defined(__linux__)
+#include <link.h>
+#include <ucontext.h>
+
+/* The module vcpu.c is linked into: the program, or libmain.so on Android. */
+static int find_text_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+    uintptr_t self = (uintptr_t)data;
+    int hit = 0;
+
+    (void)size;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        uintptr_t lo = info->dlpi_addr + ph->p_vaddr;
+        if (ph->p_type == PT_LOAD && self >= lo && self < lo + ph->p_memsz)
+            hit = 1;
+    }
+    if (!hit)
+        return 0;
+    for (int i = 0; i < info->dlpi_phnum && s_text_n < VCPU_TEXT_MAX; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type == PT_LOAD && (ph->p_flags & PF_X)) {
+            s_text_lo[s_text_n] = info->dlpi_addr + ph->p_vaddr;
+            s_text_hi[s_text_n] = s_text_lo[s_text_n] + ph->p_memsz;
+            s_text_n++;
+        }
+    }
+    return 1;
+}
+
+static void find_text(void)
+{
+    dl_iterate_phdr(find_text_cb, (void *)(uintptr_t)&find_text);
+}
+
+static uintptr_t signal_pc(void *opaque)
+{
+    ucontext_t *uc = opaque;
+#if defined(__x86_64__)
+    return (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+#elif defined(__aarch64__)
+    return (uintptr_t)uc->uc_mcontext.pc;
 #else
-static void preempt_signal(int sig)
+    (void)uc;
+    return s_text_lo[0];
 #endif
+}
+#else
+static void find_text(void) {}
+static uintptr_t signal_pc(void *opaque) { (void)opaque; return 0; }
+#endif
+
+static void preempt_signal(int sig, siginfo_t *si, void *opaque)
 {
     vcpu_thread *t = t_self;
     int saved = errno;
 
     (void)sig;
-#ifdef __APPLE__
     (void)si;
-    uintptr_t pc = ((ucontext_t *)opaque)->uc_mcontext->__ss.__pc;
-    /* Darwin libc uses locks even in getenv. Yielding while it holds one
-     * can strand the next guest thread in that same lock. Retry next quantum
-     * when the interrupted PC is back in the executable. */
-    if (pc < s_text_lo || pc >= s_text_hi)
-        return;
-#endif
     if (t && !t->in_vcpu && compat_host_depth() == 0) {
+        /* Only here would it yield: a skip marks it for request_preempt to send again. Only so many in a row: a
+         * thread blocked in libc on a lock another guest thread holds (that one waiting for the CPU) is in libc
+         * at every signal, and was let go of the CPU on the first before this check -- a call like fprintf is out
+         * again long before. */
+        t->deferred = !t_yield_anywhere && !pc_in_text(signal_pc(opaque)) && t->deferrals < VCPU_DEFER_MAX;
+        if (t->deferred) {
+            t->deferrals++;
+            errno = saved;
+            return;
+        }
+        t->deferrals = 0;
         yield_now(t);
         /* A suspension that arrived while this thread waited for the CPU
          * has to take effect before it runs more guest code. */
         compat_park_if_pending();
     }
-    /* else: compat_host_leave sees t->preempt */
+    else if (t)   /* compat_host_leave sees t->preempt; no signal again meanwhile */
+        t->deferred = 0;
     errno = saved;
 }
 #endif
@@ -307,7 +409,9 @@ static void *quantum_thread(void *unused)
     for (;;) {
         usleep(VCPU_QUANTUM_MS * 1000 / 2);
         pthread_mutex_lock(&s_lock);
-        if (s_holder && now_ms() - s_holder_since_ms >= VCPU_QUANTUM_MS) {
+        /* (a preemption put off in libc, sent again at every tick: a thread of higher priority waiting on it
+         * waits no whole quantum) */
+        if (s_holder && (now_ms() - s_holder_since_ms >= VCPU_QUANTUM_MS || (s_holder->preempt && s_holder->deferred))) {
             vcpu_thread *b = best_ready();
             if (b && (b->priority >= s_holder->priority || starved_ready()))
                 request_preempt(s_holder);
@@ -328,17 +432,11 @@ static void vcpu_init_once(void)
     struct sigaction sa;
 
     memset(&sa, 0, sizeof(sa));
-#ifdef __APPLE__
-    unsigned long text_size = 0;
-    const uint8_t *text = getsegmentdata((const struct mach_header_64 *)_dyld_get_image_header(0), "__TEXT", &text_size);
-    s_text_lo = (uintptr_t)text;
-    s_text_hi = s_text_lo + text_size;
+    find_text();
+    fprintf(stderr, "[VCPU] preemption yields only in the executable's code: %d range(s)%s\n",
+            s_text_n, s_text_n ? "" : " (not found: yields anywhere)");
     sa.sa_sigaction = preempt_signal;
     sa.sa_flags = SA_RESTART | SA_SIGINFO;
-#else
-    sa.sa_handler = preempt_signal;
-    sa.sa_flags = SA_RESTART;
-#endif
     sigemptyset(&sa.sa_mask);
     sigaction(SIG_PREEMPT, &sa, NULL);
 #else
@@ -359,6 +457,7 @@ vcpu_thread *vcpu_attach(int priority)
 
     t = calloc(1, sizeof(*t));
     t->thread = pthread_self();
+    t_yield_anywhere = 0;   /* (its thread-local storage made here, not first in the signal handler) */
 #if defined(_WIN32)
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &t->host,
                     THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT |
@@ -468,12 +567,23 @@ void vcpu_yield_any(void)
     t->in_vcpu = 1;
     pthread_mutex_lock(&s_lock);
     t->preempt = 0;
+    t->deferred = 0;
     if (s_holder == t && best_ready()) {
         release_locked(t);
         acquire_locked_ex(t, 1);
     }
     pthread_mutex_unlock(&s_lock);
     t->in_vcpu = 0;
+}
+
+void vcpu_yield_anywhere_begin(void)
+{
+    t_yield_anywhere++;
+}
+
+void vcpu_yield_anywhere_end(void)
+{
+    t_yield_anywhere--;
 }
 
 void vcpu_quiet_begin(void)
