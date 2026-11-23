@@ -44,6 +44,9 @@ void ngb_menu_frame(void)
     s_frames++;
 }
 
+/* The game's frames so far (src/main_menu.c: the main menu back after another screen) */
+uint32_t ngb_game_frames(void) { return s_frames; }
+
 static uint64_t now_ms(void);
 static volatile uint64_t s_engine_ms;
 

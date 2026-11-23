@@ -3,10 +3,10 @@
  *
  * Ranking's scoreboards were Xbox Live's, long gone, and choosing it
  * leaves the game for the dashboard's account setup (dashupdate.xbe), which
- * is not here: the program ends. Its entry in the main menu's list is
- * hidden and not selectable (the list's entries: 8 bytes, byte 4 enabled,
- * byte 5 shown), as the game hides the entries it does not offer. The menu's drawer (sub_0017A010) is the
- * lifted one renamed, behind a wrapper; its list is at ebx.
+ * is not here: the program ends. Its entry in the main menu's list (8 bytes
+ * an entry: the flag, byte 4 enabled, byte 5 shown) is taken by OPTIONS
+ * (below). The menu's drawer (sub_0017A010) is the lifted one renamed,
+ * behind a wrapper; its list is at ebx.
  *
  * Options > General Settings without Flag Select (the country Ranking
  * wanted): the menu engine's General page (page 1 of the Options menu)
@@ -15,18 +15,21 @@
  * Settings and Exit in the flag's place and after. NGB_KEEP_RANKING=1
  * keeps both.
  *
- * Ranking's place in the list is "RECOMP SETTINGS" instead: its text in
- * the menu's text table (0x436184: id, English, Japanese) is ours, and
- * choosing it (the main menu's A handler, sub_0017B010, with the cursor at
- * 0x94 in the menu object) opens the Options menu as OPTIONS does (its id,
- * 7, at 0x90) but on the recomp's settings (src/pc_menu.c, RECOMP
- * SETTINGS), instead of Ranking's flag question and the dashboard's
- * account setup.
- *
- * The last entry is EXIT TO DESKTOP, behind an Are you sure? box
- * (src/pause_tab.c): OPTIONS moves up into COMING ATTRACTIONS' place (Xbox
- * Live's trailers, gone; it is never shown) -- its text there, and its
- * choice made as OPTIONS' (id 7) -- and OPTIONS' place has the new words.
+ * The list then reads NEW GAME, LOAD GAME, MISSIONS, ARCADE NINJA GAIDEN,
+ * MOVIE THEATER, OPTIONS, RECOMP SETTINGS, EXIT GAME (as NG2's title menu,
+ * #277). A row's text is the menu's text id + its place (place 3's entry
+ * at 0x436188, then 0xC a place: id, English, Japanese), its showing the flag in its list entry
+ * (sub_0017A9C0), and choosing it hands the game its place (the A handler,
+ * sub_0017B010: the cursor at 0x94 in the menu object, the choice at 0x90).
+ * So ARCADE's and MOVIE THEATER's entries move up into Ranking's place and
+ * the next (their flags with them), the texts of places 3-5 are theirs and
+ * OPTIONS' while the main menu draws (only then: those screens' own titles
+ * are the same ids), and each choice is handed on as its own place:
+ * ARCADE 4, MOVIE THEATER 5, OPTIONS 7. RECOMP SETTINGS (COMING
+ * ATTRACTIONS' place: Xbox Live's trailers, gone; never shown) opens the
+ * Options menu as OPTIONS does but on the recomp's settings (src/pc_menu.c).
+ * EXIT GAME (OPTIONS' place) asks Are you sure? (src/pause_tab.c). Ranking's
+ * flag question and the dashboard's account setup are gone with its row.
  */
 #define RECOMP_GENERATED_CODE
 #include "recomp_funcs.h"
@@ -41,7 +44,11 @@
 
 
 static void items_draw(void);
-static int s_back_to = -1;   /* the entry to return to from the Options menu (OPTIONS, RECOMP SETTINGS) */
+/* The main menu's text table: place i's English text pointer (Japanese at + 4). */
+#define MENU_TEXT(i) (0x43618Cu + 0xCu * ((uint32_t)(i) - 3))
+static uint32_t s_main_text[3][2];   /* places 3-5 on the main menu: ARCADE, MOVIE THEATER, OPTIONS */
+static int s_back_to = -1;   /* the row to return to from a choice handed on as another place */
+static int s_back_id = -1;   /* that place */
 static int s_no_flag;
 
 /* Before the game starts (after src/pc_menu.c has its page table). */
@@ -52,24 +59,21 @@ void ngb_general_page_init(void)
 {
     if (getenv("NGB_KEEP_RANKING"))
         return;
-    {   /* COMING ATTRACTIONS' text (0x4361AC: id 0x9000C) OPTIONS', OPTIONS' ours */
-        static const char t[] = "EXIT TO DESKTOP";
-        uint32_t va = xbox_HeapAlloc(sizeof t, 4);
-        MEM32(0x4361B0) = MEM32(0x4361BC);
-        MEM32(0x4361B4) = MEM32(0x4361C0);
-        if (va) {
-            memcpy((void *)XBOX_PTR(va), t, sizeof t);
-            MEM32(0x4361BC) = va;
-            MEM32(0x4361C0) = va;
-        }
+    /* The texts of places 3-5 while the main menu draws: ARCADE's, MOVIE THEATER's, OPTIONS' (main_texts) */
+    for (int i = 0; i < 3; i++) {
+        s_main_text[i][0] = MEM32(MENU_TEXT(4 + (i == 2 ? 3 : i)));
+        s_main_text[i][1] = MEM32(MENU_TEXT(4 + (i == 2 ? 3 : i)) + 4);
     }
-    {   /* Ranking's text: "RECOMP SETTINGS" (English and Japanese) */
-        static const char t[] = "RECOMP SETTINGS";
-        uint32_t va = xbox_HeapAlloc(sizeof t, 4);
-        if (va) {
-            memcpy((void *)XBOX_PTR(va), t, sizeof t);
-            MEM32(0x43618C) = va;
-            MEM32(0x436190) = va;
+    {   /* COMING ATTRACTIONS' text (place 6) ours, OPTIONS' (place 7) ours */
+        static const char t6[] = "RECOMP SETTINGS", t7[] = "EXIT GAME";
+        uint32_t va6 = xbox_HeapAlloc(sizeof t6, 4), va7 = xbox_HeapAlloc(sizeof t7, 4);
+        if (va6) {
+            memcpy((void *)XBOX_PTR(va6), t6, sizeof t6);
+            MEM32(MENU_TEXT(6)) = MEM32(MENU_TEXT(6) + 4) = va6;
+        }
+        if (va7) {
+            memcpy((void *)XBOX_PTR(va7), t7, sizeof t7);
+            MEM32(MENU_TEXT(7)) = MEM32(MENU_TEXT(7) + 4) = va7;
         }
     }
     uint32_t pages = MEM32(0x42A28C);
@@ -108,13 +112,14 @@ static int game_flag_set(uint32_t flag)
 }
 
 /* The unlocks (RECOMP SETTINGS > Cheats > Unlocks): MISSIONS, ARCADE NINJA GAIDEN and MOVIE THEATER, the
- * list's entries 2, 4 and 5. The game sets each entry from its flag as the main menu comes up; a setting
+ * list's entries 2, 3 and 4 (the last two moved up, main_list_move). The game sets each entry from its flag as the main menu comes up; a setting
  * changed since (in RECOMP SETTINGS, over this menu) shows or hides the entry at once, as the flag now
  * reads -- set with the setting on, as earned with it off. */
-static void unlocks_tick(uint32_t list)
+static void unlocks_tick(uint32_t list, int moved)
 {
     extern int ngb_unlock(int which);                  /* src/cheats.c */
-    static const int entry[3] = { 2, 4, 5 };
+    static const int moved_entry[3] = { 2, 3, 4 }, kept_entry[3] = { 2, 4, 5 };   /* (NGB_KEEP_RANKING: not moved) */
+    const int *entry = moved ? moved_entry : kept_entry;
     static int last[3] = { -1, -1, -1 };
     for (int i = 0; i < 3; i++) {
         int on = ngb_unlock(i);
@@ -127,9 +132,50 @@ static void unlocks_tick(uint32_t list)
     }
 }
 
+/* ARCADE's and MOVIE THEATER's entries (flag, shown, chosen, new) up into Ranking's place and the next,
+ * once: the game then shows each from its own flag there (sub_0017A9C0). Ranking's entry goes to place 5,
+ * OPTIONS', shown below. As it moves on the first frame, it is shown as it was read for the place. */
+static void main_list_move(uint32_t list)
+{
+    static uint32_t moved;
+    if (moved == list)
+        return;
+    uint8_t e[3][8];
+    memcpy(e[0], (void *)XBOX_PTR(list + 8 * 3), 8);
+    memcpy(e[1], (void *)XBOX_PTR(list + 8 * 4), 8);
+    memcpy(e[2], (void *)XBOX_PTR(list + 8 * 5), 8);
+    memcpy((void *)XBOX_PTR(list + 8 * 3), e[1], 8);
+    memcpy((void *)XBOX_PTR(list + 8 * 4), e[2], 8);
+    memcpy((void *)XBOX_PTR(list + 8 * 5), e[0], 8);
+    moved = list;
+}
+
+/* Places 3-5's texts swapped in around the main menu's drawing (one frame), and back. */
+static void main_texts(int on)
+{
+    static uint32_t was[3][2];
+    for (int i = 0; i < 3; i++) {
+        uint32_t a = MENU_TEXT(3 + i);
+        if (on) {
+            was[i][0] = MEM32(a);
+            was[i][1] = MEM32(a + 4);
+            if (s_main_text[i][0]) {
+                MEM32(a) = s_main_text[i][0];
+                MEM32(a + 4) = s_main_text[i][1];
+            }
+        } else {
+            MEM32(a) = was[i][0];
+            MEM32(a + 4) = was[i][1];
+        }
+    }
+}
+
 void sub_0017A010(void)
 {
     uint32_t list = MEM32(ebx), n = MEM32(ebx + 4);
+    int main_menu = ebx == 0xC07600 && n == 8 && !ENV_ONCE("NGB_KEEP_RANKING");
+    if (main_menu)
+        main_list_move(list);
     if (n == 8) {
         extern void ngb_main_menu_seen(void);          /* src/ingame_menu.c */
         ngb_recomp_menu_tick();                        /* back from RECOMP SETTINGS */
@@ -147,34 +193,47 @@ void sub_0017A010(void)
             fprintf(stderr, "\n");
         }
     }
-    /* The main menu's list (NEW GAME, LOAD GAME, MISSIONS, RANKING, ...,
-     * OPTIONS: eight): Ranking not shown. */
+    /* The main menu's list (eight entries): */
     if (n == 8 && ENV_ONCE("NGB_MENU_LOG")) {             /* the cursor (menu + 0x94), as it moves */
         static uint32_t last = ~0u;
         if (MEM32(ebx + 0x54) != last)
             fprintf(stderr, "[MAINMENU] cursor %u\n", last = MEM32(ebx + 0x54));
     }
-    /* Back from the Options menu the game puts the cursor where OPTIONS was,
-     * the last entry -- now EXIT TO DESKTOP: back on the entry chosen. */
-    if (n == 8 && s_back_to >= 0 && MEM32(ebx + 0x54) == 7 && !ENV_ONCE("NGB_KEEP_RANKING")) {
-        MEM32(ebx + 0x50) = (uint32_t)s_back_to;    /* where the highlight is drawn */
-        MEM32(ebx + 0x54) = (uint32_t)s_back_to;
-        if (MEM32(esp + 4) == 7)                    /* this frame's too: its caller passed the cursor */
-            MEM32(esp + 4) = (uint32_t)s_back_to;
-        s_back_to = -1;
+    /* Back from a choice handed on as another place (OPTIONS' 7, ARCADE's 4, MOVIE THEATER's 5) the game
+     * puts the cursor on that place: back on the row chosen. On any other row (a new game from the Arcade,
+     * the cursor reset) nothing is owed. */
+    /* The menu back after another screen (not drawn in the game's last frame): the cursor put right, if it is on
+     * that place, and nothing owed after -- a return that leaves the cursor alone must not leave this armed for a
+     * later press. Counted in the game's frames: a stall while the choice flashes (a shader made, the window
+     * away) is no return. */
+    extern uint32_t ngb_game_frames(void);             /* src/menu_mouse.c */
+    const uint32_t frame = ngb_game_frames();
+    static uint32_t s_drawn_frame;
+    int back = main_menu && frame - s_drawn_frame > 1;
+    if (main_menu)
+        s_drawn_frame = frame;
+    if (main_menu && s_back_to >= 0 && (back || MEM32(ebx + 0x54) != (uint32_t)s_back_to)) {
+        if (MEM32(ebx + 0x54) == (uint32_t)s_back_id) {
+            MEM32(ebx + 0x50) = (uint32_t)s_back_to;    /* where the highlight is drawn */
+            MEM32(ebx + 0x54) = (uint32_t)s_back_to;
+            if (MEM32(esp + 4) == (uint32_t)s_back_id)  /* this frame's too: its caller passed the cursor */
+                MEM32(esp + 4) = (uint32_t)s_back_to;
+        }
+        s_back_to = s_back_id = -1;
     }
     if (n == 8 && ENV_ONCE("NGB_MENU_FORCE"))            /* a test: all unlocked */
         for (uint32_t i = 0; i < 8; i++)
             MEM8(list + 8 * i + 4) = MEM8(list + 8 * i + 5) = 1;
     else if (n == 8)
-        unlocks_tick(list);
+        unlocks_tick(list, main_menu);
     if (n == 8) {
         extern void ngb_cheats_menu_shown(void);               /* src/cheats.c: All Weapons waits (#268) */
         ngb_cheats_menu_shown();
     }
-    if (n == 8 && !ENV_ONCE("NGB_KEEP_RANKING")) {
-        MEM8(list + 8 * 3 + 4) = MEM8(list + 8 * 3 + 5) = 1;   /* "RECOMP SETTINGS": shown and chosen */
-        MEM8(list + 8 * 6 + 4) = MEM8(list + 8 * 6 + 5) = 1;   /* OPTIONS, in COMING ATTRACTIONS' place */
+    if (main_menu) {
+        MEM8(list + 8 * 5 + 4) = MEM8(list + 8 * 5 + 5) = 1;   /* OPTIONS, in MOVIE THEATER's place */
+        MEM8(list + 8 * 5 + 6) = 0;
+        MEM8(list + 8 * 6 + 4) = MEM8(list + 8 * 6 + 5) = 1;   /* RECOMP SETTINGS, in COMING ATTRACTIONS' */
         extern int ngb_main_menu_exit_tick(void);              /* src/pause_tab.c */
         if (ngb_main_menu_exit_tick()) {                       /* the Are you sure? box: */
             esp += 4;                                          /* alone, the entries not drawn */
@@ -212,7 +271,11 @@ void sub_0017A010(void)
         MEM16(0x45A9BA + 2 * 5) = s_five_was;
         s_five = 0;
     }
+    if (main_menu)
+        main_texts(1);
     items_draw();
+    if (main_menu)
+        main_texts(0);
 }
 
 /**
@@ -1384,28 +1447,29 @@ loc_0017CD28: ;
 void sub_001E3400(void);
 static void main_menu_select(void);
 
-/* The main menu's choice: "RECOMP SETTINGS" (Ranking's place) opens the
- * Options menu on the recomp's settings. */
+/* The main menu's choice, each row handed on as its own place (the header): ARCADE 4, MOVIE THEATER 5,
+ * OPTIONS 7, RECOMP SETTINGS the Options menu on the recomp's settings, EXIT GAME the Are you sure? box. */
 #define OPTIONS_ID 7
 void sub_0017B010(void)
 {
     if (getenv("NGB_MENU_LOG"))
         fprintf(stderr, "[MAINMENU] chosen: entry %u id %u\n", MEM32(esi + 0x94), MEM32(esi + 0x90));
-    if (esi == 0xC075C0 && MEM32(esi + 0x94) <= 2) {    /* New Game, Load Game, Missions: play (src/cheats.c, #268) */
+    int main_menu = esi == 0xC075C0 && !getenv("NGB_KEEP_RANKING");
+    uint32_t row = MEM32(esi + 0x94);
+    if (esi == 0xC075C0 && row <= 2) {                  /* New Game, Load Game, Missions: play (src/cheats.c, #268) */
         extern void ngb_cheats_play_chosen(void);
         ngb_cheats_play_chosen();
     }
-    if (esi == 0xC075C0 && MEM32(esi + 0x94) == 3 && !getenv("NGB_KEEP_RANKING")) {
-        s_back_to = 3;
-        ngb_recomp_menu_enter();
-        MEM32(esi + 0x90) = OPTIONS_ID;
+    if (main_menu && row >= 3 && row <= 6) {
+        static const int place[4] = { 4, 5, OPTIONS_ID, OPTIONS_ID };
+        if (row == 6)
+            ngb_recomp_menu_enter();
+        s_back_to = (int)row;
+        s_back_id = place[row - 3];
+        MEM32(esi + 0x90) = (uint32_t)s_back_id;
     }
-    if (esi == 0xC075C0 && MEM32(esi + 0x94) == 6 && !getenv("NGB_KEEP_RANKING")) {
-        s_back_to = 6;
-        MEM32(esi + 0x90) = OPTIONS_ID;                 /* OPTIONS, moved up */
-    }
-    if (esi == 0xC075C0 && MEM32(esi + 0x94) == 7 && !getenv("NGB_KEEP_RANKING")) {
-        extern void ngb_main_menu_exit(void);           /* EXIT TO DESKTOP: Are you sure? */
+    if (main_menu && row == 7) {
+        extern void ngb_main_menu_exit(void);           /* EXIT GAME: Are you sure? */
         uint32_t sp = esp;
         PUSH32(esp, 0x40);                              /* the menu's "chosen" sound */
         PUSH32(esp, 6);
@@ -1416,13 +1480,13 @@ void sub_0017B010(void)
         esp += 4;   /* ret */
         return;
     }
-    /* The bar slides from the chosen id (+0x90) while the choice flashes, and the Options menu's id, 7,
-     * is EXIT TO DESKTOP's row now: once the game has read it, the row chosen again, or the highlight
-     * flashed on EXIT TO DESKTOP (issue #27, found by akirahayabusa). Only this function reads +0x90. */
-    int moved = esi == 0xC075C0 && MEM32(esi + 0x90) == OPTIONS_ID && MEM32(esi + 0x94) != OPTIONS_ID &&
-                s_back_to >= 0;
+    /* The bar slides from the chosen id (+0x90) while the choice flashes, and that place is another row
+     * now: once the game has read it, the row chosen again, or the highlight flashed on the wrong row
+     * (issue #27, found by akirahayabusa). Only this function reads +0x90. */
+    int moved = main_menu && s_back_to >= 0 && MEM32(esi + 0x90) == (uint32_t)s_back_id &&
+                row != (uint32_t)s_back_id;
     main_menu_select();
-    if (moved && MEM32(0xC07650) == OPTIONS_ID)
+    if (moved && MEM32(0xC07650) == (uint32_t)s_back_id)
         MEM32(0xC07650) = (uint32_t)s_back_to;
 }
 
