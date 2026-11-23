@@ -526,14 +526,28 @@ private:
             std::unique_lock lock(m_);
             auto since = std::chrono::steady_clock::now();
             int logged = 0;
+            // the wait is in libc, which a preemption otherwise leaves alone (#275): this one yields, as it always
+            // did on Linux and Android (other guest threads run while the frame draws), the log line excepted
+#if XBOX_HAS_VCPU
+            vcpu_yield_anywhere_begin();
+#endif
             while (!done_cv_.wait_for(lock, std::chrono::seconds(1), [&] { return done_.load() >= id; })) {
                 int s = int(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - since).count());
                 if (s >= kStallLogSeconds * (logged + 1)) {
                     logged++;
+#if XBOX_HAS_VCPU
+                    vcpu_yield_anywhere_end();
+#endif
                     std::fprintf(stderr, "[D3D] frame %llu not drawn after %d s: the render thread is held up (drawn %llu)\n",
                                  (unsigned long long)id, s, (unsigned long long)done_.load());
+#if XBOX_HAS_VCPU
+                    vcpu_yield_anywhere_begin();
+#endif
                 }
             }
+#if XBOX_HAS_VCPU
+            vcpu_yield_anywhere_end();
+#endif
         }
 #if XBOX_HAS_VCPU
         if (release) vcpu_block_end();
@@ -737,6 +751,7 @@ private:
         uint64_t key4;                             // its look alone: shaders, textures, target (another mesh of it)
         uint64_t key5;                             // the key without the textures (a texture animated by turns)
         uint64_t key6;                             // ... nor the vertex buffer (one look drawn from several)
+        uint32_t tex0;                             // texture stage 0's texture (a flip-book's pages lie together)
         const std::bitset<192>* reads;             // a vertex shader's: the constants its program reads (Reads)
         uint32_t vb, fvf;                          // stream 0's buffer, the vertex format
         bool copied;                               // its vertices kept (cur_vb_)
@@ -777,6 +792,37 @@ private:
         return h;
     }
     static constexpr uint16_t kLerpMatrices[6] = {2, 3, 256, 257, 258, 259};
+    // row-vector 4x4 matrices (Direct3D's): out = a then b
+    static void Mul4(const std::array<float, 16>& a, const std::array<float, 16>& b, std::array<float, 16>& out) {
+        std::array<float, 16> r{};
+        for (size_t i = 0; i < 4; i++)
+            for (size_t j = 0; j < 4; j++)
+                for (size_t k = 0; k < 4; k++) r[i * 4 + j] += a[i * 4 + k] * b[k * 4 + j];
+        out = r;
+    }
+    static bool Invert4(const std::array<float, 16>& m, std::array<float, 16>& out) {
+        double a[4][8];
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 8; j++) a[i][j] = j < 4 ? m[size_t(i * 4 + j)] : (j - 4 == i ? 1 : 0);
+        for (int c = 0; c < 4; c++) {
+            int p = c;
+            for (int r = c + 1; r < 4; r++)
+                if (std::fabs(a[r][c]) > std::fabs(a[p][c])) p = r;
+            if (std::fabs(a[p][c]) < 1e-12) return false;
+            if (p != c)
+                for (int j = 0; j < 8; j++) std::swap(a[p][j], a[c][j]);
+            const double d = a[c][c];
+            for (int j = 0; j < 8; j++) a[c][j] /= d;
+            for (int r = 0; r < 4; r++)
+                if (r != c && a[r][c] != 0) {
+                    const double f = a[r][c];
+                    for (int j = 0; j < 8; j++) a[r][j] -= f * a[c][j];
+                }
+        }
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++) out[size_t(i * 4 + j)] = float(a[i][j + 4]);
+        return true;
+    }
     // A matrix part of the way (t) from a to b. A world or view matrix (rows: its axes, scaled, then its place)
     // turned along the arc, its scale and place lerped: lerped number by number, one turned far in a frame
     // (Ryu's limbs in a flip) shrank toward nothing, half-way through a half turn to a point (and its lighting,
@@ -1117,6 +1163,7 @@ private:
         d.key5 = (DrawKey(state_, prim, start, count, sh.both, true, false) ^ (slot + 1)) * 0x100000001b3ull;
         d.key6 = (DrawKey(state_, prim, start, count, sh.both, false, false) ^ (slot + 1)) * 0x100000001b3ull;
         d.vb = state_.streams[0].vb;
+        d.tex0 = state_.textures[0];
         d.fvf = state_.vs_handle;
         d.copied = KeepVertices(start, count, idx);
         if (interp_log_) {
@@ -1311,6 +1358,31 @@ private:
                 match_[size_t(cs[size_t(x)])] = ps[size_t(y)];
                 matched++;
             }
+            // ... but a set the camera carries (the dots of the sun's lens flare, placed each frame for the camera
+            // along a line across the screen, drawn in one order): as the camera turned, each dot's nearest a frame
+            // ago in the world was its neighbour, and the in-betweens showed dots come and go (#259). Where pairing
+            // them in order keeps them twice as still as seen from the camera, in order. (32768: not, a test.)
+            if (!vs_group && cs.size() == ps.size() && cs.size() > 1 && !(dbg_ & 32768)) {
+                auto seen = [](const InterpDraw& d, float out[3]) {   // its world's place, seen from its camera
+                    const auto& w = d.m[2];
+                    const auto& v = d.m[0];
+                    for (size_t c = 0; c < 3; c++)
+                        out[c] = w[12] * v[c] + w[13] * v[4 + c] + w[14] * v[8 + c] + v[12 + c];
+                };
+                auto apart = [&](int32_t ci, int32_t pi) {
+                    float a[3], b[3];
+                    seen(cur_draws_[size_t(ci)], a);
+                    seen(prev_draws_[size_t(pi)], b);
+                    return std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+                };
+                float near_sum = 0, order_sum = 0;
+                for (size_t n = 0; n < cs.size(); n++) {
+                    near_sum += apart(cs[n], match_[size_t(cs[n])]);
+                    order_sum += apart(cs[n], ps[n]);
+                }
+                if (order_sum < near_sum * 0.5f)
+                    for (size_t n = 0; n < cs.size(); n++) match_[size_t(cs[n])] = ps[n], how_[size_t(cs[n])] = 1;
+            }
         }
         // Several of one look whose textures are flip-books at their own pages (the flames on the imps' heads in
         // Chapter 15: layers of one quad, each from its own buffer, any of them on any imp from frame to frame):
@@ -1322,11 +1394,28 @@ private:
             std::unordered_map<uint64_t, std::vector<int32_t>> prev6, cur6;
             for (int32_t j = 0; j < int32_t(prev_draws_.size()); j++) prev6[prev_draws_[size_t(j)].key6].push_back(j);
             for (int32_t i = 0; i < int32_t(cur_draws_.size()); i++) cur6[cur_draws_[size_t(i)].key6].push_back(i);
-            for (auto& [k6, cs] : cur6) {
+            // A group over the limit split by the 4 KB block its draws' textures are in: a flip-book's pages are
+            // records side by side. The waterfall's spray in Chapter 1, sprites of the smoke bomb's look, made one
+            // group of 215 a frame with the smoke's puffs, and the puffs were left to the whole key's mix-ups again.
+            // (Only then: a book whose records cross a block, or pages made one by one, stay together below it.)
+            std::vector<std::pair<std::vector<int32_t>, std::vector<int32_t>>> groups;
+            for (auto& [k6, cs6] : cur6) {
                 auto pit = prev6.find(k6);
-                if (pit == prev6.end()) continue;
-                const std::vector<int32_t>& ps = pit->second;
-                if (cs.size() + ps.size() < 3 || cs.size() * ps.size() > 1024) continue;
+                if (pit == prev6.end() || cs6.size() + pit->second.size() < 3) continue;
+                if (cs6.size() * pit->second.size() <= 4096) {
+                    groups.emplace_back(cs6, pit->second);
+                    continue;
+                }
+                std::unordered_map<uint32_t, std::pair<std::vector<int32_t>, std::vector<int32_t>>> blocks;
+                for (int32_t i : cs6) blocks[cur_draws_[size_t(i)].tex0 >> 12].first.push_back(i);
+                for (int32_t j : pit->second) blocks[prev_draws_[size_t(j)].tex0 >> 12].second.push_back(j);
+                for (auto& [b, g] : blocks)
+                    if (!g.first.empty() && !g.second.empty()) groups.push_back(std::move(g));
+            }
+            for (auto& [cs, ps] : groups) {
+                // (up to 4096 pairs, as the whole key's groups: a smoke bomb's cloud is some 37 puffs of one look,
+                // each at its own page, and at 1024 it was left to the whole key's mix-ups, puffs drawn between two)
+                if (cs.size() + ps.size() < 3 || cs.size() * ps.size() > 4096) continue;
                 bool pages = false;   // (more than one key among them)
                 const uint64_t k0 = cur_draws_[size_t(cs[0])].key;
                 for (int32_t i : cs) pages |= cur_draws_[size_t(i)].key != k0;
@@ -1741,6 +1830,35 @@ private:
         }
         bool cut = turn < kCutCos || move > cut_move_ || jump > cut_jump_;
         bool ok = !cut && matched * 2 >= cur_draws_.size() && !cur_draws_.empty();
+        // A frame the same as the last, draw for draw (the game holding a picture: after Interact on an item, until
+        // its screen comes up): nothing to draw part of the way, the frame shown as drawn. Replayed, the in-betweens
+        // kept the screen copy their own replay made as the picture stopped -- the half-way picture -- and blended it
+        // in for as long as it held, two pictures in turn, a judder or a blur (#259). The replays' targets start
+        // again from the game's when it moves on.
+        if (ok && !(dbg_ & 65536) && cur_draws_.size() == prev_draws_.size()) {
+            bool same = true;
+            for (size_t i = 0; i < cur_draws_.size() && same; i++) {
+                if (match_[i] < 0) {
+                    same = false;
+                    break;
+                }
+                const InterpDraw& a = cur_draws_[i];
+                const InterpDraw& b = prev_draws_[size_t(match_[i])];
+                const bool moved_mesh = dyn_.size() > i && dyn_[i];
+                same = (moved_mesh ? a.key2 == b.key2 : a.key == b.key) && a.m == b.m && a.tm == b.tm &&
+                       a.tfactor == b.tfactor && (!a.vs || a.c == b.c);
+                // a mesh the game moves itself, in turns between two buffers (its key by the buffer apart): still when
+                // its vertices are the same
+                if (same && moved_mesh) {
+                    auto c = cur_vb_.find(a.vb);
+                    auto p = prev_vb_.find(b.vb);
+                    same = c != cur_vb_.end() && p != prev_vb_.end() && c->second.lo == p->second.lo &&
+                           c->second.hi == p->second.hi && c->second.stride == p->second.stride &&
+                           c->second.bytes == p->second.bytes;
+                }
+            }
+            if (same) ok = false;
+        }
         if (!ok) interp_skipped_++;
         if (move > move_max_) move_max_ = move;
         interp_frames_++;
@@ -1794,12 +1912,23 @@ private:
         // by number, 8 fixed-function draws' worlds as now, 16 texture matrices as now, 32 worlds always turned
         // (128 blended draws' worlds as now, 256 the others'; 512 CPU-moved meshes as now, 1024 no pairs by
         // the key without the textures, 2048 no flip-book regrouping, 4096 the texture factor as now,
-        // 8192 a dividing program's constants part of the way too)
+        // 8192 a dividing program's constants part of the way too, 16384 fixed-function worlds lerped with the
+        // view, 32768 no pairs in order for a set the camera carries, 65536 a still frame replayed all the same)
         const int matrices = (snap_[i] || (dbg_ & 8) || ((dbg_ & 128) && now.vblend) || ((dbg_ & 256) && !now.vblend)) ? 2 : 6;
         for (int k = 0; k < matrices; k++)
             LerpMatrix(was.m[size_t(k)], now.m[size_t(k)], t,
                        k == 0 ? ((dbg_ & 2) ? 0 : 2) : k == 1 ? 0 : (dbg_ & 4) ? 0 : (dbg_ & 32) ? 3 : 1,
                        state_.transforms[kLerpMatrices[k]]);
+        // (16384, a test for the sun's lens flare, #259: a fixed-function draw's world and view lerped together, the
+        // world then made so that with the view part of the way it gives that -- a thing placed by the camera each
+        // frame lands where it belongs for the camera part of the way)
+        if ((dbg_ & 16384) && !now.vs && !now.vblend && !snap_[i]) {
+            std::array<float, 16> wv_was, wv_now, wv, inv;
+            Mul4(was.m[2], was.m[0], wv_was);
+            Mul4(now.m[2], now.m[0], wv_now);
+            LerpMatrix(wv_was, wv_now, t, 1, wv);
+            if (Invert4(state_.transforms[kLerpMatrices[0]], inv)) Mul4(wv, inv, state_.transforms[kLerpMatrices[2]]);
+        }
         // (a program dividing by a vertex's value: its constants as now, Divides)
         if (now.vs && !(dbg_ & 1) && (!now.divides || (dbg_ & 8192)))
             for (size_t r = 0; r < 192; r++)
