@@ -249,7 +249,7 @@ game's own pair for it (Y + B, X + A) no longer does it.
 | Ninpo | F | | Wind run | C |
 | Guard / roll | Shift | | Center camera | Q, middle mouse |
 | Map | Tab | | Karma window | R |
-| Pause | Esc, Enter | | First-person view | Z |
+| Pause | Esc, Enter | | Toggle camera mode | V |
 
 After loading, the right stick (or the mouse) turns the third-person camera; click it (V) to look around
 in first person. Turn off **Start in Third Person** (RECOMP SETTINGS → Controls) to start each load in

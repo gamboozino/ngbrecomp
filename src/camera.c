@@ -4,8 +4,8 @@
  * The game keeps the right stick's mode in 0xDB9ACC: 0, the stick looks around in first person; 1, it
  * turns the third-person camera (the stick's click toggles it). Its two initialisers, run at every load
  * and new game, set 0; here they set the player's choice. The first-person routine 0x0004F800 runs while
- * the first-person view is up -- through the stick in mode 0, or the First-Person View control in mode 1 --
- * and marks the frame. Found by HammerD72 (#23).
+ * the first-person view is up -- through the stick in mode 0, or aiming a bow -- and marks the frame. Found
+ * by HammerD72 (#23).
  *
  * Both cameras, the first-person look (0x0004F800) and the third-person camera (0x000479B0), shape the stick
  * with a curve; a Camera Sensitivity over 100% multiplies what comes out of it, so the camera turns faster than

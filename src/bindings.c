@@ -58,10 +58,12 @@ static const Action s_act[A_COUNT] = {
       XBOX_GAMEPAD_START, 0 },
     { "Back", "back", "The controller's Back button.", SDL_SCANCODE_BACKSPACE, 0, P(P_BACK), T_BTN,
       XBOX_GAMEPAD_BACK, 0 },
-    { "First-Person View", "first_person", "Looks through Ryu's eyes (the left stick's button).", SDL_SCANCODE_Z,
+    /* (the setting names stay first_person and right_stick for existing profiles; the game gives the left stick's
+     * button nothing in play, and the right stick's switches the camera mode, 0xDB9ACC in src/camera.c: #274) */
+    { "Left Stick Button", "first_person", "The controller's left stick button.", SDL_SCANCODE_Z,
       0, P(P_LS), T_BTN, XBOX_GAMEPAD_LEFT_THUMB, 0 },
-    { "Right Stick Button", "right_stick", "The right stick's button.", SDL_SCANCODE_V, 0, P(P_RS), T_BTN,
-      XBOX_GAMEPAD_RIGHT_THUMB, 0 },
+    { "Toggle Camera Mode", "right_stick", "Switches the right stick between turning the camera and looking in first "
+      "person (the right stick's button).", SDL_SCANCODE_V, 0, P(P_RS), T_BTN, XBOX_GAMEPAD_RIGHT_THUMB, 0 },
     { "Move Forward", "move_forward", "Moves Ryu (the left stick).", SDL_SCANCODE_W, 0, 0, T_AXIS, 1, 0 },
     { "Move Back", "move_back", "Moves Ryu (the left stick).", SDL_SCANCODE_S, 0, 0, T_AXIS, 1, 1 },
     { "Move Left", "move_left", "Moves Ryu (the left stick).", SDL_SCANCODE_A, 0, 0, T_AXIS, 0, 1 },

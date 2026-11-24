@@ -170,15 +170,18 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
 
 #include "bindings.h"
 #include "input/xinput_xbox.h"   /* (XBOX_BUTTON_*: the buttons the prompts picture) */
-/* the actions; then On/Off rows: Invert Camera X and Y (the third-person camera, #26), Invert First-Person X
- * (#33, #63; its up/down is the game's own 1st Person Camera Control), Start in Third Person (#23); then
- * Default Controls */
-#define CTL_INVX A_COUNT
-#define CTL_RESET (A_COUNT + 4)   /* Start+Back Reset (#195) */
-#define CTL_MOUSE (A_COUNT + 5)   /* Camera Sensitivity: a value, Left / Right (#67) */
-#define CTL_PROMPTS (A_COUNT + 6) /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
-#define CTL_DEF  (A_COUNT + 7)
-#define CTL_ROWS (A_COUNT + 8)
+/* The list's rows: first the settings (#274: below the actions they went unseen) -- On/Off rows: Invert Camera
+ * X and Y (the third-person camera, #26), Invert First-Person X (#33, #63; its up/down is the game's own 1st
+ * Person Camera Control), Start in Third Person (#23), Start+Back Reset; then Camera Sensitivity and Button
+ * Prompts; then the actions, from CTL_BIND0 (action = row - CTL_BIND0); then Default Controls */
+#define CTL_INVX 0
+#define CTL_RESET 4               /* Start+Back Reset (#195) */
+#define CTL_MOUSE 5               /* Camera Sensitivity: a value, Left / Right (#67) */
+#define CTL_PROMPTS 6             /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
+#define CTL_BIND0 7               /* the first action's row */
+#define CTL_DEF  (CTL_BIND0 + A_COUNT)
+#define CTL_ROWS (CTL_DEF + 1)
+#define CTL_IS_BIND(r) ((r) >= CTL_BIND0 && (r) < CTL_DEF)
 #define CTL_TOGGLE(r) ((r) >= CTL_INVX && (r) <= CTL_RESET)
 static const char *const s_ctl_toggle_name[5] = {
     "Invert Camera X", "Invert Camera Y", "Invert First-Person X", "Start in Third Person", "Start+Back Reset",
@@ -928,6 +931,7 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
                       sel ? 0xF5EB5A : focused ? 0xE6E6EB : 0xA0A0A8, 0);
             continue;
         }
+        r -= CTL_BIND0;                                /* an action's row: from here r is the action */
         page_text_fit(px, m, ngb_bind_name(r), CTL_NAME_X + 6, y + 19, 18,
                       sel ? 0xF5EB5A : focused ? 0xE6E6EB : 0xA0A0A8, 0, 186);
         for (int c = 0; c < 3; c++) {
@@ -980,7 +984,7 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
     const char *help = NULL;
     if (focused && row >= 0 && capturing)
         help = s_ctl_col != 2 ? "Press a key or mouse button (Esc cancels)."
-             : ngb_bind_pad_pair(row) ? "Press a button, or two together for a pair (wait to cancel)."
+             : ngb_bind_pad_pair(row - CTL_BIND0) ? "Press a button, or two together for a pair (wait to cancel)."
              : "Press the controller's button (wait to cancel).";
     else if (focused && row == CTL_DEF)
         help = "Every action as it was.";
@@ -991,7 +995,7 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
     else if (focused && row == CTL_PROMPTS)
         help = "The buttons the prompts show. Auto: whichever controller or keyboard is in use.";
     else if (focused && row >= 0)
-        help = s_ctl_col == 2 && ngb_bind_pad_fixed(row) ? ngb_bind_help(row)
+        help = s_ctl_col == 2 && ngb_bind_pad_fixed(row - CTL_BIND0) ? ngb_bind_help(row - CTL_BIND0)
              : ngb_pad_prompts_ps() ? "Cross: change   Square / Delete: clear   (play only; the menus keep theirs)"
              : ngb_pad_prompts_nintendo() && ngb_bind_nintendo_position()
              ? "B: change   Y / Delete: clear   (play only; the menus keep theirs)"
@@ -2106,9 +2110,9 @@ static int ctl_hit(float x, float y)
     int r = s_ctl_top + (int)((y - CTL_Y0) / ROW_H), c = 3;
     if (r >= CTL_ROWS)
         return -1;
-    if (r >= A_COUNT)
-        c = 0;                                        /* the camera rows, Default Controls: anywhere on it */
-    for (int i = 0; i < 3 && r < A_COUNT; i++)
+    if (!CTL_IS_BIND(r))
+        c = 0;                                        /* the settings, Default Controls: anywhere on it */
+    for (int i = 0; i < 3 && CTL_IS_BIND(r); i++)
         if (fabsf(x - s_ctl_cx[i]) <= s_ctl_w[i] / 2)
             c = i;
     return HIT_CTL + r * 4 + c;
@@ -2164,8 +2168,10 @@ static int ctl_keys(int key, int *row, int strip)
             play_sound(1);
             break;
         }
+        if (!CTL_IS_BIND(*row))                        /* (the On/Off rows, Default Controls: no columns) */
+            break;
         int c = s_ctl_col + (key == K_LEFT ? -1 : 1);
-        if (c >= 0 && c <= 2 && !(c == 2 && *row < A_COUNT && ngb_bind_pad_fixed(*row))) {
+        if (c >= 0 && c <= 2 && !(c == 2 && CTL_IS_BIND(*row) && ngb_bind_pad_fixed(*row - CTL_BIND0))) {
             s_ctl_col = c;
             play_sound(1);
         }
@@ -2185,14 +2191,14 @@ static int ctl_keys(int key, int *row, int strip)
             ngb_bind_defaults();
             ngb_bind_set(0, 0, ngb_bind_get(0, 0));   /* saved */
             play_sound(6);
-        } else if (!(s_ctl_col == 2 && ngb_bind_pad_fixed(*row))) {
-            ngb_bind_capture_begin(*row, s_ctl_col);
+        } else if (CTL_IS_BIND(*row) && !(s_ctl_col == 2 && ngb_bind_pad_fixed(*row - CTL_BIND0))) {
+            ngb_bind_capture_begin(*row - CTL_BIND0, s_ctl_col);
             play_sound(1);
         }
         break;
     case K_CLEAR:
-        if (*row < A_COUNT && !(s_ctl_col == 2 && ngb_bind_pad_fixed(*row))) {
-            ngb_bind_set(*row, s_ctl_col, 0);
+        if (CTL_IS_BIND(*row) && !(s_ctl_col == 2 && ngb_bind_pad_fixed(*row - CTL_BIND0))) {
+            ngb_bind_set(*row - CTL_BIND0, s_ctl_col, 0);
             play_sound(3);
         }
         break;
@@ -2207,7 +2213,7 @@ static void ctl_mouse(int r, int *row)
     if (rr != *row || (c < 3 && c != s_ctl_col))
         play_sound(1);
     *row = rr;
-    if (c < 3 && !(c == 2 && ngb_bind_pad_fixed(rr)))
+    if (c < 3 && CTL_IS_BIND(rr) && !(c == 2 && ngb_bind_pad_fixed(rr - CTL_BIND0)))
         s_ctl_col = c;
 }
 
@@ -2269,7 +2275,7 @@ static void pt_draw(void)
     if (s_cat == CAT_CTL && s_row >= 0 && key)
         key = ctl_keys(key, &s_row, 1);
     if (s_cat == CAT_CTL) {
-        if (s_row >= 0 && s_row < A_COUNT && s_ctl_col == 2 && ngb_bind_pad_fixed(s_row))
+        if (CTL_IS_BIND(s_row) && s_ctl_col == 2 && ngb_bind_pad_fixed(s_row - CTL_BIND0))
             s_ctl_col = 1;                            /* a stick's: not the controller's to change */
         ctl_scroll(s_row);
         if (s_row < 0)
@@ -2609,7 +2615,7 @@ void ngb_controls_panel_tick(int want)
     }
     if (key)
         ctl_keys(key, &s_ov_row, 0);
-    if (s_ov_row < A_COUNT && s_ctl_col == 2 && ngb_bind_pad_fixed(s_ov_row))
+    if (CTL_IS_BIND(s_ov_row) && s_ctl_col == 2 && ngb_bind_pad_fixed(s_ov_row - CTL_BIND0))
         s_ctl_col = 1;
     ctl_scroll(s_ov_row);
     if (!s_ov_focus) {                                 /* B: closed, and the menu goes back */
