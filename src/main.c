@@ -1252,6 +1252,7 @@ int main(int argc, char **argv)
     printf("=== Ninja Gaiden Black - Static Recompilation ===\n");
     printf("Game directory: %s\n", s_game_dir);
     { extern void ngb_quick_set_game_dir(const char *); ngb_quick_set_game_dir(s_game_dir); }
+    { extern void ngb_hud_set_game_dir(const char *); ngb_hud_set_game_dir(s_game_dir); }   /* src/hud.c: Shuriken Icon */
 
 #if defined(_WIN32)
     SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);

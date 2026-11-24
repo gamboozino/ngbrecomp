@@ -59,8 +59,8 @@ game passes each sound's movement over one game frame as its velocity, so it is 
 Positional Audio places a mono 3D sound through the library's own HRTF tables (0x395430 the filter per
 direction, 0x383E70 the filters: 31 taps per ear, the far ear's delay in its last byte): "Console" filters it as
 the chip does, each tap a small float in 2048ths (sign, 3 bits of exponent, 4 of mantissa: before 0.9.81 read as sign
-and magnitude in 128ths, which gave the far ear the more bass and dulled it all; the capture's tone now within 1 dB), 9.5 dB up so its 3D sounds are as loud against the music as those of "Mixed" (below) were (#270: the chip's own level, within 2 dB of the capture, was heard as too quiet; `NGB_DSOUND_CHIP_GAIN=<dB>`, 0 for that), "Clear" (the default from 0.9.40 to 0.9.51; "Panning" before 0.9.40)
-takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Off" plays it centred. ("Mixed", the default from 0.9.52 to 0.9.80, half the filters read the old way and half a level pan by the direction, went in 0.9.83 with Console at its loudness; a saved Mixed reads as Console.) Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
+and magnitude in 128ths, which gave the far ear the more bass and dulled it all; the capture's tone now within 1 dB), 9.5 dB up so its 3D sounds are as loud against the music as "Mixed"'s (#270: the chip's own level, within 2 dB of the capture, was heard as too quiet; `NGB_DSOUND_CHIP_GAIN=<dB>`, 0 for that), "Clear" (the default from 0.9.40 to 0.9.51; "Panning" before 0.9.40)
+takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Mixed" (the default from 0.9.52 to 0.9.80; out in 0.9.83 and back in 0.9.84, heard as brighter than "Console", #270) is half Console's filters read the old way (brought to Clear's power) and half a level pan by the direction, the far ear 6 dB down for a sound straight to one side (`NGB_MIX_PAN_DB`; Clear's levels a few dB apart left sounds hard to place, #126), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
 Stereo, 5.1, or Auto: 5.1 when the default output device has six channels or more. On 5.1 the program is
 told its speakers are surround (with Dolby Digital) and mixes for them, and the output is FL FR C LFE BL
 BR; on stereo the centre is folded into the front pair at -3 dB, and the back pairs into their sides at -3 dB too
@@ -333,6 +333,16 @@ renderer blends a dot over the presented picture, after the game's own drawing, 
 where arrows land: 1.2% of the height right of and below the middle (they leave from the bow, not the camera;
 #230), and in the middle for the Strongbow, whose arrows fly straight there. The dot is game.spr's sprite 85 (`demo.afs`, the glow at an explosive arrow's head), about 2% of the height across and kept
 round at every aspect ratio. Off with the HUD.
+
+Shuriken Icon (Gameplay, #276, `src/hud.c`): the HUD's projectile box (`sub_00201F80`, taken into the hand-written
+code) draws only the Incendiary Shuriken, the Smoke Bomb and a bow's arrows, each from its own picture in game.spr;
+the game has none for the Shuriken (item 0) or the Windmill Shuriken (0x30). With the setting on, either is drawn
+as the Smoke Bomb is (sprite 0x12B), without a count, and while it is equipped the Smoke Bomb's picture (game.spr
+texture 90, 64x64 P8, its sprite alone, its own palette) holds the shuriken's: the item page's art (spr.afs
+`syuri.spr`, `fu_syuri.spr`), fitted into the square, with a white outline glow as the game's pictures have, in the
+art's palette (16 unused entries made the glow's whites). Where the picture is comes from the sprite's definition
+and the game's texture table (`0x8DBB28`) each time the box is drawn, as the pause menu loads the sprites again;
+the Smoke Bomb's own goes back as soon as anything else is equipped.
 
 The boot "Warnings" screen is always skipped (`NGB_KEEP_WARNINGS=1` shows it).
 

@@ -144,8 +144,8 @@ void ngb_settings_load(NgbSettings *s)
     s->msaa = 1;
     s->shadow_scale = 1;   /* the console's (Original): 0.9.45; 4x before */
     s->quick_menu_freeze = 1;
-    s->positional_audio = 1;  /* console: the sound chip's filters and crosstalk, as a console sounds (#270); mixed (3,
-                               * gone in 0.9.83) was the default from 0.9.52 to 0.9.80, clear (2) from 0.9.40 to 0.9.51 */
+    s->positional_audio = 1;  /* console: the sound chip's filters and crosstalk, as a console sounds (#270); mixed (3)
+                               * was the default from 0.9.52 to 0.9.80, clear (2) from 0.9.40 to 0.9.51 */
     s->show_hud = 1;
     s->smooth_glow = 2;   /* Bloom On (#270): the game's bloom, steady at any render scale */
     s->talisman = 1;
@@ -214,6 +214,8 @@ void ngb_settings_load(NgbSettings *s)
             s->text_language = !SDL_strncasecmp(val, "en", 2) ? 1 : !SDL_strncasecmp(val, "ja", 2) ? 2 : 0;   /* english, en, Japanese, ja... */
         } else if (!strcmp(key, "bow_crosshair")) {
             s->bow_crosshair = atoi(val) != 0;
+        } else if (!strcmp(key, "shuriken_icon")) {
+            s->shuriken_icon = atoi(val) != 0;
         } else if (!strcmp(key, "hud_aspect")) {
             s->hud_aspect = atoi(val) != 0;
         } else if (!strcmp(key, "cheats_unlocked")) {
@@ -221,7 +223,7 @@ void ngb_settings_load(NgbSettings *s)
         } else if (!strcmp(key, "show_hud")) {
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
-            s->positional_audio = atoi(val) < 0 || atoi(val) > 2 ? 1 : atoi(val);   /* 0 off, 1 console, 2 clear (3 was mixed: console) */
+            s->positional_audio = atoi(val) < 0 || atoi(val) > 3 ? 1 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
         } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: On either way now (#270) */
             s->smooth_glow = 2;
         } else if (!strcmp(key, "bloom")) {   /* 2 On, 3 Off; 0 Original and 1 Reduced are On now (#270) */
@@ -314,6 +316,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "cheats_unlocked = %d\n", s->cheats_unlocked);
     fprintf(f, "talisman_of_rebirth = %d\n", s->talisman);
     fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
+    fprintf(f, "shuriken_icon = %d\n", s->shuriken_icon);
     fprintf(f, "text_language = %s\n", s->text_language == 2 ? "japanese" : s->text_language == 1 ? "english" : "auto");
     fprintf(f, "frame_interpolation = %d\n", s->frame_interp);
     fprintf(f, "audio_output = %d\n", s->audio_output);

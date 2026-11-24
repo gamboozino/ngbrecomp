@@ -193,8 +193,8 @@ of the pause menu. Changes apply at once and are saved.
   game's widescreen mode, or Corrected: the HUD in the shape it was drawn, where Stretched puts it), skip the
   warnings and intro movies
 - **Sound**: Positional Audio (3D sounds placed left and right: Console, the default, through the sound
-  chip's filters and its speaker crosstalk, as on the Xbox; Clear,
-  by level only; Off, centred), Audio Output (Auto, Stereo
+  chip's filters and its speaker crosstalk, as on the Xbox; Mixed, half the filters and half panned by direction,
+  brighter; Clear, by level only; Off, centred), Audio Output (Auto, Stereo
   or 5.1; Auto is 5.1 on a 5.1 or 7.1 output; a change needs a restart of the game)
 - **Gameplay** (each off unless chosen): the Quick Menu, an NG2-style d-pad menu for weapons, Ninpo
   and items, and whether the game pauses while it is open; **Intercept** (Black or Hurricane), the Hurricane
@@ -203,7 +203,8 @@ of the pause menu. Changes apply at once and are saved.
   Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
   ignores it for a while (#116); **Bow Crosshair**, a dot where the arrow will land while aiming a bow in first
-  person, the game's own glow from an arrow's head (#228). The Talisman of Rebirth is equipped or unequipped on the
+  person, the game's own glow from an arrow's head (#228); **Shuriken Icon**, the HUD's projectile box for the
+  Shuriken and the Windmill Shuriken too, their pictures without a count (#276). The Talisman of Rebirth is equipped or unequipped on the
   pause menu's Item page (unequipped, Ryu dies and keeps his talismans)
 - **Cheats** (for the session only; locked until "Do you want to use cheats?" is answered Yes in RECOMP SETTINGS,
   and only then in the pause menu): infinite health, ninpo, essence, items, projectiles; golden scarabs; one

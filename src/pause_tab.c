@@ -82,7 +82,8 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
        S_HUDSTYLE, S_HUDASPECT, S_TALISMAN, S_CROSSHAIR, S_INTERP,
-       S_COUNT };   /* (46 is taken, with no row: cheats_unlocked, src/ingame_menu.c -- a new setting here is 47) */
+       S_UNUSED46 /* (taken, with no row: cheats_unlocked, src/ingame_menu.c) */, S_SHURIKEN,
+       S_COUNT };
 
 static const char *const s_label[S_COUNT] = {
     "Render Resolution", "Anisotropic Filtering", "Shadow Resolution",
@@ -95,7 +96,7 @@ static const char *const s_label[S_COUNT] = {
     "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
     "Responsive Menus", "All Armlets", "All Scrolls",
     "One Hit Kill", "Unlocks", "HUD Style", "HUD Aspect", "Talisman of Rebirth",
-    "Bow Crosshair", "Frame Interpolation",
+    "Bow Crosshair", "Frame Interpolation", "", "Shuriken Icon",
 };
 static const char *const s_help[S_COUNT] = {
     "Draws the game at a multiple of the console's resolution.",
@@ -121,7 +122,7 @@ static const char *const s_help[S_COUNT] = {
     "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size.",
     "Healing items, talismans and jewels are not used up. For this session only.",
     "Shuriken, smoke bombs, arrows and spears are not used up. For this session only.",
-    "Sounds placed around you. Console: as on the Xbox. Clear: by level only, no filtering.",
+    "Sounds placed around you. Console: as on the Xbox. Mixed: brighter, easier to place. Clear: by level only.",
     "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen.",
     "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game.",
     "MISSIONS in the main menu without earning it.",
@@ -144,6 +145,8 @@ static const char *const s_help[S_COUNT] = {
     "Off: a Talisman of Rebirth is never used; at no health Ryu dies, the talismans kept.",
     "On: a dot in the middle of the screen while aiming a bow in first person.",
     "Experimental. Pictures between the game's frames, on a 120 Hz or faster display.",
+    "",
+    "On: the HUD shows the Shuriken or Windmill Shuriken when one is equipped.",
 };
 
 /* The categories: the strip's words, their rows. */
@@ -159,7 +162,7 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_HUDASPECT, S_SKIP },   /* (a full page) */
     { S_POSAUDIO, S_AUDIOOUT, -1 },
     /* (no Talisman of Rebirth: equipped from the item page, src/talisman.c) */
-    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_CROSSHAIR, -1 },
+    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_CROSSHAIR, S_SHURIKEN, -1 },
     { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
     { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },
@@ -234,7 +237,7 @@ static void value_text(int row, char *out, size_t n)
     }
     case S_ASPECT:  snprintf(out, n, "%s", v == 4 ? "32:9" : v == 3 ? "21:9" : v == 2 ? "16:10" : v ? "16:9" : "4:3"); break;
     case S_QUICKSCALE: if (v) snprintf(out, n, "%d%%", v); else snprintf(out, n, "Off"); break;
-    case S_POSAUDIO: snprintf(out, n, "%s", v == 2 ? "Clear" : v ? "Console" : "Off"); break;
+    case S_POSAUDIO: snprintf(out, n, "%s", v == 3 ? "Mixed" : v == 2 ? "Clear" : v ? "Console" : "Off"); break;
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
     case S_INTERCEPT: snprintf(out, n, "%s", v == 2 ? "Hurricane" : v ? "Black" : "Off"); break;
     case S_HUDSTYLE: snprintf(out, n, "%s", v ? "Compact" : "Original"); break;

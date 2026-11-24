@@ -1008,3 +1008,702 @@ loc_001FB97B: ;
 
 }
 
+
+/* ---------- Shuriken Icon (Gameplay, setting 47, #276) ----------
+ *
+ * The HUD's projectile box (sub_00201F80, below) shows the Incendiary Shuriken, the Smoke Bomb and a bow's
+ * arrows, each its own picture in game.spr (demo.afs), and nothing for the Shuriken or the Windmill Shuriken:
+ * the game has no such picture. With the setting on, either of those is drawn as the Smoke Bomb is, without a
+ * count (they are never used up), and while it is equipped the Smoke Bomb's picture (game.spr texture 90, used
+ * by its sprite 86 alone, its own palette) holds the shuriken's: the item page's art (spr.afs syuri.spr,
+ * fu_syuri.spr, 256x256), fitted into the square at 64x64 as the other pictures fill it, with the art's palette. The Smoke Bomb's
+ * own goes back as soon as anything else is equipped. Where the picture is comes from the sprite's group each
+ * time (the pause menu loads the sprites again); written, the renderer reads it again. */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include "xbox_memory_layout.h"
+
+int xbox_mod_file(const char *rel, char *out, size_t n);   /* xboxrecomp kernel_path.c: a mod in a game file's place */
+
+static char s_si_dir[4096];
+void ngb_hud_set_game_dir(const char *path) { snprintf(s_si_dir, sizeof s_si_dir, "%s", path); }
+
+enum { SI_W = 64, SI_PIX = SI_W * SI_W, SI_PAL = 1024, SI_SPRITE = 0x12B };   /* (the Smoke Bomb's sprite) */
+
+/* An AFS archive's file, read whole (a mod's in its place, as the game reads it); NULL if missing */
+static unsigned char *si_afs_file(const char *archive, const char *name, unsigned *size_out)
+{
+    char path[4200];
+    FILE *f = xbox_mod_file(archive, path, sizeof path) ? fopen(path, "rb") : NULL;
+    if (!f) {
+        snprintf(path, sizeof path, "%s/%s", s_si_dir, archive);
+        f = fopen(path, "rb");
+    }
+    if (!f)
+        return NULL;
+    unsigned char *out = NULL, h[8];
+    if (fread(h, 1, 8, f) == 8 && !memcmp(h, "AFS\0", 4)) {
+        uint32_t n;
+        memcpy(&n, h + 4, 4);
+        uint32_t *tab = n && n <= 4096 ? malloc((n + 1u) * 8u) : NULL;
+        char *names = tab ? malloc(n * 48u) : NULL;
+        if (names && fread(tab, 8, n + 1u, f) == n + 1u && !fseek(f, (long)tab[n * 2], SEEK_SET) &&
+            fread(names, 48, n, f) == n)
+            for (uint32_t i = 0; i < n; i++) {
+                if (strncmp(names + i * 48u, name, 32))
+                    continue;
+                if (tab[i * 2 + 1] < 0x80 || tab[i * 2 + 1] > 0x400000 || fseek(f, (long)tab[i * 2], SEEK_SET))
+                    break;
+                out = malloc(tab[i * 2 + 1]);
+                if (out && fread(out, 1, tab[i * 2 + 1], f) != tab[i * 2 + 1]) {
+                    free(out);
+                    out = NULL;
+                }
+                if (out)
+                    *size_out = tab[i * 2 + 1];
+                break;
+            }
+        free(names);
+        free(tab);
+    }
+    fclose(f);
+    return out;
+}
+
+/* An XPR's texture `index` (a P8 one, with its palette): its size and where its pixels and palette are */
+static int si_xpr_texture(const unsigned char *b, unsigned size, unsigned index, unsigned *w, unsigned *h,
+                          const unsigned char **pix, const unsigned char **pal)
+{
+    uint32_t data, defs;
+    if (size < 0x20 || memcmp(b, "XPR0", 4))
+        return 0;
+    memcpy(&data, b + 8, 4);
+    memcpy(&defs, b + 0x10, 4);
+    if (data > size || data < 0x14 || defs > data - 0x14)
+        return 0;
+    uint32_t res = 0x14 + defs;
+    unsigned t = 0;
+    for (; t < index && res + 32 <= data; t++) {
+        uint32_t next;
+        memcpy(&next, b + res + 20, 4);
+        res += 20 + ((next >> 16 & 7) == 3 ? 12 : 0);
+    }
+    if (t != index)
+        return 0;
+    uint32_t c0, c1, fmt, toff, poff;
+    if (res + 32 > data || data > size)
+        return 0;
+    memcpy(&c0, b + res, 4);
+    memcpy(&c1, b + res + 20, 4);
+    memcpy(&fmt, b + res + 12, 4);
+    memcpy(&toff, b + res + 4, 4);
+    memcpy(&poff, b + res + 24, 4);
+    unsigned lw = fmt >> 20 & 15, lh = fmt >> 24 & 15;
+    if ((c0 >> 16 & 7) != 4 || (c1 >> 16 & 7) != 3 || (fmt >> 8 & 255) != 0x0B || lw > 10 || lh > 10 ||
+        (uint64_t)data + toff + (1u << (lw + lh)) > size || (uint64_t)data + poff + SI_PAL > size)
+        return 0;
+    *w = 1u << lw;
+    *h = 1u << lh;
+    *pix = b + data + toff;
+    *pal = b + data + poff;
+    return 1;
+}
+
+/* The console's layout of a texture's texels: x and y bits interleaved */
+static unsigned si_spread(unsigned v, unsigned mask)
+{
+    unsigned r = 0;
+    for (unsigned bit = 1; mask; bit <<= 1)
+        if (mask & bit) {
+            if (v & 1)
+                r |= bit;
+            v >>= 1;
+            mask &= ~bit;
+        }
+    return r;
+}
+static void si_masks(unsigned w, unsigned h, unsigned *mx, unsigned *my)
+{
+    unsigned mask = 1;
+    *mx = *my = 0;
+    for (unsigned bit = 1; bit < w || bit < h; bit <<= 1) {
+        if (bit < w) {
+            *mx |= mask;
+            mask <<= 1;
+        }
+        if (bit < h) {
+            *my |= mask;
+            mask <<= 1;
+        }
+    }
+}
+static uint32_t si_texel(const unsigned char *pix, const unsigned char *pal, unsigned w, unsigned h, unsigned x,
+                         unsigned y)
+{
+    static unsigned lw, lh, mx, my;   /* (the masks of the last size asked: made once a picture) */
+    if (w != lw || h != lh)
+        si_masks(lw = w, lh = h, &mx, &my);
+    uint32_t c;
+    memcpy(&c, pal + pix[si_spread(x, mx) | si_spread(y, my)] * 4u, 4);
+    return c;
+}
+
+/* The opaque bounds of a P8 picture */
+static void si_bounds(const unsigned char *pix, const unsigned char *pal, unsigned w, unsigned h, int box[4])
+{
+    box[0] = (int)w, box[1] = (int)h, box[2] = box[3] = 0;
+    for (unsigned y = 0; y < h; y++)
+        for (unsigned x = 0; x < w; x++)
+            if (si_texel(pix, pal, w, h, x, y) >> 24 > 16) {
+                if ((int)x < box[0]) box[0] = (int)x;
+                if ((int)y < box[1]) box[1] = (int)y;
+                if ((int)x + 1 > box[2]) box[2] = (int)x + 1;
+                if ((int)y + 1 > box[3]) box[3] = (int)y + 1;
+            }
+}
+
+static unsigned char s_si_own[SI_PIX + SI_PAL];       /* the Smoke Bomb's picture and palette, as in the file */
+static unsigned char s_si_art[2][SI_PIX + SI_PAL];    /* the Shuriken's, the Windmill Shuriken's */
+static int s_si_ready = 0;                            /* 1 made, -1 not to be had */
+
+/* The nearest of a palette's colours (alpha first, then the colour where there is some) */
+static int si_nearest(const uint32_t pal[256], float a, float r, float g, float bl)
+{
+    int best = 0;
+    float best_d = 1e30f;
+    for (int p = 0; p < 256; p++) {
+        uint32_t c = pal[p];
+        float da = (float)(c >> 24) - a, dr = (float)(c >> 16 & 255) - r, dg = (float)(c >> 8 & 255) - g,
+              db = (float)(c & 255) - bl;
+        float d = da * da * 2 + (a > 8 ? dr * dr + dg * dg + db * db : 0);
+        if (d < best_d)
+            best_d = d, best = p;
+    }
+    return best;
+}
+
+/* The art of one, fitted into box at 64x64 (each texel the average of the art's under it), with a faint white
+ * glow around all of it behind, as the game's projectile pictures have (the Smoke Bomb's and the arrows': white,
+ * alpha up to about 64, a few texels out, round its outline); then each texel the nearest of the art's own palette, 16 entries it
+ * does not use made the glow's whites */
+static int si_make(const char *file, const int box[4], unsigned char out[SI_PIX + SI_PAL])
+{
+    unsigned size = 0, w, h;
+    const unsigned char *pix, *pal;
+    unsigned char *b = si_afs_file("spr.afs", file, &size);
+    if (!b || !si_xpr_texture(b, size, 0, &w, &h, &pix, &pal)) {
+        free(b);
+        return 0;
+    }
+    int ab[4];
+    si_bounds(pix, pal, w, h, ab);
+    if (ab[2] <= ab[0] || ab[3] <= ab[1] || box[2] <= box[0] || box[3] <= box[1]) {
+        free(b);
+        return 0;
+    }
+    float aw = (float)(ab[2] - ab[0]), ah = (float)(ab[3] - ab[1]);
+    float bw = (float)(box[2] - box[0]), bh = (float)(box[3] - box[1]);
+    float k = aw / bw > ah / bh ? aw / bw : ah / bh;   /* art texels to a picture texel */
+    float ox = ab[0] + aw * 0.5f - (box[0] + bw * 0.5f) * k, oy = ab[1] + ah * 0.5f - (box[1] + bh * 0.5f) * k;
+    static float rgba[SI_PIX][4];   /* a, r, g, b */
+    for (unsigned y = 0; y < SI_W; y++)
+        for (unsigned x = 0; x < SI_W; x++) {
+            float acc[4] = {0, 0, 0, 0}, n = 0;   /* (colours weighed by their alpha) */
+            for (float sy = 0.25f; sy < 1; sy += 0.5f)
+                for (float sx = 0.25f; sx < 1; sx += 0.5f)
+                    for (int j = 0; j < 3; j++)
+                        for (int i = 0; i < 3; i++) {
+                            float fx = ox + (x + sx) * k + (i - 1) * k / 3, fy = oy + (y + sy) * k + (j - 1) * k / 3;
+                            uint32_t c = 0;
+                            if (fx >= 0 && fy >= 0 && fx < w && fy < h)
+                                c = si_texel(pix, pal, w, h, (unsigned)fx, (unsigned)fy);
+                            float a = (float)(c >> 24);
+                            acc[0] += a;
+                            acc[1] += (float)(c >> 16 & 255) * a;
+                            acc[2] += (float)(c >> 8 & 255) * a;
+                            acc[3] += (float)(c & 255) * a;
+                            n++;
+                        }
+            float *o = rgba[y * SI_W + x];
+            /* (the art's own faint pixels -- a sheen between the Windmill Shuriken's blades -- left out, its edges
+             * kept: alpha 64..192 spread over the whole range) */
+            float a = (acc[0] / n - 64) * (255.0f / 128);
+            o[0] = a < 0 ? 0 : a > 255 ? 255 : a;
+            for (int c = 1; c < 4; c++) o[c] = acc[0] > 0 ? acc[c] / acc[0] : 0;
+        }
+    /* the glow: an outline, fading over 3 texels from the shape (the strongest of the texels near, each by how
+     * solid and how far it is), at most 64 -- not a blur, which filled the gaps between the blades by the hub */
+    static float glow[SI_PIX];
+    for (int y = 0; y < SI_W; y++)
+        for (int x = 0; x < SI_W; x++) {
+            float g = 0;
+            for (int j = -3; j <= 3; j++)
+                for (int i = -3; i <= 3; i++) {
+                    if (x + i < 0 || y + j < 0 || x + i >= SI_W || y + j >= SI_W)
+                        continue;
+                    float d = sqrtf((float)(i * i + j * j)), f = 1 - d / 3.5f;
+                    float v = f > 0 ? rgba[(y + j) * SI_W + x + i][0] / 255 * f * 64 : 0;
+                    if (v > g)
+                        g = v;
+                }
+            glow[y * SI_W + x] = g;
+        }
+    /* the palette: the art's, the 16 entries the picture leaves unused the glow's whites (alpha 6 to 96) */
+    uint32_t p32[256];
+    memcpy(p32, pal, SI_PAL);
+    int used[256] = {0};
+    for (int t = 0; t < SI_PIX; t++)
+        used[si_nearest(p32, rgba[t][0], rgba[t][1], rgba[t][2], rgba[t][3])] = 1;
+    for (int p = 255, made = 0; p >= 0 && made < 16; p--)
+        if (!used[p])
+            p32[p] = (uint32_t)(6 + made++ * 6) << 24 | 0xFFFFFFu;
+    unsigned mx, my;
+    si_masks(SI_W, SI_W, &mx, &my);
+    for (unsigned y = 0; y < SI_W; y++)
+        for (unsigned x = 0; x < SI_W; x++) {
+            const float *c = rgba[y * SI_W + x];
+            float g = glow[y * SI_W + x], a = c[0] + g * (1 - c[0] / 255);   /* the art over its glow */
+            float r = a > 0 ? (c[1] * c[0] + 255 * g * (1 - c[0] / 255)) / a : 0;
+            float gg = a > 0 ? (c[2] * c[0] + 255 * g * (1 - c[0] / 255)) / a : 0;
+            float bl = a > 0 ? (c[3] * c[0] + 255 * g * (1 - c[0] / 255)) / a : 0;
+            out[si_spread(x, mx) | si_spread(y, my)] = (unsigned char)si_nearest(p32, a, r, gg, bl);
+        }
+    memcpy(out + SI_PIX, p32, SI_PAL);
+    free(b);
+    return 1;
+}
+
+/* Made once: the two pictures (and the Smoke Bomb's own, to give it back) */
+static void si_prepare(void)
+{
+    s_si_ready = -1;
+    unsigned size = 0, w, h;
+    const unsigned char *pix, *pal;
+    unsigned char *b = si_afs_file("demo.afs", "game.spr", &size);
+    uint32_t defs = 0, tex = ~0u;   /* (sprite 86's texture, as its definition in the file has it: 90) */
+    if (b && size >= 0x14)
+        memcpy(&defs, b + 0x10, 4);
+    if (b && defs / 24 > 86 && 0x14 + 86 * 24 + 20 <= size)
+        memcpy(&tex, b + 0x14 + 86 * 24 + 16, 4);
+    if (!b || !si_xpr_texture(b, size, tex, &w, &h, &pix, &pal) || w != SI_W || h != SI_W) {
+        fprintf(stderr, "[HUD] Shuriken Icon: the Smoke Bomb's picture not found in game.spr\n");
+        free(b);
+        return;
+    }
+    memcpy(s_si_own, pix, SI_PIX);
+    memcpy(s_si_own + SI_PIX, pal, SI_PAL);
+    /* (as big as the other projectiles' pictures, which fill the square: the arrows 61x62, the Incendiary
+     * Shuriken 56x64; the Smoke Bomb's own bounds, 51x58, made them look small) */
+    const int box[4] = {3, 3, SI_W - 3, SI_W - 3};   /* (room for the glow around it) */
+    free(b);
+    if (!si_make("syuri.spr", box, s_si_art[0]) || !si_make("fu_syuri.spr", box, s_si_art[1])) {
+        fprintf(stderr, "[HUD] Shuriken Icon: syuri.spr / fu_syuri.spr not read\n");
+        return;
+    }
+    s_si_ready = 1;
+}
+
+/* Where the game has the Smoke Bomb's sprite's picture and palette now (its definition's texture in the game's
+ * table, as the sprites are drawn: the pause menu loads its sprites again, and the picture with them) -- a 64x64
+ * P8 one only */
+static int si_where(unsigned char **pix, unsigned char **pal)
+{
+    for (uint32_t g = 0x452A6C; g < 0x45A7F4; g += 0x34)
+        if (MEM32(g - 32) && MEM32(g) <= SI_SPRITE && SI_SPRITE < MEM32(g) + MEM32(g + 4)) {
+            uint32_t def = MEM32(g - 16) + (SI_SPRITE - MEM32(g)) * 0x18;
+            uint32_t at = 0x8DBB28 + MEM32(def + 0x10) * 8, hdr = MEM32(at), pal_hdr = MEM32(at + 4);   /* (the
+                                                                                    * game's texture table, by index) */
+            if (!hdr || !pal_hdr || MEM32(pal_hdr) >> 30)   /* (a palette of 256 entries, 1 KB, only) */
+                return 0;
+            uint32_t fmt = MEM32(hdr + 0xC);
+            if ((fmt >> 8 & 0xFF) != 0x0B || (fmt >> 20 & 0xF) != 6 || (fmt >> 24 & 0xF) != 6)
+                return 0;
+            *pix = (unsigned char *)XBOX_PTR(MEM32(hdr + 4) | 0x80000000u);
+            *pal = (unsigned char *)XBOX_PTR(MEM32(pal_hdr + 4) | 0x80000000u);
+            return 1;
+        }
+    return 0;
+}
+
+/* For the projectile equipped (item): 1 when the box is to be drawn as a shuriken's, the picture made so; else
+ * the Smoke Bomb's own picture back where it holds one of ours. Asked each time where the picture is: cheap,
+ * and right after the game loads it again. */
+static int shuriken_icon(uint16_t item)
+{
+    int which = item == 0 ? 0 : item == 0x30 ? 1 : -1;
+    if (which >= 0 && !ngb_pc_setting(47))
+        which = -1;
+    if (which >= 0 && !s_si_ready)
+        si_prepare();
+    unsigned char *pix, *pal;
+    if (s_si_ready <= 0 || !si_where(&pix, &pal))
+        return 0;
+    if (which >= 0) {
+        if (memcmp(pix, s_si_art[which], SI_PIX) || memcmp(pal, s_si_art[which] + SI_PIX, SI_PAL)) {
+            memcpy(pix, s_si_art[which], SI_PIX);
+            memcpy(pal, s_si_art[which] + SI_PIX, SI_PAL);
+        }
+        return 1;
+    }
+    for (int k = 0; k < 2; k++)
+        if (!memcmp(pix, s_si_art[k], SI_PIX)) {
+            memcpy(pix, s_si_own, SI_PIX);
+            memcpy(pal, s_si_own + SI_PIX, SI_PAL);
+        }
+    return 0;
+}
+
+/**
+ * sub_00201F80
+ * Original: 0x00201F80 - 0x002022CA (842 bytes, 182 insns)
+ * CC: cdecl, 0 params, returns int_or_void
+ * Frame: standard_frame
+ */
+void sub_00201F80(void)
+{
+    RECOMP_ENTRY(0x00201F80u);
+    uint32_t ebp = 0;
+    ebp = g_ebp;  /* prologue saves caller's frame */
+    int _flags = 0; /* fallback flag var */
+    int shuriken = 0;   /* PC: Shuriken Icon (#276): the box drawn as the Smoke Bomb's, its picture the shuriken's */
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+
+loc_00201F80: ;
+    PUSH32(esp, ebp);
+    ebp = esp;
+    g_ebp = ebp; /* publish frame for frameless callees */
+    g_seh_ebp = ebp;
+    esp = esp & 0xFFFFFFF0u;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */
+    _fb = (uint32_t)(0x54) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* sub source, before the write */
+    esp = esp - 0x54;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */
+    xmm0 = XMM_SCALAR(MEMF(0x4152CC)); /* movss */
+    _fa = (uint32_t)(MEM32(0xD6AF00)) & 0xFFFFFFFFu; _fb = (uint32_t)(1) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp MEM32(0xD6AF00), 1 (32-bit) */
+    xmm1 = XMM_ZERO(); /* xorps self = zero */
+    PUSH32(esp, ebx);
+    PUSH32(esp, esi);
+    MEMF(esp + 0x20) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(0x414920)); /* movss */
+    PUSH32(esp, edi);
+    MEMF(esp + 0x20) = xmm1.f[0]; /* movss */
+    MEMF(esp + 0x28) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x2C) = xmm0.f[0]; /* movss */
+    if (CMP_NE(_fa, _fb)) goto loc_002022C3; /* jne: not equal / not zero */
+
+loc_00201FC4: ;
+    eax = ZX8(MEM8(0x4B7640));
+    { int64_t _r = (int64_t)(int32_t)(eax) * (int64_t)(int32_t)(0x210);
+      eax = (uint32_t)_r;
+      _fa = (uint32_t)_r & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); _fb = (_r != (int64_t)(int32_t)_r); } /* imul */
+    ebx = 0; /* xor self */
+    _fa = (uint32_t)(ebx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    SET_LO16(ebx, MEM16(eax + 0x58A572));
+    shuriken = shuriken_icon(LO16(ebx));
+    if (shuriken) goto loc_00202007;
+    _fa = (uint32_t)(LO16(ebx)) & 0xFFFFu; _fb = (uint32_t)(8) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(ebx), 8 (16-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_00202007; /* je: equal / zero */
+
+loc_00201FE0: ;
+    _fa = (uint32_t)(LO16(ebx)) & 0xFFFFu; _fb = (uint32_t)(0x165) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(ebx), 0x165 (16-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_00202007; /* je: equal / zero */
+
+loc_00201FE7: ;
+    ecx = ebx;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x00201FEEu); RECOMP_ABI_CALL(0x00154B10u, sub_00154B10); /* call 0x00154B10 */
+
+loc_00201FEE: ;
+    _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(0x10) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 0x10 (8-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_002022C3; /* jne: not equal / not zero */
+
+loc_00201FF6: ;
+    eax = esp + 0x1C;
+    ecx = ebx;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x00202001u); RECOMP_ABI_CALL(0x001550F0u, sub_001550F0); /* call 0x001550F0 */
+
+loc_00202001: ;
+    esi = MEM32(esp + 0x1C);
+    goto loc_00202009;
+
+loc_00202007: ;
+    esi = ebx;
+
+loc_00202009: ;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x0020200Eu); RECOMP_ABI_CALL(0x001542C0u, sub_001542C0); /* call 0x001542C0 */
+
+loc_0020200E: ;
+    _fa = (uint32_t)(LO16(ebx)) & 0xFFFFu; _fb = (uint32_t)(0x165) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(ebx), 0x165 (16-bit) */
+    xmm0 = XMM_SCALAR(MEMF(0x8DB278)); /* movss */
+    xmm0.f[0] = xmm0.f[0] * MEMF(0xD6AF04); /* mulss */
+    MEM32(esp + 0x1C) = eax;
+    MEMF(esp + 0x18) = xmm0.f[0]; /* movss */
+    if (CMP_NE(_fa, _fb) && !shuriken) goto loc_00202084; /* jne: not equal / not zero */
+
+loc_0020202F: ;
+    xmm2 = XMM_SCALAR(MEMF(0x4148C8)); /* movss */
+    MEM32(esp + 0x34) = 0x12B;
+    MEM16(esp + 0x38) = 0x25C;
+    MEM16(esp + 0x3A) = 0x24;
+    MEM16(esp + 0x3C) = 0x1B0;
+    MEM8(esp + 0x3E) = 0;
+    MEM8(esp + 0x3F) = 1;
+    MEM8(esp + 0x40) = 1;
+    MEM32(esp + 0x44) = 0;
+    MEMF(esp + 0x50) = xmm2.f[0]; /* movss */
+    MEMF(esp + 0x58) = xmm1.f[0]; /* movss */
+    MEM32(esp + 0x5C) = 0xFFFFFFFFu;
+    goto loc_002021BD;
+
+loc_00202084: ;
+    _fa = (uint32_t)(LO16(ebx)) & 0xFFFFu; _fb = (uint32_t)(8) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(ebx), 8 (16-bit) */
+    eax = esp + 0x34;
+    if (CMP_EQ(_fa, _fb)) goto loc_0020214B; /* je: equal / zero */
+
+loc_00202092: ;
+    _fa = (uint32_t)(LO16(esi)) & 0xFFFFu; _fb = (uint32_t)(0xE3) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(esi), 0xE3 (16-bit) */
+    PUSH32(esp, 0x1AF);
+    PUSH32(esp, 0x24);
+    PUSH32(esp, 0x25C);
+    if (CMP_EQ(_fa, _fb)) goto loc_00202105; /* je: equal / zero */
+
+loc_002020A5: ;
+    ecx = 0x125;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x002020AFu); RECOMP_ABI_CALL(0x001744F0u, sub_001744F0); /* call 0x001744F0 */
+
+loc_002020AF: ;
+    xmm0 = XMM_SCALAR(MEMF(esp + 0x24)); /* movss */
+    MEMF(esp + 0x60) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(0x414BF4)); /* movss */
+    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0xC;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    edi = esp + 0x34;
+    MEMF(esp + 0x4C) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x48) = xmm0.f[0]; /* movss */
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x002020DBu); RECOMP_ABI_CALL(0x00221340u, sub_00221340); /* call 0x00221340 */
+
+loc_002020DB: ;
+    _fa = (uint32_t)(LO16(esi)) & 0xFFFFu; _fb = (uint32_t)(0x2A) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(esi), 0x2A (16-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_002021E0; /* jne: not equal / not zero */
+
+loc_002020E5: ;
+    PUSH32(esp, 0x1B0);
+    PUSH32(esp, 0x2E);
+    PUSH32(esp, 0x25D);
+    ecx = 0x128;
+    eax = edi;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x002020FDu); RECOMP_ABI_CALL(0x001744F0u, sub_001744F0); /* call 0x001744F0 */
+
+loc_002020FD: ;
+    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0xC;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    goto loc_002021A7;
+
+loc_00202105: ;
+    ecx = 0x126;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x0020210Fu); RECOMP_ABI_CALL(0x001744F0u, sub_001744F0); /* call 0x001744F0 */
+
+loc_0020210F: ;
+    xmm0 = XMM_SCALAR(MEMF(esp + 0x24)); /* movss */
+    MEMF(esp + 0x60) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(0x414BF4)); /* movss */
+    edi = esp + 0x40;
+    MEMF(esp + 0x58) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x54) = xmm0.f[0]; /* movss */
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x00202138u); RECOMP_ABI_CALL(0x00221340u, sub_00221340); /* call 0x00221340 */
+
+loc_00202138: ;
+    PUSH32(esp, 0x1B0);
+    PUSH32(esp, 0x24);
+    PUSH32(esp, 0x249);
+    ecx = 0x127;
+    goto loc_0020219B;
+
+loc_0020214B: ;
+    PUSH32(esp, 0x1B0);
+    PUSH32(esp, 0x24);
+    PUSH32(esp, 0x25C);
+    ecx = 0x129;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x00202161u); RECOMP_ABI_CALL(0x001744F0u, sub_001744F0); /* call 0x001744F0 */
+
+loc_00202161: ;
+    xmm0 = XMM_SCALAR(MEMF(esp + 0x24)); /* movss */
+    MEMF(esp + 0x60) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(0x414BF4)); /* movss */
+    edi = esp + 0x40;
+    MEMF(esp + 0x58) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x54) = xmm0.f[0]; /* movss */
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x0020218Au); RECOMP_ABI_CALL(0x00221340u, sub_00221340); /* call 0x00221340 */
+
+loc_0020218A: ;
+    PUSH32(esp, 0x1AF);
+    PUSH32(esp, 0x24);
+    PUSH32(esp, 0x257);
+    ecx = 0x12A;
+
+loc_0020219B: ;
+    eax = esp + 0x4C;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x002021A4u); RECOMP_ABI_CALL(0x001744F0u, sub_001744F0); /* call 0x001744F0 */
+
+loc_002021A4: ;
+    _fb = (uint32_t)(0x18) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0x18;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+
+loc_002021A7: ;
+    xmm0 = XMM_SCALAR(MEMF(esp + 0x18)); /* movss */
+    xmm0.f[0] = xmm0.f[0] * MEMF(0x4148C0); /* mulss */
+    MEM32(esp + 0x44) = 5;
+
+loc_002021BD: ;
+    MEMF(esp + 0x54) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(0x414BF4)); /* movss */
+    edi = esp + 0x34;
+    MEMF(esp + 0x48) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x4C) = xmm0.f[0]; /* movss */
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x002021E0u); RECOMP_ABI_CALL(0x00221340u, sub_00221340); /* call 0x00221340 */
+
+loc_002021E0: ;
+    if (shuriken) goto loc_002022C3;   /* (no count: they are never used up) */
+    edi = MEM32(esp + 0x1C);
+    _fa = (uint32_t)(LO16(edi)) & 0xFFFFu; _fb = (uint32_t)(0xFF) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(edi), 0xFF (16-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_002022C3; /* je: equal / zero */
+
+loc_002021EF: ;
+    _fa = (uint32_t)(LO16(ebx)) & 0xFFFFu; _fb = (uint32_t)(0xFFFF) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(ebx), 0xFFFF (16-bit) */
+    if (CMP_AE(_fa, _fb)) goto loc_00202227; /* jae: above or equal (unsigned >=) */
+
+loc_002021F6: ;
+    eax = MEM32(0xDB5E24);
+    ecx = ZX16(LO16(ebx));
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(ecx) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, ecx (32-bit) */
+    if (CMP_LE(_fas, _fbs)) goto loc_00202227; /* jle: less or equal (signed <=) */
+
+loc_00202202: ;
+    eax = MEM32(0xDB98E4);
+    ecx = MEM32(eax + ecx * 4);
+    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0 (32-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_00202227; /* je: equal / zero */
+
+loc_0020220E: ;
+    _fb = (uint32_t)(ecx) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    eax = eax + ecx;
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    if ((_fa == 0)) goto loc_00202227; /* je: equal / zero */
+
+loc_00202212: ;
+    _fa = (uint32_t)(MEM8(eax + 0xD)) & 0xFFu; _fb = (uint32_t)(2) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(eax + 0xD), 2 (8-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_00202227; /* jne: not equal / not zero */
+
+loc_00202218: ;
+    eax = esi;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x0020221Fu); RECOMP_ABI_CALL(0x00158FB0u, sub_00158FB0); /* call 0x00158FB0 */
+
+loc_0020221F: ;
+    _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(0) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(eax), 0 (8-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_002022C3; /* je: equal / zero */
+
+loc_00202227: ;
+    _fa = (uint32_t)(LO16(edi)) & 0xFFFFu; _fb = (uint32_t)(0x63) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp LO16(edi), 0x63 (16-bit) */
+    if (CMP_BE(_fa, _fb)) goto loc_00202232; /* jbe: below or equal (unsigned <=) */
+
+loc_0020222D: ;
+    edi = 0x63;
+
+loc_00202232: ;
+    xmm0 = XMM_SCALAR(MEMF(0x4148C8)); /* movss */
+    MEMF(esp + 0x50) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_ZERO(); /* xorps self = zero */
+    MEMF(esp + 0x58) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(0x414BF4)); /* movss */
+    MEMF(esp + 0x4C) = xmm0.f[0]; /* movss */
+    MEMF(esp + 0x48) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(esp + 0x18)); /* movss */
+    PUSH32(esp, 0);
+    esi = esp + 0x24;
+    MEM32(esp + 0x38) = 0x93;
+    MEM16(esp + 0x3C) = 0x274;
+    MEM16(esp + 0x3E) = 0x48;
+    MEM16(esp + 0x40) = 0x1B1;
+    MEM8(esp + 0x42) = 0;
+    MEM8(esp + 0x43) = 1;
+    MEM8(esp + 0x44) = 1;
+    MEM32(esp + 0x48) = 0;
+    MEM32(esp + 0x60) = 0xFFFFFFFFu;
+    MEMF(esp + 0x58) = xmm0.f[0]; /* movss */
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x002022B0u); RECOMP_ABI_CALL(0x00053770u, sub_00053770); /* call 0x00053770 */
+
+loc_002022B0: ;
+    ecx = ZX16(LO16(edi));
+    PUSH32(esp, eax);
+    PUSH32(esp, ecx);
+    SET_LO8(edx, 2);
+    edi = esp + 0x40;
+    g_ebp = ebp; /* frame stays current across calls */
+    g_seh_ebp = ebp;
+    PUSH32(esp, 0x002022C0u); RECOMP_ABI_CALL(0x001E9B80u, sub_001E9B80); /* call 0x001E9B80 */
+
+loc_002022C0: ;
+    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0xC;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+
+loc_002022C3: ;
+    POP32(esp, edi);
+    POP32(esp, esi);
+    POP32(esp, ebx);
+    esp = ebp;
+    POP32(esp, ebp);
+    esp += 4; return; /* ret */
+
+}
+
