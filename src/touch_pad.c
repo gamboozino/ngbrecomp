@@ -241,10 +241,7 @@ static void let_go(void)
 {
     static int had;
     int now = xbox_InputControllerPresent();
-    if (now == had)
-        return;
-    had = now;
-    if (!now)
+    if (__atomic_exchange_n(&had, now, __ATOMIC_ACQ_REL) == now || !now)   /* (two readers: play, the quick menu) */
         return;
     pthread_mutex_lock(&s_lock);
     memset(s_finger, 0, sizeof s_finger);
@@ -263,7 +260,7 @@ static void touch_init(void)
     SDL_AddEventWatch(touch_watch, NULL);
 }
 
-/* Merged into the keyboard's pad state (src/keyboard.c) */
+/* Merged into the keyboard's pad state (src/keyboard.c), and read alone by the quick menu (src/quick_ui.c) */
 void ngb_touch_map(XBOX_INPUT_STATE *st)
 {
     touch_init();

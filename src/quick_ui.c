@@ -111,6 +111,15 @@ void ngb_quick_poll(void)
         int connected = xbox_InputGetStateRaw(p, &pad) == 0;
         bits |= ngb_bind_quick_state(s_keys, s_mouse, connected ? &pad : NULL);
     }
+#ifdef __ANDROID__
+    {   /* the touch controls (src/touch_pad.c) as a controller of their own: the quick menu's buttons (#279) */
+        extern void ngb_touch_map(XBOX_INPUT_STATE *st);
+        XBOX_INPUT_STATE touch;
+        memset(&touch, 0, sizeof touch);
+        ngb_touch_map(&touch);
+        bits |= ngb_bind_quick_state(s_keys, s_mouse, &touch);
+    }
+#endif
     {   /* Toggle HUD (Controls; nothing bound by default): each new press flips Display & Audio > HUD */
         static unsigned hud_held;
         unsigned hud = bits & NGB_BIND_HUD_BIT;
