@@ -77,18 +77,18 @@ static int is_ours(int page) { return page >= PAGE_GFX && page < PAGE_GFX + N_OU
 /* (without the PC Settings row: the PC settings are in RECOMP SETTINGS only) */
 static const uint8_t s_rows_ws[] = { ROW_SCREEN, ROW_MOVIE, ROW_DEFAULT, ROW_EXIT };
 static const uint8_t s_rows_std[] = { ROW_SCREEN, ROW_EXIT };
+/* (no Exit rows on our pages: B leaves them, and the longer pages ran into the information line) */
 static const uint8_t s_rows_gfx[] = { ROW_RENDER, ROW_TEXTURE, ROW_MSAA, ROW_SHADOW, ROW_GLOW, ROW_LOADDETAIL,
-                                      ROW_RTHREAD, ROW_INTERP, ROW_BACK };
-static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_HUDASPECT, ROW_SKIP,
-                                       ROW_BACK };
-static const uint8_t s_rows_sound[] = { ROW_POSAUDIO, ROW_AUDIOOUT, ROW_BACK };
+                                      ROW_RTHREAD, ROW_INTERP };
+static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_HUDASPECT, ROW_SKIP };
+static const uint8_t s_rows_sound[] = { ROW_POSAUDIO, ROW_AUDIOOUT };
 static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_INTERCEPT, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_CROSSHAIR,
-                                      ROW_SHURIKEN, ROW_BACK };   /* (Talisman of Rebirth: equipped from the item page, src/talisman.c) */
+                                      ROW_SHURIKEN };   /* (Talisman of Rebirth: equipped from the item page, src/talisman.c) */
 static const uint8_t s_rows_cheat[] = { ROW_HEALTH, ROW_NINPO, ROW_ESSENCE, ROW_SCARABS, ROW_INFITEMS, ROW_INFAMMO,
-                                        ROW_ONEHIT, ROW_UNLOCKS, ROW_BACK };
-static const uint8_t s_rows_ctrl[] = { ROW_BACK };
+                                        ROW_ONEHIT, ROW_UNLOCKS };
+static const uint8_t s_rows_ctrl[] = { ROW_BACK };   /* (under the Controls panel, src/pause_tab.c: a page has a row) */
 static const uint8_t s_rows_unl[] = { ROW_ALLDIFF, ROW_ALLCOST, ROW_MISSIONS, ROW_ARCADE, ROW_MOVIES, ROW_ALLWEAP,
-                                      ROW_ALLARM, ROW_ALLSCROLL, ROW_BACK };
+                                      ROW_ALLARM, ROW_ALLSCROLL };
 static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
     { s_rows_gfx, (int)sizeof s_rows_gfx },
     { s_rows_disp, (int)sizeof s_rows_disp },
@@ -1145,7 +1145,7 @@ loc_0017F540: ;
 loc_0017F545: ;
     if (s_recomp && s_unl && MEM8(edi) == PAGE_CHEAT) {   /* PC: B on Unlocks' rows: Cheats' again, on Unlocks */
         menu_sound(3);
-        unl_show(0, (int)sizeof s_rows_cheat - 2);
+        unl_show(0, (int)sizeof s_rows_cheat - 1);   /* (on Unlocks, the last row) */
         goto loc_0017F681;
     }
     PUSH32(esp, 0x40);
@@ -1238,11 +1238,9 @@ loc_0017F5E4: ;
     goto loc_0017F681;
 
 loc_0017F5F9: ;
-    if (s_recomp && MEM8(edi) == PAGE_CHEAT &&
-        (LO8(edx) == UNL_ACTION || (LO8(edx) == 0xFD && s_unl))) {   /* PC: Unlocks' rows, or Exit on them */
-        int open = LO8(edx) == UNL_ACTION;
-        menu_sound(open ? 5 : 3);
-        unl_show(open, open ? 0 : (int)sizeof s_rows_cheat - 2);
+    if (s_recomp && MEM8(edi) == PAGE_CHEAT && LO8(edx) == UNL_ACTION) {   /* PC: Unlocks' rows (B leaves them) */
+        menu_sound(5);
+        unl_show(1, 0);
         goto loc_0017F681;
     }
     eax = ZX8(LO8(edx));
