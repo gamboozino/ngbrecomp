@@ -747,10 +747,11 @@ int ngb_quick_layer(uint32_t *pixels)
     if (!ngb_pc_setting(20)) return 0;
     SDL_AtomicLock(&s_lock);
     s_renderer_ready = 1;
-    if (!s_open)
+    if (!s_open || !pixels)   /* (no pixels: only whether it is open) */
     {
+        int open = s_open;
         SDL_AtomicUnlock(&s_lock);
-        return 0;
+        return !pixels && open;
     }
     unsigned bits = s_held, pressed = s_edges;
     s_edges = 0;

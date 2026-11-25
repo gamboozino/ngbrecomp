@@ -3294,7 +3294,9 @@ void VulkanBackend::CaptureQuick(QuickPeek& q) {
     q.percent = ngb_pc_setting(20);
     q.frozen = 0;
     q.layer.clear();
-    if (!q.percent) return;
+    // (asked first: the layer made and cleared every frame while closed, 480 KB, was 2% of the title's thread on
+    // a phone)
+    if (!q.percent || !ngb_quick_layer(nullptr)) return;
     q.layer.resize(size_t(NGB_QUICK_WIDTH) * NGB_QUICK_HEIGHT);
     if (!ngb_quick_layer(q.layer.data())) {   // (its input steps here, once a frame)
         q.layer.clear();
@@ -5647,10 +5649,23 @@ void VulkanBackend::CacheSavePipelines() {
 
 void VulkanBackend::CacheWritePipelines() {
     if (cache_dir_.empty() || !pcache_) return;
+    // Written from a copy: the driver's cache stays locked while its data is copied out (Mesa serializes every
+    // entry under the lock, twice: size, then data), and a pipeline made meanwhile -- on the drawing thread,
+    // within its compile budget -- waited for all of it. A merge into an empty cache only takes references
+    // (Mesa) or copies (others) under the lock; the copy is then serialized with nobody waiting on it.
+    VkPipelineCache src = pcache_, copy = VK_NULL_HANDLE;
+    VkPipelineCacheCreateInfo pci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    if (d_.vkCreatePipelineCache(dev_, &pci, nullptr, &copy) == VK_SUCCESS) {
+        if (d_.vkMergePipelineCaches(dev_, copy, 1, &pcache_) == VK_SUCCESS) src = copy;
+    }
+    struct Drop {
+        VulkanBackend* b; VkPipelineCache c;
+        ~Drop() { if (c) b->d_.vkDestroyPipelineCache(b->dev_, c, nullptr); }
+    } drop{this, copy};
     size_t n = 0;
-    if (d_.vkGetPipelineCacheData(dev_, pcache_, &n, nullptr) != VK_SUCCESS || !n) return;
+    if (d_.vkGetPipelineCacheData(dev_, src, &n, nullptr) != VK_SUCCESS || !n) return;
     std::vector<uint8_t> v(n);
-    if (d_.vkGetPipelineCacheData(dev_, pcache_, &n, v.data()) != VK_SUCCESS) return;
+    if (d_.vkGetPipelineCacheData(dev_, src, &n, v.data()) != VK_SUCCESS) return;
     std::string tmp = cache_dir_ + "/pipelines.bin.tmp";
     if (FILE* f = std::fopen(tmp.c_str(), "wb")) {
         bool ok = std::fwrite(v.data(), 1, n, f) == n;

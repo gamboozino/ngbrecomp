@@ -164,7 +164,10 @@ void Draw(uint32_t prim, uint32_t start, uint32_t count, const uint8_t* indices)
 // pairs (0x1800) or 32-bit indices (0x1808), END (BEGIN 0). Anything else is reported once.
 void RunPushBuffer(uint32_t pb) {
     uint32_t data = R32(pb + 4) | 0x80000000u, size = R32(pb + 0xC);
-    std::vector<uint16_t> idx;
+    // (kept from call to call: grown afresh each time, its allocations were a tenth of the title thread's time
+    // on a phone; Draw copies the indices before it returns)
+    static thread_local std::vector<uint16_t> idx;
+    idx.clear();
     uint32_t prim = 0;
     for (uint32_t o = 0; o + 4 <= size;) {
         uint32_t h = R32(data + o), count = (h >> 18) & 0x7FF, method = h & 0x1FFC;

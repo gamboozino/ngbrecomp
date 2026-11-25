@@ -171,6 +171,16 @@ static int s_cpu_load = -1;
 #include <x86intrin.h>
 static inline uint64_t host_cycles(void) { return __rdtsc(); }
 #define HOST_CYCLES 1
+#elif defined(__aarch64__)
+/* (the virtual counter, readable at user level: a Pixel 4a has no vDSO clock, and the system calls these
+ * took a third of the title thread's time) */
+static inline uint64_t host_cycles(void)
+{
+    uint64_t v;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(v));
+    return v;
+}
+#define HOST_CYCLES 1
 #else
 static inline uint64_t host_cycles(void) { return xbox_ReadTimeStampCounter(); }
 #define HOST_CYCLES 0
@@ -184,7 +194,7 @@ static void load_calibrate(void)
     if (!c0) {
         c0 = c;
         t0 = t;
-    } else if (c - c0 > 100000000ull) {   /* over a tenth of a second or so: the ratio is good */
+    } else if (c - c0 > 100000000ull || t - t0 > 73333333ull) {   /* over a tenth of a second or so: the ratio is good */
         s_title_per_cycle = (double)(t - t0) / (double)(c - c0);
     }
 #endif
