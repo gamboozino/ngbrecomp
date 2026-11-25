@@ -1132,6 +1132,126 @@ static void borderless_apply(SDL_Window *w)
     SDL_SetWindowSize(w, r.w, r.h);
 }
 
+/* Window, F11 out of fullscreen: the menus' mode to go back to (0 a window, 2 borderless). */
+static int s_win_base;
+/* F11 out of fullscreen to a window: its size (the menus' last, or the window's as it went fullscreen). A window
+ * manager may not give the old size back: KWin, for one as wide as the display. */
+static int s_keep_w, s_keep_h;
+
+/* A framed window w x h (its inside; 0: as it is now), fitted into the display's usable area -- the
+ * taskbar and panels left out -- with its frame (#282): a size bigger than that is made smaller, its shape
+ * kept. Centered there when asked, or when made smaller. */
+static void window_fit(SDL_Window *win, int w, int h, bool center)
+{
+    SDL_Rect r;
+    int d = SDL_GetWindowDisplayIndex(win), top = 0, left = 0, bottom = 0, right = 0;
+    bool as_is = w <= 0 || h <= 0;   /* (just out of fullscreen on Wayland, the size can still be the old one) */
+    if (as_is)
+        SDL_GetWindowSize(win, &w, &h);
+    if (w <= 0 || h <= 0)
+        return;
+    if (SDL_GetDisplayUsableBounds(d < 0 ? 0 : d, &r) != 0) {
+        if (!as_is)
+            SDL_SetWindowSize(win, w, h);
+        if (center)
+            SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        return;
+    }
+    if (SDL_GetWindowBordersSize(win, &top, &left, &bottom, &right) != 0)
+        top = left = bottom = right = 0;
+    int mw = r.w - left - right, mh = r.h - top - bottom;
+    if (mw > 0 && mh > 0 && (w > mw || h > mh)) {
+        double k = (double)mw / w < (double)mh / h ? (double)mw / w : (double)mh / h;
+        int fw = (int)(w * k), fh = (int)(h * k);
+        fprintf(stderr, "nv2a: a %dx%d window is bigger than the display has room for (%dx%d): %dx%d\n",
+                w, h, mw, mh, fw, fh);
+        w = fw, h = fh, center = true;
+    } else if (as_is) {
+        return;              /* it fits: left as it is */
+    }
+    SDL_SetWindowSize(win, w, h);
+    if (center)   /* (SDL places the window's inside; the frame goes around it) */
+        SDL_SetWindowPosition(win, r.x + left + (mw - w) / 2, r.y + top + (mh - h) / 2);
+}
+
+/* ---- The player's mouse motions (#281) ----
+ * SDL reports a motion whenever the pointer's place in the window changes, so also when the window
+ * moves, changes size or mode under a pointer at rest, comes to the front or gets the pointer back, or
+ * when the relative mode ends. Taken for the player's, such a motion moved a menu's cursor to the row
+ * under the pointer (the next Left/Right changed that row) and made the mouse the device in use. They
+ * are dropped here, ahead of every event watcher and the queue: a motion is the player's when the
+ * window is as it was at the last one, nothing brought it or the pointer in since, and it moved.
+ * (A real move that comes first after such a change is dropped too; the next one is taken.) */
+typedef struct {
+    int x, y, w, h, dw, dh, hz;
+    Uint32 flags;
+} mouse_geom;
+static mouse_geom s_mouse_geom;
+static int s_mouse_seen, s_mouse_fresh;
+
+static void mouse_geom_of(Uint32 id, mouse_geom *g)
+{
+    SDL_Window *w = SDL_GetWindowFromID(id);
+    SDL_DisplayMode m;
+    memset(g, 0, sizeof *g);
+    if (!w)
+        return;
+    SDL_GetWindowPosition(w, &g->x, &g->y);
+    SDL_GetWindowSize(w, &g->w, &g->h);
+    g->flags = SDL_GetWindowFlags(w) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP |
+                                        SDL_WINDOW_BORDERLESS | SDL_WINDOW_MAXIMIZED |
+                                        SDL_WINDOW_MINIMIZED);
+    int d = SDL_GetWindowDisplayIndex(w);
+    if (d >= 0 && SDL_GetCurrentDisplayMode(d, &m) == 0)
+        g->dw = m.w, g->dh = m.h, g->hz = m.refresh_rate;
+}
+
+static int SDLCALL mouse_filter(void *unused, SDL_Event *ev)
+{
+    (void)unused;
+    if (ev->type == SDL_WINDOWEVENT) {
+        switch (ev->window.event) {
+        case SDL_WINDOWEVENT_ENTER: case SDL_WINDOWEVENT_FOCUS_GAINED:
+        case SDL_WINDOWEVENT_SHOWN: case SDL_WINDOWEVENT_RESTORED:
+        case SDL_WINDOWEVENT_MAXIMIZED:
+            s_mouse_fresh = 1;
+            break;
+        default:
+            break;
+        }
+        return 1;
+    }
+    if (ev->type != SDL_MOUSEMOTION || ev->motion.which == SDL_TOUCH_MOUSEID ||
+        ev->motion.which == NV2A_MOUSEID_SCRIPTED)
+        return 1;
+    if (SDL_GetRelativeMouseMode()) {   /* the camera's: all of them; the first one after is not */
+        s_mouse_fresh = 1;
+        return 1;
+    }
+    mouse_geom g;
+    mouse_geom_of(ev->motion.windowID, &g);
+    int player = s_mouse_seen && !s_mouse_fresh && !memcmp(&g, &s_mouse_geom, sizeof g) &&
+                 (ev->motion.xrel || ev->motion.yrel);
+    s_mouse_geom = g;
+    s_mouse_seen = 1;
+    s_mouse_fresh = 0;
+    if (!player) {
+        static int log = -1;
+        if (log < 0)
+            log = getenv("NGB_MOUSE_LOG") != NULL;
+        if (log)
+            fprintf(stderr, "[MOUSE] motion %d,%d rel %d,%d not the player's (window %d,%d %dx%d)\n",
+                    ev->motion.x, ev->motion.y, ev->motion.xrel, ev->motion.yrel, g.x, g.y, g.w, g.h);
+    }
+    return player;
+}
+
+void nv2a_mouse_filter_install(void)
+{
+    s_mouse_seen = 0;
+    SDL_SetEventFilter(mouse_filter, NULL);
+}
+
 int nv2a_window_create(const char *title, int width, int height,
                        int fullscreen, double aspect, int vsync)
 {
@@ -1153,6 +1273,14 @@ int nv2a_window_create(const char *title, int width, int height,
         fprintf(stderr, "nv2a: SDL video: %s\n", SDL_GetError());
         return -1;
     }
+    nv2a_mouse_filter_install();   /* (before the window: setting it empties the event queue) */
+    if (fullscreen == 0) {   /* made at a size that fits already: a window window managers find too big gets maximized */
+        SDL_Rect r;
+        if (SDL_GetDisplayUsableBounds(0, &r) == 0 && r.w > 0 && r.h > 0 && (width > r.w || height > r.h)) {
+            double k = (double)r.w / width < (double)r.h / height ? (double)r.w / width : (double)r.h / height;
+            width = (int)(width * k), height = (int)(height * k);
+        }
+    }
     s_window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED,
                                 SDL_WINDOWPOS_CENTERED, width, height,
                                 (getenv("NGB_TEST_HIDDEN") ? SDL_WINDOW_HIDDEN : 0) |
@@ -1170,8 +1298,15 @@ int nv2a_window_create(const char *title, int width, int height,
      * Chinese, Korean) could open its candidate box over the game, or hang
      * the window as "Not responding" when the input method stalled. */
     SDL_StopTextInput();
+    s_win_base = fullscreen == 2 ? 2 : 0;
+    s_keep_w = width, s_keep_h = height;   /* (fitted above) */
     if (fullscreen == 2)
         borderless_apply(s_window);
+    else if (fullscreen == 0) {
+        if (SDL_GetWindowFlags(s_window) & SDL_WINDOW_MAXIMIZED)
+            SDL_RestoreWindow(s_window);
+        window_fit(s_window, width, height, true);   /* now with its frame */
+    }
     if (aspect > 0)
         s_aspect = aspect;
     else if (aspect < 0)
@@ -1287,6 +1422,44 @@ static void mode_switch_end(void)
     __atomic_store_n(&s_switching, 0, __ATOMIC_SEQ_CST);
 }
 
+/* Every display mode change, on the window's thread: mode 0 a window w x h (0: its size now), 1
+ * fullscreen, 2 borderless. A window the player maximized (a double click on its title, Win+Up) is
+ * made normal first: left maximized, a window asked for stayed the display's size (#282). */
+static void window_apply(int mode, int w, int h)
+{
+    Uint32 was = SDL_GetWindowFlags(s_window);
+    bool fs = was & SDL_WINDOW_FULLSCREEN;
+    mode_switch_begin();
+    if (mode == 1 && !fs && !(was & (SDL_WINDOW_BORDERLESS | SDL_WINDOW_MAXIMIZED)))
+        SDL_GetWindowSize(s_window, &s_keep_w, &s_keep_h);
+    if (mode != 1 && fs)
+        SDL_SetWindowFullscreen(s_window, 0);
+    if (mode == 0 && fs && (w <= 0 || h <= 0) && s_keep_w > 0 && s_keep_h > 0)
+        w = s_keep_w, h = s_keep_h;
+    if (mode != 1 && (SDL_GetWindowFlags(s_window) & SDL_WINDOW_MAXIMIZED))
+        SDL_RestoreWindow(s_window);
+    if (mode != 2)
+        SDL_SetWindowBordered(s_window, SDL_TRUE);
+    if (mode == 0)
+    {
+        window_fit(s_window, w, h, w > 0 && h > 0 && !fs);
+        if (w > 0 && h > 0)   /* (just set: SDL has it; as it was, it can be the fullscreen size still on Wayland) */
+            SDL_GetWindowSize(s_window, &s_keep_w, &s_keep_h);
+    }
+    else if (mode == 2)
+        borderless_apply(s_window);
+    else if (!fs)
+        SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    if (mode != 1)
+        s_win_base = mode;
+    mode_switch_end();
+}
+
+__attribute__((weak)) void nv2a_window_mode_changed(int mode)
+{
+    (void)mode;
+}
+
 bool nv2a_window_pump(void)
 {
 #ifdef __APPLE__
@@ -1315,24 +1488,8 @@ bool nv2a_window_pump(void)
     }
     SDL_Event ev;
 
-    if (__atomic_exchange_n(&s_win_req, 0, __ATOMIC_ACQ_REL)) {
-        bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
-        mode_switch_begin();
-        if (s_win_fs != 1 && fs)
-            SDL_SetWindowFullscreen(s_window, 0);
-        if (s_win_fs != 2)
-            SDL_SetWindowBordered(s_window, SDL_TRUE);
-        if (s_win_fs == 0 && s_win_w > 0 && s_win_h > 0) {
-            SDL_SetWindowSize(s_window, s_win_w, s_win_h);
-            SDL_SetWindowPosition(s_window, SDL_WINDOWPOS_CENTERED,
-                                  SDL_WINDOWPOS_CENTERED);
-        }
-        if (s_win_fs == 2)
-            borderless_apply(s_window);
-        if (s_win_fs == 1 && !fs)
-            SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-        mode_switch_end();
-    }
+    if (__atomic_exchange_n(&s_win_req, 0, __ATOMIC_ACQ_REL))
+        window_apply(s_win_fs, s_win_w, s_win_h);
 
     while (SDL_PollEvent(&ev)) {
         switch (ev.type) {
@@ -1350,13 +1507,11 @@ bool nv2a_window_pump(void)
             if (ev.key.keysym.sym == SDLK_F11 ||
                 (ev.key.keysym.sym == SDLK_RETURN &&
                  (ev.key.keysym.mod & KMOD_ALT))) {
-                bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
-                mode_switch_begin();
-                SDL_SetWindowFullscreen(s_window,
-                                        fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-                if (fs)
-                    SDL_SetWindowBordered(s_window, SDL_TRUE);
-                mode_switch_end();
+                /* Out of fullscreen to the menus' mode, at the window's size: what
+                 * the menus show follows (#282). */
+                int to = (SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN) ? s_win_base : 1;
+                window_apply(to, 0, 0);
+                nv2a_window_mode_changed(to);
             }
             break;
         default:

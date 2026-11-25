@@ -20,6 +20,14 @@ bool nv2a_window_pump(void);
 void nv2a_window_tick(void);
 /* Every SDL_Event also goes here (weak; define it to see input). */
 void nv2a_window_event_hook(const void *sdl_event);
+/* F11 / Alt+Enter changed the display mode (0 window, 1 fullscreen, 2 borderless), on the window's
+ * thread (weak): the menus' setting follows. */
+void nv2a_window_mode_changed(int mode);
+/* Mouse motions not the player's -- the window changed under a pointer at rest -- dropped before any
+ * watcher or the queue sees them (#281). nv2a_window_create installs it; another SDL window (a
+ * settings screen) can too, before it makes the window: installing empties SDL's event queue. A motion pushed by a test script with this id counts as the player's. */
+void nv2a_mouse_filter_install(void);
+#define NV2A_MOUSEID_SCRIPTED 0x5C51u
 
 /* A host overlay over the paused game (a settings menu). The presenter asks
  * nv2a_overlay_wanted() at every frame; once it says yes, the game is held

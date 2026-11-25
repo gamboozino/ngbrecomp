@@ -1203,7 +1203,7 @@ static void mouse_test_tick(void)
     Uint32 id = w ? SDL_GetWindowID(w) : 0;
     switch (c) {
     case 'M':
-        e.type = SDL_MOUSEMOTION; e.motion.windowID = id; e.motion.x = x; e.motion.y = y;
+        e.type = SDL_MOUSEMOTION; e.motion.windowID = id; e.motion.x = x; e.motion.y = y; e.motion.which = NV2A_MOUSEID_SCRIPTED;
         break;
     case 'L': case 'R':
         e.type = SDL_MOUSEBUTTONDOWN; e.button.windowID = id; e.button.x = x; e.button.y = y;
@@ -1356,6 +1356,16 @@ static bool game_mouse(const SDL_Event *ev)
 }
 
 /* Main thread: every window event. */
+/* F11 / Alt+Enter: the Display Mode row shows the mode the window is in, and the next change steps on
+ * from it (#282). In the settings menu's copy too, or closing it put the old mode back. */
+void nv2a_window_mode_changed(int mode)
+{
+    s_running.fullscreen = mode;
+    s_cfg.fullscreen = mode;
+    if (!getenv("NGB_NO_SETTINGS"))   /* kept, as the menus' choice is */
+        ngb_settings_save(&s_running);
+}
+
 void nv2a_window_event_hook(const void *sdl_event)
 {
     const SDL_Event *ev = sdl_event;

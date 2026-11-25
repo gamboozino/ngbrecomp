@@ -16,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "launcher.h"
 #if defined(NGB_NV2A_VK)
@@ -276,11 +279,15 @@ void ngb_settings_load(NgbSettings *s)
 
 void ngb_settings_save(const NgbSettings *s)
 {
-    char path[1100];
+    char path[1100], tmp[1140];
     FILE *f;
+    static int seq;
 
+    /* Written whole to a file of its own, then put in place: the menus (renderer thread) and F11 (the
+     * window's thread) can save at once, and a reader never sees half a file. */
     config_path(path, sizeof path, 1);
-    f = fopen(path, "w");
+    snprintf(tmp, sizeof tmp, "%s.%d.tmp", path, __atomic_add_fetch(&seq, 1, __ATOMIC_RELAXED));
+    f = fopen(tmp, "w");
     if (!f) {
         fprintf(stderr, "settings: cannot write %s: %s\n", path, strerror(errno));
         return;
@@ -324,7 +331,19 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "quick_menu_scale = %d\n", ngb_quick_scale_value(s->quick_menu_scale));
     fprintf(f, "skip_intro = %d\n", s->skip_intro);
     fprintf(f, "show_settings_at_startup = %d\n", s->show_launcher);
-    fclose(f);
+    if (fclose(f) != 0) {
+        remove(tmp);
+        return;
+    }
+#ifdef _WIN32
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING))
+#else
+    if (rename(tmp, path) != 0)
+#endif
+    {
+        fprintf(stderr, "settings: cannot write %s\n", path);
+        remove(tmp);
+    }
 }
 
 double ngb_settings_aspect_ratio(const NgbSettings *s)
@@ -601,6 +620,7 @@ int ngb_launcher_run(NgbSettings *s)
         fprintf(stderr, "settings screen: %s\n", SDL_GetError());
         return 1;                /* no screen: just start */
     }
+    nv2a_mouse_filter_install(); /* motions the player didn't make (alt-tab back, a pointer at rest): none (#281) */
     win = SDL_CreateWindow("Ninja Gaiden Black", SDL_WINDOWPOS_CENTERED,
                            SDL_WINDOWPOS_CENTERED, LW, LH,
                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
