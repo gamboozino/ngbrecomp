@@ -28,7 +28,7 @@
 #define TH 256
 #define M 512                  /* the master's size: drawn there, reduced to the size asked for */
 #define APP_ID "ninja-gaiden-black"
-#define ICON_VERSION 1         /* raised whenever the icon is drawn differently: the desktop's files written again */
+#define ICON_VERSION 2         /* raised whenever the icon is drawn differently: the desktop's files written again */
 
 int stbi_write_png(const char *filename, int w, int h, int comp, const void *data, int stride_in_bytes);
 
@@ -282,7 +282,7 @@ int ngb_app_icon_make(const char *game_dir, int size, uint8_t *out)
     double cw = x1 + 1 - x0 + 2 * pad, ch = y1 + 1 - y0 + 2 * pad, k = size > 32 ? 1.16 : 1.30;
     double w = M * k, scale = cw / w, h = ch / scale, ox = (M - w) / 2, oy = (M - h) / 2;
     float lift = size > 48 ? 1.0f : size > 32 ? 1.35f : 1.7f;
-    const double rad = 0.19 * M;
+    const double rad = 0;          /* square corners, on every desktop */
     for (int y = 0; y < M; y++)
         for (int x = 0; x < M; x++) {
             float *d = big + 4 * ((size_t)y * M + x), s[4];
