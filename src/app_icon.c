@@ -28,7 +28,7 @@
 #define TH 256
 #define M 512                  /* the master's size: drawn there, reduced to the size asked for */
 #define APP_ID "ninja-gaiden-black"
-#define ICON_VERSION 2         /* raised whenever the icon is drawn differently: the desktop's files written again */
+#define ICON_VERSION 3         /* raised whenever the icon is drawn differently: the desktop's files written again */
 
 int stbi_write_png(const char *filename, int w, int h, int comp, const void *data, int stride_in_bytes);
 
@@ -142,6 +142,28 @@ static void spread(const uint8_t *m, float *d)
     free(nxt);
 }
 
+/* The letter's own glow: where the texture's alpha only falls on the way out from the marked pixels (d: spread()'s
+ * steps from them; a step up of under a tenth is the palette's grain, and the first 3 steps are its rim, darker
+ * than the glow behind it). What rises again out there is other art -- the red streak under the logo, which no
+ * letter's distance claims -- and nothing past it is the letter's. */
+static void falling(const float *px, const float *d, uint8_t *own)
+{
+    for (int i = 0; i < TW * TH; i++)
+        own[i] = d[i] <= 3;
+    for (int s = 4; s < 40; s++)
+        for (int y = 0; y < TH; y++)
+            for (int x = 0; x < TW; x++) {
+                int i = y * TW + x;
+                if (d[i] != (float)s)
+                    continue;
+                const int nb[4] = { y ? i - TW : -1, y < TH - 1 ? i + TW : -1, x ? i - 1 : -1, x < TW - 1 ? i + 1 : -1 };
+                for (int k = 0; k < 4; k++)
+                    if (nb[k] >= 0 && d[nb[k]] == (float)(s - 1) && own[nb[k]] &&
+                        px[4 * i + 3] <= px[4 * nb[k] + 3] + 0.1f)
+                        own[i] = 1;
+            }
+}
+
 static void blur(float *a, int w, int h, double sigma)
 {
     int r = (int)ceil(sigma * 3);
@@ -221,9 +243,9 @@ int ngb_app_icon_make(const char *game_dir, int size, uint8_t *out)
     float *px = malloc(sizeof(float) * 4 * TW * TH), *dn = malloc(sizeof(float) * TW * TH),
           *dother = malloc(sizeof(float) * TW * TH), *glow = malloc(sizeof(float) * TW * TH),
           *letter = malloc(sizeof(float) * TW * TH), *big = calloc((size_t)M * M * 4, sizeof(float));
-    uint8_t *solid = malloc(TW * TH), *nm = calloc(TW * TH, 1), *rest = malloc(TW * TH);
+    uint8_t *solid = malloc(TW * TH), *nm = calloc(TW * TH, 1), *rest = malloc(TW * TH), *own = malloc(TW * TH);
     int *stack = malloc(sizeof(int) * TW * TH);
-    if (!spr || !px || !dn || !dother || !glow || !letter || !big || !solid || !nm || !rest || !stack ||
+    if (!spr || !px || !dn || !dother || !glow || !letter || !big || !solid || !nm || !rest || !own || !stack ||
         !logo_texture(spr, n, px))
         goto done;
 
@@ -261,8 +283,10 @@ int ngb_app_icon_make(const char *game_dir, int size, uint8_t *out)
         rest[i] = solid[i] && !nm[i];
     spread(nm, dn);
     spread(rest, dother);
+    falling(px, dn, own);
 
-    /* its share of the glow: what is nearer it than another letter, dying out 26 texels away; and the letter alone */
+    /* its share of the glow: what is nearer it than another letter, dying out 26 texels away, and its own (not the
+     * streak under the logo, which comes within those 26); and the letter alone */
     for (int i = 0; i < TW * TH; i++) {
         glow[i] = dn[i] <= dother[i];
         letter[i] = nm[i];
@@ -270,7 +294,7 @@ int ngb_app_icon_make(const char *game_dir, int size, uint8_t *out)
     blur(glow, TW, TH, 2.5);
     blur(letter, TW, TH, 0.6);
     for (int i = 0; i < TW * TH; i++) {
-        float a = px[4 * i + 3], fade = clip01((26 - dn[i]) / 8), g = glow[i] * fade;
+        float a = px[4 * i + 3], fade = clip01((26 - dn[i]) / 8), g = own[i] ? glow[i] * fade : 0;
         glow[i] = a * (g > nm[i] ? g : nm[i]);
         float e = clip01(letter[i] * 1.6f);
         letter[i] = dn[i] <= 1 ? (a < e ? a : e) : 0;
@@ -342,7 +366,7 @@ int ngb_app_icon_make(const char *game_dir, int size, uint8_t *out)
     free(bl);
 done:
     free(spr); free(px); free(dn); free(dother); free(glow); free(letter); free(big);
-    free(solid); free(nm); free(rest); free(stack);
+    free(solid); free(nm); free(rest); free(own); free(stack);
     return ok;
 }
 
