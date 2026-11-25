@@ -560,7 +560,8 @@ __attribute__((weak)) bool nv2a_overlay_picture(uint32_t win_w, uint32_t win_h, 
     return false;
 }
 
-#define LAYER_MAX_PX (2048u * 1152u)
+/* (a title that draws it at the window's size: a 2400 x 1080 phone's whole, a 3200 x 1440 one's at three quarters) */
+#define LAYER_MAX_PX (2560u * 1440u)
 static struct {
     int state;                          /* 0 not tried, 1 ready, -1 not possible */
     VkBuffer buf[FRAMES_IN_FLIGHT];

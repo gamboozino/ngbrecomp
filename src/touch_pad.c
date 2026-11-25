@@ -4,8 +4,9 @@
  * merged into the pad state the keyboard gives (src/keyboard.c, xbox_keyboard_map), which the game reads while
  * no controller is connected. With a controller connected they are hidden and their touches ignored.
  *
- * The picture is made here, at half the window's size, premultiplied BGRA, again whenever something on it
- * changes; the presenter blends it over each frame (xboxrecomp's present_sdl.c, nv2a_overlay_picture). The pieces
+ * The picture is made here, at the window's own size (half its size, enlarged by the presenter, blurred every
+ * piece: #284; NGB_TOUCH_HALF=1 makes it at half again, to compare), premultiplied BGRA, again whenever something
+ * on it changes; the presenter blends it over each frame (xboxrecomp's present_sdl.c, nv2a_overlay_picture). The pieces
  * are made from the game's own button art (src/game_prompts.c: the game's gems, plates and Black and White
  * buttons at touch size, a d-pad drawn in the look of its icon, the sticks' wells; each held piece a picture of
  * its own), and saved in the save folder (<save folder>/touch-art), so a later start shows them from its first
@@ -511,68 +512,136 @@ static const Sprite *piece(const char *name)
     return sprite(n);
 }
 
-/* A picture over the box of size (bw, bh) centred at (cx, cy), at opacity a, blended premultiplied: each pixel
- * the picture's texels under it averaged (the game's pieces are made larger than drawn), or sampled
- * bilinearly where it is drawn larger */
-static void draw_sprite(const Sprite *sp, float cx, float cy, float bw, float bh, float a)
+/* What was drawn over the untouched controls in each of the presenter's buffers (it hands a few in turn, each
+ * still holding the picture drawn into it last): only those boxes are put back before the next picture, not the
+ * whole of it copied, which at the window's own size is ten megabytes a frame while a stick is dragged. */
+#define OVER_BUFS 4
+#define OVER_BOXES 24
+typedef struct { uint32_t *px; int w, h, n; unsigned bg; int box[OVER_BOXES][4]; } Over;
+static Over s_over[OVER_BUFS];
+static Over *s_rec;      /* the buffer being drawn over (NULL: the untouched picture itself) */
+static unsigned s_bg_gen;   /* +1 each untouched picture made */
+
+static void over_box(int x0, int y0, int x1, int y1)
 {
-    if (!sp || !sp->px || bw < 1 || bh < 1)
+    Over *o = s_rec;
+    if (!o || o->n < 0)
         return;
-    int x0 = (int)floorf(cx - bw / 2), y0 = (int)floorf(cy - bh / 2), x1 = (int)ceilf(cx + bw / 2),
-        y1 = (int)ceilf(cy + bh / 2);
+    x0 = x0 < 0 ? 0 : x0;
+    y0 = y0 < 0 ? 0 : y0;
+    x1 = x1 > s_w ? s_w : x1;
+    y1 = y1 > s_h ? s_h : y1;
+    if (x0 >= x1 || y0 >= y1)
+        return;
+    if (o->n == OVER_BOXES) {
+        o->n = -1;       /* (more than kept: the whole picture put back next time) */
+        return;
+    }
+    int *b = o->box[o->n++];
+    b[0] = x0; b[1] = y0; b[2] = x1; b[3] = y1;
+}
+
+/* A picture at the size it is drawn, premultiplied BGRA: scaled once and kept (scaled at each drawing, a few
+ * held buttons and a dragged stick took milliseconds of every frame). Each pixel is the picture's texels under it
+ * averaged by how much of each it covers (the game's pieces are made larger than drawn), or sampled bilinearly
+ * where it is drawn larger. ox, oy: where the picture's corner lies in its first pixel (0..1). */
+typedef struct { const uint8_t *src; int sw, sh, w, h; float bw, bh, ox, oy; uint32_t *px; } Scaled;
+#define SCALED_N 96
+static Scaled s_scaled[SCALED_N];
+static int s_nscaled;
+
+static const Scaled *scaled(const Sprite *sp, int w, int h, float bw, float bh, float ox, float oy)
+{
+    for (int i = 0; i < s_nscaled; i++) {
+        const Scaled *c = &s_scaled[i];
+        if (c->src == sp->px && c->sw == sp->w && c->sh == sp->h && c->w == w && c->h == h &&
+            fabsf(c->bw - bw) < 1e-3f && fabsf(c->bh - bh) < 1e-3f && fabsf(c->ox - ox) < 1e-3f &&
+            fabsf(c->oy - oy) < 1e-3f)
+            return c;
+    }
+    if (s_nscaled == SCALED_N) {      /* (other sizes' left from a window since resized: all made again) */
+        for (int i = 0; i < SCALED_N; i++)
+            free(s_scaled[i].px);
+        s_nscaled = 0;
+    }
+    uint32_t *px = malloc(sizeof(uint32_t) * (size_t)w * h);
+    if (!px)
+        return NULL;
     float kx = sp->w / bw, ky = sp->h / bh;
-    bool area = kx > 1.5f || ky > 1.5f;
-    for (int y = y0 < 0 ? 0 : y0; y < y1 && y < s_h; y++)
-        for (int x = x0 < 0 ? 0 : x0; x < x1 && x < s_w; x++) {
+    bool area = kx > 1.0f || ky > 1.0f;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
             float acc[4] = {0, 0, 0, 0};
             if (area) {
-                float u0 = ((x - (cx - bw / 2)) * kx), v0 = ((y - (cy - bh / 2)) * ky);
-                int iu0 = (int)floorf(u0), iv0 = (int)floorf(v0), iu1 = (int)ceilf(u0 + kx), iv1 = (int)ceilf(v0 + ky);
-                int n = 0;
-                for (int v = iv0; v < iv1; v++)
-                    for (int u = iu0; u < iu1; u++) {
-                        n++;
-                        if (u < 0 || v < 0 || u >= sp->w || v >= sp->h)
-                            continue;
+                float u0 = (x - ox) * kx, v0 = (y - oy) * ky, u1 = u0 + kx, v1 = v0 + ky;
+                int iu0 = (int)floorf(u0), iv0 = (int)floorf(v0), iu1 = (int)ceilf(u1), iv1 = (int)ceilf(v1);
+                for (int v = iv0 < 0 ? 0 : iv0; v < iv1 && v < sp->h; v++) {
+                    float wv = fminf(v1, v + 1.0f) - fmaxf(v0, (float)v);
+                    for (int u = iu0 < 0 ? 0 : iu0; u < iu1 && u < sp->w; u++) {
+                        float wgt = wv * (fminf(u1, u + 1.0f) - fmaxf(u0, (float)u));
                         const uint8_t *t = &sp->px[((size_t)v * sp->w + u) * 4];
-                        float ta = t[3] / 255.0f;
+                        float ta = t[3] / 255.0f * wgt;
                         acc[0] += t[0] / 255.0f * ta;
                         acc[1] += t[1] / 255.0f * ta;
                         acc[2] += t[2] / 255.0f * ta;
                         acc[3] += ta;
                     }
-                if (!n)
-                    continue;
+                }
                 for (int k = 0; k < 4; k++)
-                    acc[k] /= n;
+                    acc[k] /= kx * ky;
             } else {
-                float u = ((x + 0.5f) - (cx - bw / 2)) / bw * sp->w - 0.5f,
-                      v = ((y + 0.5f) - (cy - bh / 2)) / bh * sp->h - 0.5f;
-                if (u < -0.5f || v < -0.5f || u > sp->w - 0.5f || v > sp->h - 0.5f)
-                    continue;
-                int iu = (int)floorf(u), iv = (int)floorf(v);
-                float fu = u - iu, fv = v - iv;
-                for (int k = 0; k < 4; k++) {   /* (premultiplied before filtering: no dark fringes) */
-                    int su = iu + (k & 1), sv = iv + (k >> 1);
-                    su = su < 0 ? 0 : su >= sp->w ? sp->w - 1 : su;
-                    sv = sv < 0 ? 0 : sv >= sp->h ? sp->h - 1 : sv;
-                    const uint8_t *t = &sp->px[((size_t)sv * sp->w + su) * 4];
-                    float wgt = ((k & 1) ? fu : 1 - fu) * ((k >> 1) ? fv : 1 - fv), ta = t[3] / 255.0f;
-                    acc[0] += wgt * t[0] / 255.0f * ta;
-                    acc[1] += wgt * t[1] / 255.0f * ta;
-                    acc[2] += wgt * t[2] / 255.0f * ta;
-                    acc[3] += wgt * ta;
+                float u = (x + 0.5f - ox) / bw * sp->w - 0.5f, v = (y + 0.5f - oy) / bh * sp->h - 0.5f;
+                if (!(u < -0.5f || v < -0.5f || u > sp->w - 0.5f || v > sp->h - 0.5f)) {
+                    int iu = (int)floorf(u), iv = (int)floorf(v);
+                    float fu = u - iu, fv = v - iv;
+                    for (int k = 0; k < 4; k++) {   /* (premultiplied before filtering: no dark fringes) */
+                        int su = iu + (k & 1), sv = iv + (k >> 1);
+                        su = su < 0 ? 0 : su >= sp->w ? sp->w - 1 : su;
+                        sv = sv < 0 ? 0 : sv >= sp->h ? sp->h - 1 : sv;
+                        const uint8_t *t = &sp->px[((size_t)sv * sp->w + su) * 4];
+                        float wgt = ((k & 1) ? fu : 1 - fu) * ((k >> 1) ? fv : 1 - fv), ta = t[3] / 255.0f;
+                        acc[0] += wgt * t[0] / 255.0f * ta;
+                        acc[1] += wgt * t[1] / 255.0f * ta;
+                        acc[2] += wgt * t[2] / 255.0f * ta;
+                        acc[3] += wgt * ta;
+                    }
                 }
             }
-            if (acc[3] <= 0)
-                continue;
-            uint32_t *p = &s_px[(size_t)y * s_w + x], c = *p;
-            float k = 1 - acc[3] * a;
-            float ob = (c & 0xFF) / 255.0f * k + acc[2] * a, og = (c >> 8 & 0xFF) / 255.0f * k + acc[1] * a,
-                  orr = (c >> 16 & 0xFF) / 255.0f * k + acc[0] * a, oa = (c >> 24) / 255.0f * k + acc[3] * a;
-            *p = (uint32_t)(ob * 255 + 0.5f) | (uint32_t)(og * 255 + 0.5f) << 8 | (uint32_t)(orr * 255 + 0.5f) << 16 |
-                 (uint32_t)(oa * 255 + 0.5f) << 24;
+            for (int k = 0; k < 4; k++)
+                acc[k] = acc[k] < 0 ? 0 : acc[k] > 1 ? 1 : acc[k];
+            px[(size_t)y * w + x] = (uint32_t)(acc[2] * 255 + 0.5f) | (uint32_t)(acc[1] * 255 + 0.5f) << 8 |
+                                    (uint32_t)(acc[0] * 255 + 0.5f) << 16 | (uint32_t)(acc[3] * 255 + 0.5f) << 24;
         }
+    Scaled *c = &s_scaled[s_nscaled++];
+    *c = (Scaled){ sp->px, sp->w, sp->h, w, h, bw, bh, ox, oy, px };
+    return c;
+}
+
+/* A picture over the box of size (bw, bh) centred at (cx, cy), at opacity a, blended premultiplied */
+static void draw_sprite(const Sprite *sp, float cx, float cy, float bw, float bh, float a)
+{
+    if (!sp || !sp->px || bw < 1 || bh < 1 || bw > 4096 || bh > 4096)
+        return;
+    int x0 = (int)floorf(cx - bw / 2), y0 = (int)floorf(cy - bh / 2), x1 = (int)ceilf(cx + bw / 2),
+        y1 = (int)ceilf(cy + bh / 2);
+    const Scaled *sc = scaled(sp, x1 - x0, y1 - y0, bw, bh, cx - bw / 2 - x0, cy - bh / 2 - y0);
+    if (!sc)
+        return;
+    over_box(x0, y0, x1, y1);
+    uint32_t A = (uint32_t)((a < 0 ? 0 : a > 1 ? 1 : a) * 256 + 0.5f);
+    for (int y = y0 < 0 ? 0 : y0; y < y1 && y < s_h; y++) {
+        const uint32_t *q = sc->px + (size_t)(y - y0) * sc->w - x0;
+        uint32_t *row = s_px + (size_t)y * s_w;
+        for (int x = x0 < 0 ? 0 : x0; x < x1 && x < s_w; x++) {
+            uint32_t t = q[x];
+            if (!(t >> 24))
+                continue;
+            uint32_t c = row[x], k = 255 * 256 - (t >> 24) * A, o = 0;   /* (what of the picture under it is kept) */
+            for (int sh = 0; sh < 32; sh += 8)
+                o |= (((c >> sh & 0xFF) * k + (t >> sh & 0xFF) * A * 255 + 255 * 128) / (255 * 256)) << sh;
+            row[x] = o;
+        }
+    }
 }
 
 static void draw(const char *name, float cx, float cy, float bw, float bh, float a)
@@ -630,6 +699,7 @@ static void draw_all(void)
 {
     float u = (float)s_h;
     size_t px = (size_t)s_w * s_h;
+    bool fresh = false;
     if (!s_bg || s_bg_w != s_w || s_bg_h != s_h || s_bg_aspect != d_aspect || s_bg_art != s_art) {
         free(s_bg);
         s_bg = NULL;
@@ -641,9 +711,34 @@ static void draw_all(void)
         s_bg_h = s_h;
         s_bg_aspect = d_aspect;
         s_bg_art = s_art;
+        s_bg_gen++;
+        fresh = true;
+    }
+    Over *o = NULL;
+    for (int i = 0; i < OVER_BUFS; i++)
+        if (s_over[i].px == s_px)
+            o = &s_over[i];
+    if (!o) {            /* (a buffer not seen before: in the place of the one least lately drawn) */
+        static int next;
+        o = &s_over[next++ % OVER_BUFS];
+        o->px = s_px;
+        o->n = -1;
+    }
+    if (fresh) {
+        /* (the untouched picture is in it) */
+    } else if (o->n >= 0 && o->bg == s_bg_gen && o->w == s_w && o->h == s_h) {
+        for (int b = 0; b < o->n; b++)
+            for (int y = o->box[b][1]; y < o->box[b][3]; y++)
+                memcpy(s_px + (size_t)y * s_w + o->box[b][0], s_bg + (size_t)y * s_w + o->box[b][0],
+                       sizeof(uint32_t) * (size_t)(o->box[b][2] - o->box[b][0]));
     } else {
         memcpy(s_px, s_bg, sizeof(uint32_t) * px);
     }
+    o->bg = s_bg_gen;
+    o->w = s_w;
+    o->h = s_h;
+    o->n = s_bg ? 0 : -1;
+    s_rec = o;
     for (int i = 0; i < NCTRL; i++) {
         const Ctrl *c = &s_ctrl[i];
         Place at = place_at(c, d_aspect, s_art == ART_STANDIN);
@@ -652,6 +747,8 @@ static void draw_all(void)
         if (c->kind == STICK) {
             int s = i == RSTICK;
             float nx = cx + d_stick[s][0] * r * 0.55f, ny = cy + d_stick[s][1] * r * 0.55f;
+            nx = roundf(nx - r / 2) + r / 2;   /* (moved by whole pixels: its picture at this size made once) */
+            ny = roundf(ny - r / 2) + r / 2;
             draw_piece("nub", nx, ny, r, r, on ? 0.95f : IDLE + 0.2f);
             if (on) {
                 draw_piece("pad_lit", cx, cy, 2 * r, 2 * r, 0.9f);
@@ -674,6 +771,7 @@ static void draw_all(void)
             draw_button(c, true, cx, cy, r, 1.0f);   /* (the game's pieces: their own held picture) */
         }
     }
+    s_rec = NULL;
 }
 
 /* The presenter asks first whether there is a picture at all */
@@ -696,7 +794,19 @@ bool nv2a_overlay_picture(uint32_t win_w, uint32_t win_h, uint32_t *px, size_t m
 {
     if (xbox_InputControllerPresent() || !win_w || !win_h)
         return false;
-    int w = (int)(win_w / 2), h = (int)(win_h / 2);
+    /* (the window's own size; one of more pixels than the presenter's buffer holds at three quarters, or half) */
+    static int half = -1;
+    if (half < 0)
+        { const char *e = getenv("NGB_TOUCH_HALF"); half = e && *e == '1'; }
+    int w = (int)win_w, h = (int)win_h;
+    if (!half && (size_t)w * h > max) {
+        w = (int)(win_w * 3 / 4);
+        h = (int)(win_h * 3 / 4);
+    }
+    if (half || (size_t)w * h > max) {
+        w = (int)(win_w / 2);
+        h = (int)(win_h / 2);
+    }
     if (!w || !h || (size_t)w * h > max)
         return false;
     pthread_mutex_lock(&s_lock);

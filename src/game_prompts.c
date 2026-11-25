@@ -15,8 +15,9 @@
  *       sticks the bare disc with an L / R; the d-pad the game's icon, the arm meant lit.
  *   Keys: the plate wiped, the legend in the game's font enlarged; arrows, the Windows key and the mouse drawn.
  *   Tabs: Q and E for the pause menu's L / R plates, the plate's shape and glow drawn at 4x.
- *   Touch: the Xbox pieces made at 8 pixels a game pixel, a d-pad drawn as vectors, the sticks' wells, each held
- *       piece a picture of its own.
+ *   Touch: every piece drawn at its own size (16 pixels a game pixel, 384 x 384), none an enlarged icon: the gems,
+ *       the Black and White balls, the plates, the d-pad and the sticks' wells are the icons' shapes drawn again,
+ *       their colours and light read from the game's textures; each held piece a picture of its own.
  *
  * The shapes are coverage drawn supersampled 8 times and box-filtered, scan-converted the way the mock-ups'
  * drawing library (Pillow) does, and enlarged with its bicubic filter, so these match the approved mock-ups
@@ -1014,9 +1015,9 @@ static double plate_glyph(Cv *c, char ch, double x, double base, double u)
 }
 
 /* A plate w x h with text in the plate letters' cut, centred, at scale s > 1 */
-static Im plate_label(const char *text, int w, int h, int s, double size)
+/* A legend in the plate letters' cut, centred on a plate w x h at scale s */
+static void plate_text(Im p, const char *text, int w, int h, int s, double size)
 {
-    Im p = plate_sized(w, h, s);
     Cv cv = cv_new(w, h, s);
     int n = (int)strlen(text);
     double ws[8], tw = 0, gap = 0.15 * size;
@@ -1029,6 +1030,12 @@ static Im plate_label(const char *text, int w, int h, int s, double size)
         x += ws[i] + gap;
     }
     ink(p, cv_mask(&cv), k_ink, 0, 0, 1);
+}
+
+static Im plate_label(const char *text, int w, int h, int s, double size)
+{
+    Im p = plate_sized(w, h, s);
+    plate_text(p, text, w, h, s, size);
     return p;
 }
 
@@ -1266,10 +1273,8 @@ static Im ball(int start, int s)
     return d;
 }
 
-static Im stick(char side, int click, int s)
+static Im stick_on(Im d, char side, int click, int s)   /* the L / R (and the click's chevron) on a disc */
 {
-    static const double base[3] = { 0.17, 0.17, 0.18 };
-    Im d = dark_disc(base, 1.0, s);
     Cv cv = cv_new(21, 23, s);
     double size = click ? 0.74 : 0.9, w = (side == 'L' ? 8.3 : 10.3) * size, bl = click ? 13.0 : 15.4;
     plate_glyph(&cv, side, CX - w / 2 - SHEAR * CAP * size / 2, bl, size);
@@ -1284,6 +1289,12 @@ static Im stick(char side, int click, int s)
     }
     ink(d, cv_mask(&cv), k_ink, 0, 0, 1);
     return d;
+}
+
+static Im stick(char side, int click, int s)
+{
+    static const double base[3] = { 0.17, 0.17, 0.18 };
+    return stick_on(dark_disc(base, 1.0, s), side, click, s);
 }
 
 static Im dpad_icon(int dir, int s)          /* 0 Up 1 Down 2 Left 3 Right */
@@ -1542,43 +1553,16 @@ static Im tab_key(int e, int s)
 
 /* ---------- the touch pieces ---------- */
 
-#define TS 8                 /* touch: 8 pixels a game pixel */
-#define BALL_S 11
-#define SMALL_S 11      /* (8 left Start and Back about 26 px across on a phone) */
+#define TN 384               /* a touch piece's picture (a face button is some 200 pixels across on a 1080p phone,
+                              * 270 on a 1440p one: 192 was drawn enlarged, #284) */
+#define TS 16                /* touch: 16 pixels a game pixel */
+#define BALL_S 22
+#define SMALL_S 22
 
 static Im centred(Im a, int n, double ax, double ay)
 {
     Im o = im_new(n, n);
     over(o, a, pyround(n / 2.0 - ax), pyround(n / 2.0 - ay));
-    return o;
-}
-
-static Im firm_disc(Im a, int s, double cx, double cy, double R, double shadow)
-{
-    Im o = im_copy(a);
-    for (int y = 0; y < a.h; y++)
-        for (int x = 0; x < a.w; x++) {
-            double r = hypot((x + 0.5) / s - cx, (y + 0.5) / s - cy), circ = clip01((R - r) * s + 0.5);
-            float *p = PX(o, x, y), *q = PX(a, x, y);
-            double out = fmin(q[3], shadow) * (r > R - 0.5);
-            for (int c = 0; c < 3; c++)
-                p[c] = (float)(q[c] * circ + 0.02 * (1 - circ));
-            p[3] = (float)fmax(circ, out);
-        }
-    return o;
-}
-
-static Im crisp(Im a, double sigma, double amount)
-{
-    Im o = im_copy(a);
-    for (int c = 0; c < 3; c++) {
-        Mk ch = mk_new(a.w, a.h);
-        for (int i = 0; i < a.w * a.h; i++)
-            ch.m[i] = a.p[4 * i + c];
-        Mk b = blur(ch, sigma);
-        for (int i = 0; i < a.w * a.h; i++)
-            o.p[4 * i + c] = clip01(ch.m[i] + amount * (ch.m[i] - b.m[i]));
-    }
     return o;
 }
 
@@ -1624,7 +1608,7 @@ static void gem_letter(Cv *cv, int k, double cx, double cy, double w)
         break;
     case 2: {                              /* B: the stem, two bowls (the lower one wider) */
         p.n = 0;
-        pt(&p, cx - 1.2, cy); pt(&p, cx - 2.9, cy); pt(&p, cx - 2.9, cy - h); pt(&p, cx + 0.4, cy - h);
+        pt(&p, cx + 0.4, cy); pt(&p, cx - 2.9, cy); pt(&p, cx - 2.9, cy - h); pt(&p, cx + 0.4, cy - h);
         for (int i = 1; i < 12; i++) {
             double t = -M_PI / 2 + M_PI * i / 12;
             pt(&p, cx + 0.4 + 2.1 * cos(t), cy - h / 2 + 2.1 * sin(t));
@@ -1643,63 +1627,6 @@ static void gem_letter(Cv *cv, int k, double cx, double cy, double w)
         p.n = 0; pt(&p, cx - 1.9, cy + 1.2); pt(&p, cx + 1.9, cy + 1.2); cv_stroke(cv, &p, w, 255, 0);
         break;
     }
-}
-
-static Im gem(int k)
-{
-    Im a = crisp(smooth(face(k), TS), 0.9 * TS, 0.35);
-    a = firm_disc(a, TS, CX, CY, R_DISC, 0.5);
-    /* the letter drawn sharp over the game's own: a soft dark edge under it, as the game's letters have, then the
-     * letter in the game's near-white */
-    Cv cv = cv_new(21, 23, TS);
-    gem_letter(&cv, k, CX, CY, 2.0);
-    Mk m = cv_mask(&cv);
-    Cv cvs = cv_new(21, 23, TS);
-    gem_letter(&cvs, k, CX + 0.35, CY + 0.45, 2.9);
-    Mk sh = blur(cv_mask(&cvs), 0.5 * TS);
-    static const float dark[3] = { 0.05f, 0.05f, 0.06f }, light[3] = { 0.96f, 0.96f, 0.95f };
-    ink(a, sh, dark, 0, 0, 0.55f);
-    ink(a, m, light, 0, 0, 1);
-    return centred(a, 192, CX * TS, CY * TS);
-}
-
-static Im black_ball(int s)
-{
-    Im a = smooth(crop(s_black, 0, 0, 25, 25), s);
-    for (int y = 0; y < a.h; y++)
-        for (int x = 0; x < a.w; x++) {
-            double r = hypot((x + 0.5) / s - 12.5, (y + 0.5) / s - 12.5), circ = clip01((6.4 - r) * s + 0.5);
-            double edge = clip01((96.0 / s - r) / 2.0);
-            float *p = PX(a, x, y);
-            for (int c = 0; c < 3; c++)
-                p[c] = (float)(p[c] * circ + 1.0 * (1 - circ));
-            p[3] = (float)fmax(circ, p[3] * (1 - circ) * edge);
-        }
-    return a;
-}
-
-static Im white_ball(void)
-{
-    Im a = crisp(smooth(crop(s_white, 0, 0, 13, 13), BALL_S), 0.8 * BALL_S, 0.5);
-    return firm_disc(a, BALL_S, 6.5, 6.5, 6.35, 0.0);
-}
-
-static Im start_back(int start)
-{
-    Im a = black_ball(SMALL_S);
-    Cv cv = cv_new(25, 25, SMALL_S);
-    double q = 3.0, sg = start ? 1 : -1;
-    Pts p = { .n = 0 };
-    pt(&p, 12.5 - sg * q * 0.75, 12.5 - q); pt(&p, 12.5 + sg * q * 0.95, 12.5); pt(&p, 12.5 - sg * q * 0.75, 12.5 + q);
-    cv_poly(&cv, &p, 255);
-    Mk m = cv_mask(&cv), sh = mk_new(m.w, m.h);
-    for (int y = 0; y < m.h; y++)          /* (numpy's roll: wrapped round) */
-        for (int x = 0; x < m.w; x++)
-            MV(sh, x, y) = MV(m, (x - 1 + m.w) % m.w, (y - 1 + m.h) % m.h);
-    static const float black[3] = { 0, 0, 0 };
-    ink(a, sh, black, 0, 0, 0.6f);
-    ink(a, m, k_ink, 0, 0, 1);
-    return a;
 }
 
 static float aa(double sdf, double scale) { return clip01(0.5 - sdf * scale); }
@@ -1724,6 +1651,301 @@ static double interp(double v, const double (*pts)[2], int n)
 }
 
 static double gridv(int i, int n, double s) { return (i + 0.5) / s - n / s / 2; }
+
+/* ---- The buttons drawn at the touch pieces' own size (#284: the game's 21-pixel icons enlarged were a blur on a
+ * phone). Nothing here is an enlarged icon: each is the icon's shapes, measured, drawn again as coverage -- a
+ * gem's ring, the dark under the ring's top, its glint, its shadow; a ball's rim light and reflections; a plate's
+ * bevels -- with the colours and the light read from the game's textures: a face's colour its body's median, the
+ * light across it the four faces' (D.l_body, smooth), the ring's greys theirs (D.rim), the Black button's rim and
+ * glow and the White button's light from their own. ---- */
+
+static double angle_off(double a, double b)       /* degrees apart, 0..180 */
+{
+    return fabs(pymod360(a - b + 180) - 180);
+}
+
+/* A face's colour: each channel's upper-middle value over its body (two thirds up: the letter, its shadow and the
+ * dark under the ring are the lower ones) */
+static void face_tone(int k, double out[3])
+{
+    Im f = face(k);
+    for (int c = 0; c < 3; c++) {
+        float v[23 * 21];
+        int n = 0;
+        for (int y = 0; y < 23; y++)
+            for (int x = 0; x < 21; x++)
+                if (hypot(x + 0.5 - CX, y + 0.5 - CY) < 7.5)
+                    v[n++] = PX(f, x, y)[c];
+        qsort(v, n, sizeof(float), fcmp);
+        out[c] = v[n * 2 / 3];
+    }
+}
+
+/* The game's face button without its letter, in the face's 21 x 23 cell at scale s: a glass gem of this colour in
+ * a thin metal ring, lit from the left as the game's are */
+static Im jewel(const double base[3], int s)
+{
+    discs_init();
+    const double RI = 8.75;                /* the ring's inner edge */
+    Im o = im_new(21 * s, 23 * s);
+    float *l = up_plane(D.l_body, s);
+    for (int y = 0; y < o.h; y++)
+        for (int x = 0; x < o.w; x++) {
+            double px = (x + 0.5) / s, py = (y + 0.5) / s, dx = px - CX, dy = py - CY, r = hypot(dx, dy);
+            double ang = pymod360(atan2(dy, dx) * 180 / M_PI);
+            double lv = l[y * o.w + x];
+            double t = ang / 5, fl = floor(t), f = t - fl;
+            int i0 = ((int)fl) % 72;
+            double metal = D.rim[i0] * (1 - f) + D.rim[(i0 + 1) % 72] * f;
+            double circ = clip01((R_DISC - r) * s + 0.5), ring = clip01((r - RI) * s + 0.5);
+            /* the body: dark under the ring's top (thickest up and to the right, away from the light), deeper
+             * toward its edge, a soft sheen along the lit side */
+            double under = clip01((hypot(dx + 0.4, dy - 1.7) - 8.3) / 0.45) * 0.5;
+            double deep = pow(clip01((r - 6.4) / (RI - 6.4)), 2) * 0.2;
+            double sheen = exp(-pow((r - 6.6) / 0.9, 2)) * pow(clip01(1 - angle_off(ang, 200) / 62), 1.5) * 0.2;
+            /* the ring: rounded, a fine dark line where the gem meets it */
+            metal *= 0.8 + 0.42 * sin(M_PI * clip01((r - RI) / (R_DISC - RI)));
+            double seam = aa(fabs(r - RI) - 0.1, s) * 0.4;
+            /* the glint, on the ring's inner edge at the upper left: a sharp core, a little bloom */
+            double gu = (px - 6.3) * -0.447 + (py - 2.6) * -0.894, gt = (px - 6.3) * 0.894 + (py - 2.6) * -0.447;
+            double e = hypot(gt / 1.25, gu / 0.85);
+            double glint = fmax(clip01((0.7 - e) * 0.85 * s / 2 + 0.5), 0.55 * exp(-e * e / 0.9));
+            float *p = PX(o, x, y);
+            for (int c = 0; c < 3; c++) {
+                double body = base[c] * lv + clip01(lv - 1.0) * 0.1;
+                body *= (1 - under) * (1 - deep);
+                body += (1 - body) * sheen;
+                double v = body * (1 - ring) + metal * ring;
+                v *= 1 - seam;
+                v += (0.97 - v) * glint;
+                p[c] = (float)(clip01(v) * circ + 0.02 * (1 - circ));
+            }
+            double shadow = clip01((R_DISC + 0.55 - hypot(dx - 0.45, dy - 0.75)) / 1.3) * 0.5;
+            p[3] = (float)fmax(circ, shadow);
+        }
+    return o;
+}
+
+static Im gem(int k)
+{
+    double tone[3];
+    face_tone(k, tone);
+    Im a = jewel(tone, TS);
+    /* the letter: a soft dark edge under it, as the game's letters have, then the letter in the game's near-white */
+    Cv cv = cv_new(21, 23, TS);
+    gem_letter(&cv, k, CX, CY, 2.0);
+    Mk m = cv_mask(&cv);
+    Cv cvs = cv_new(21, 23, TS);
+    gem_letter(&cvs, k, CX + 0.3, CY + 0.4, 2.7);
+    Mk sh = blur(cv_mask(&cvs), 0.3 * TS);
+    static const float dark[3] = { 0.05f, 0.05f, 0.06f }, light[3] = { 0.96f, 0.96f, 0.95f };
+    ink(a, sh, dark, 0, 0, 0.55f);
+    ink(a, m, light, 0, 0, 1);
+    return centred(a, TN, CX * TS, CY * TS);
+}
+
+/* What the Black and White buttons' icons give: the Black's rim light round its edge, its glow by distance, its
+ * glint's white; the White's light across it, smooth */
+static struct {
+    float rim[72], glow[14], spec, light[13 * 13];
+    int made;
+} K;
+
+#define BALL_R 6.4
+
+static void balls_init(void)
+{
+    if (K.made)
+        return;
+    double gw[14] = { 0 }, gs[14] = { 0 };
+    K.spec = 0;
+    for (int y = 0; y < 25; y++)
+        for (int x = 0; x < 25; x++) {
+            double r = hypot(x + 0.5 - 12.5, y + 0.5 - 12.5);
+            const float *p = PX(s_black, x, y);
+            if (r < 5 && lum3(p) > K.spec)
+                K.spec = (float)lum3(p);
+            for (int i = 0; i < 14; i++) {            /* the glow at 7.5, 8, 8.5... from the middle */
+                double w = 1 - fabs(r - (7.5 + 0.5 * i)) / 0.5;
+                if (w > 0 && r > BALL_R + 0.75) {
+                    gw[i] += w;
+                    gs[i] += p[3] * w;
+                }
+            }
+        }
+    for (int i = 0; i < 14; i++)
+        K.glow[i] = (float)(gw[i] > 0 ? gs[i] / gw[i] : 0);
+    for (int i = 0; i < 72; i++) {
+        double sw = 0, sg = 0;
+        for (int y = 0; y < 25; y++)
+            for (int x = 0; x < 25; x++) {
+                double r = hypot(x + 0.5 - 12.5, y + 0.5 - 12.5);
+                if (!(r > 5.2 && r < 6.2))
+                    continue;
+                double d = angle_off(pymod360(atan2(y + 0.5 - 12.5, x + 0.5 - 12.5) * 180 / M_PI), i * 5);
+                double w = exp(-0.5 * (d / 20) * (d / 20));
+                sw += w;
+                sg += lum3(PX(s_black, x, y)) * w;
+            }
+        K.rim[i] = (float)(sg / (sw > 1e-6 ? sw : 1e-6));
+    }
+    Mk lm = mk_new(13, 13), in = mk_new(13, 13);
+    for (int i = 0; i < 13 * 13; i++) {
+        in.m[i] = s_white.p[4 * ((i / 13) * s_white.w + i % 13) + 3] > 0.98f;
+        lm.m[i] = (float)lum3(&s_white.p[4 * ((i / 13) * s_white.w + i % 13)]) * in.m[i];
+    }
+    Mk a = blur(lm, 1.5), b = blur(in, 1.5);
+    float top = 0;
+    for (int i = 0; i < 13 * 13; i++) {
+        K.light[i] = a.m[i] / (b.m[i] > 1e-3f ? b.m[i] : 1e-3f);
+        if (in.m[i] > 0 && K.light[i] > top)
+            top = K.light[i];
+    }
+    for (int i = 0; i < 13 * 13; i++)      /* (smoothed, its white was a grey: the brightest white again) */
+        K.light[i] = clip01(K.light[i] / (top > 0.1f ? top : 1));
+    K.made = 1;
+}
+
+static double ball_glow(double r)
+{
+    double t = (r - 7.5) / 0.5;
+    if (t <= 0)                                /* (under the ball's own edge in the icon: carried on inward) */
+        return fmin(K.glow[0] + (K.glow[0] - K.glow[1]) * -t, K.glow[0] * 1.6);
+    if (t >= 13)
+        return 0;
+    int i = (int)t;
+    return K.glow[i] + (K.glow[i + 1] - K.glow[i]) * (t - i);
+}
+
+/* A spot of light: 1 inside the ellipse (rx, ry) about (cx, cy), its edge `soft` pixels of the piece wide */
+static double spot(double x, double y, double cx, double cy, double rx, double ry, double soft, int s)
+{
+    double e = hypot((x - cx) / rx, (y - cy) / ry);
+    return clip01((1 - e) * fmin(rx, ry) * s / soft + 0.5);
+}
+
+/* The Black button (Start and Back's ball too) on TN x TN at scale s: a black glossy ball in the game's white
+ * glow, its rim light, its glint and the dimmer reflections where the icon has them */
+static Im ball_black(int s, int marked)        /* marked: Start's and Back's, the glint above the triangle */
+{
+    const double gx = marked ? 0.4 : 1.0, gy = marked ? -4.3 : -2.75, gk = marked ? 0.7 : 1;
+    balls_init();
+    Im o = im_new(TN, TN);
+    for (int Y = 0; Y < TN; Y++)
+        for (int X = 0; X < TN; X++) {
+            double x = (X + 0.5 - TN / 2.0) / s, y = (Y + 0.5 - TN / 2.0) / s, r = hypot(x, y);
+            double ang = pymod360(atan2(y, x) * 180 / M_PI), t = ang / 5, fl = floor(t), f = t - fl;
+            int i0 = ((int)fl) % 72;
+            double circ = clip01((BALL_R - r) * s + 0.5);
+            double v = 0.02;
+            v += (K.rim[i0] * (1 - f) + K.rim[(i0 + 1) % 72] * f) * 1.25 * pow(clip01((r - 4.9) / 1.5), 2.2);
+            v += 0.3 * exp(-pow((r - 4.7) / 0.42, 2)) * pow(clip01(1 - angle_off(ang, 212) / 34), 1.3);
+            v += 0.26 * exp(-1.3 * (pow((x + 2.6) / 2.3, 2) + pow((y - 3.9) / 1.2, 2)));
+            if (!marked)
+                v += 0.4 * exp(-(pow(x + 1.9, 2) + pow(y + 0.9, 2)) / 0.3);
+            double e = hypot((x - gx) / (1.4 * gk), (y - gy) / (1.05 * gk));
+            v += 0.22 * exp(-e * e / 1.6);
+            v += (K.spec - v) * spot(x, y, gx, gy, 1.4 * gk, 1.05 * gk, 2, s);
+            double edge = clip01((TN / 2.0 / s - r) / 2.0);
+            float *p = PX(o, X, Y);
+            for (int c = 0; c < 3; c++)
+                p[c] = (float)(clip01(v) * circ + 1.0 * (1 - circ));
+            p[3] = (float)fmax(circ, ball_glow(r) * (1 - circ) * edge);
+        }
+    return o;
+}
+
+/* The White button: the Black's ball in white, the light across it the icon's own, in the same glow (without it,
+ * it looked the smaller one) */
+static Im ball_white(int s)
+{
+    balls_init();
+    Im o = im_new(TN, TN);
+    float *l = resize_f(K.light, 13, 13, 13 * s, 13 * s);
+    for (int Y = 0; Y < TN; Y++)
+        for (int X = 0; X < TN; X++) {
+            double x = (X + 0.5 - TN / 2.0) / s, y = (Y + 0.5 - TN / 2.0) / s, r = hypot(x, y);
+            double circ = clip01((BALL_R - r) * s + 0.5);
+            /* (the icon's ball is 6.35 across 13 pixels: its light read at that size) */
+            int lx = (int)((x * 6.35 / BALL_R + 6.5) * s), ly = (int)((y * 6.35 / BALL_R + 6.5) * s);
+            lx = lx < 0 ? 0 : lx >= 13 * s ? 13 * s - 1 : lx;
+            ly = ly < 0 ? 0 : ly >= 13 * s ? 13 * s - 1 : ly;
+            double v = 1 - (1 - l[ly * 13 * s + lx]) * 0.8;   /* (a little whiter: half see-through, it was a grey) */
+            v *= 1 - 0.2 * pow(clip01((r - 5.2) / 1.2), 2);
+            v += (0.3 - v) * 0.5 * aa(fabs(r - BALL_R + 0.1) - 0.1, s);
+            v += (1 - v) * 0.55 * exp(-(pow(x + 3.5, 2) + pow(y + 2.9, 2)) / 0.9);
+            v += (1 - v) * spot(x, y, 1.0, -3.6, 1.3, 0.9, 2, s);
+            double edge = clip01((TN / 2.0 / s - r) / 2.0);
+            float *p = PX(o, X, Y);
+            for (int c = 0; c < 3; c++)
+                p[c] = (float)(clip01(v) * circ + 1.0 * (1 - circ));
+            p[3] = (float)fmax(circ, ball_glow(r) * (1 - circ) * edge);
+        }
+    return o;
+}
+
+static Im start_back(int start)
+{
+    Im a = ball_black(SMALL_S, 1);
+    Cv cv = cv_new(TN / 2, TN / 2, 2);         /* (a unit two of the piece's pixels) */
+    double q = 3.0 * SMALL_S / 2, sg = start ? 1 : -1, m = TN / 4.0;
+    Pts p = { .n = 0 };
+    pt(&p, m - sg * q * 0.75, m - q); pt(&p, m + sg * q * 0.95, m); pt(&p, m - sg * q * 0.75, m + q);
+    cv_poly(&cv, &p, 255);
+    Mk mk = cv_mask(&cv), sh = mk_new(mk.w, mk.h);
+    int off = SMALL_S / 8;
+    for (int y = off; y < mk.h; y++)
+        for (int x = off; x < mk.w; x++)
+            MV(sh, x, y) = MV(mk, x - off, y - off);
+    static const float black[3] = { 0, 0, 0 };
+    ink(a, sh, black, 0, 0, 0.6f);
+    ink(a, mk, k_ink, 0, 0, 1);
+    return a;
+}
+
+/* The L / R plate without its letter, 21 x 21 at scale s: the game's face and its two-step bevels (their greys
+ * the plate's own, read mid-edge), the corners mitred */
+static Im plate_drawn(int s)
+{
+    Im g = plate('L'), o = im_new(21 * s, 21 * s);
+    const float *tone[4][2] = {            /* left, top, right, bottom: the outer step, the inner */
+        { PX(g, 0, 3), PX(g, 1, 3) }, { PX(g, 10, 0), PX(g, 10, 1) },
+        { PX(g, 20, 10), PX(g, 19, 10) }, { PX(g, 10, 20), PX(g, 10, 19) },
+    };
+    for (int y = 0; y < o.h; y++)
+        for (int x = 0; x < o.w; x++) {
+            double acc[3] = { 0, 0, 0 };
+            for (int q = 0; q < 16; q++) {
+                double u = (x + ((q & 3) + 0.5) / 4) / s, v = (y + ((q >> 2) + 0.5) / 4) / s;
+                double d[4] = { u, v, 21 - u, 21 - v };
+                int k = 0;
+                for (int i = 1; i < 4; i++)
+                    if (d[i] < d[k])
+                        k = i;
+                for (int c = 0; c < 3; c++)
+                    acc[c] += d[k] >= 2 ? PLATE_FACE : tone[k][d[k] >= 1][c];
+            }
+            float *p = PX(o, x, y);
+            for (int c = 0; c < 3; c++)
+                p[c] = (float)(acc[c] / 16);
+            p[3] = 1;
+        }
+    return o;
+}
+
+static Im trigger(const char *text)
+{
+    Im p = plate_drawn(TS);
+    plate_text(p, text, 21, 21, TS, 1.0);
+    return centred(p, TN, p.w / 2.0, p.h / 2.0);
+}
+
+/* The sticks' knob and their clicks: the gem dark, as the prompts' disc is */
+static Im knob(void)
+{
+    static const double base[3] = { 0.255, 0.255, 0.27 };
+    return jewel(base, TS);
+}
 
 /* The d-pad drawn at this size in the look of the game's icon; lit: 0 none, 1 n 2 s 3 w 4 e */
 static Im dpad_piece(int lit)
@@ -2110,58 +2332,46 @@ static const char *const k_touch[] = {
 static NgbPic s_touch[TOUCH_N];
 static int s_touch_ready, s_touch_started;
 
+static Im touch_base(int k)
+{
+    switch (k) {
+    case 0: case 1: case 2: case 3: return gem("\3\2\0\1"[k]);
+    case 4: return ball_black(BALL_S, 0);
+    case 5: return ball_white(BALL_S);
+    case 6: return trigger("L");
+    case 7: return trigger("R");
+    case 8: return start_back(0);
+    case 9: return start_back(1);
+    case 10: return centred(stick_on(knob(), 'L', 1, TS), TN, CX * TS, CY * TS);
+    case 11: return centred(stick_on(knob(), 'R', 1, TS), TN, CX * TS, CY * TS);
+    default: return centred(knob(), TN, CX * TS, CY * TS);
+    }
+}
+
 static void build_touch(void)
 {
-    Im base[13];
-    for (int k = 0; k < 4; k++)
-        base[k] = gem("\3\2\0\1"[k]);
-    Im bb = black_ball(BALL_S);
-    base[4] = centred(bb, 192, bb.w / 2.0, bb.h / 2.0);
-    Im wb = white_ball();
-    base[5] = centred(wb, 192, wb.w / 2.0, wb.h / 2.0);
-    for (int y = 0; y < 192; y++)     /* the Black button's halo round it too: without it, it looked the smaller one */
-        for (int x = 0; x < 192; x++) {
-            if (hypot(x - 95.5, y - 95.5) < 6.4 * BALL_S - 1)
-                continue;
-            float *d = PX(base[5], x, y), *g = PX(base[4], x, y);
-            float ga = g[3] * (1 - d[3]), oa = d[3] + ga;
-            if (oa <= 0)
-                continue;
-            for (int c = 0; c < 3; c++)
-                d[c] = (d[c] * d[3] + g[c] * ga) / oa;
-            d[3] = oa;
-        }
-    Im tl = plate_label("L", 21, 21, TS, 1.0), tr = plate_label("R", 21, 21, TS, 1.0);
-    base[6] = centred(tl, 192, tl.w / 2.0, tl.h / 2.0);
-    base[7] = centred(tr, 192, tr.w / 2.0, tr.h / 2.0);
-    Im bk = start_back(0), st = start_back(1);
-    base[8] = centred(bk, 192, bk.w / 2.0, bk.h / 2.0);
-    base[9] = centred(st, 192, st.w / 2.0, st.h / 2.0);
-    base[10] = centred(stick('L', 1, TS), 192, CX * TS, CY * TS);
-    base[11] = centred(stick('R', 1, TS), 192, CX * TS, CY * TS);
-    static const double nb[3] = { 0.17, 0.17, 0.18 };
-    base[12] = centred(dark_disc(nb, 1.0, TS), 192, CX * TS, CY * TS);
-    for (int k = 0; k < 13; k++) {
-        s_touch[k] = to_pic(base[k]);
+    for (int k = 0; k < 13; k++) {     /* a piece at a time, its scratch memory let go after each (a phone's) */
+        Im base = touch_base(k);
+        s_touch[k] = to_pic(base);
         Im a;
         if (k == 4 || k == 8 || k == 9) {        /* they carry the game's halo already: held, it is stronger */
-            a = im_copy(base[k]);
-            double lim = 6.4 * (k == 4 ? BALL_S : SMALL_S);
-            for (int y = 0; y < 192; y++)
-                for (int x = 0; x < 192; x++) {
+            a = im_copy(base);
+            double lim = BALL_R * (k == 4 ? BALL_S : SMALL_S);
+            for (int y = 0; y < TN; y++)
+                for (int x = 0; x < TN; x++) {
                     float *p = PX(a, x, y);
-                    if (hypot(x - 95.5, y - 95.5) < lim)
+                    if (hypot(x + 0.5 - TN / 2.0, y + 0.5 - TN / 2.0) < lim)
                         for (int c = 0; c < 3; c++)
                             p[c] = clip01(p[c] * 1.25 + 0.05);
                     else
                         p[3] = clip01(p[3] * 1.9);
                 }
         } else {
-            a = held(base[k], k == 5 ? BALL_S : TS);
+            a = held(base, k == 5 ? BALL_S : TS);
         }
         s_touch[13 + k] = to_pic(a);
+        tmp_release();
     }
-    tmp_release();                    /* (only now: base[] is in the scratch memory) */
     s_touch[26] = to_pic(well(0));
     s_touch[27] = to_pic(well(1));
     tmp_release();
@@ -2275,7 +2485,7 @@ static void dump_touch(const char *dir)
  * them from its first frame, before the game's textures are read, and does not make them again. version.txt,
  * written last, says which drawing of them they are; another (or none) and they are made and saved again. */
 
-#define TOUCH_ART_VERSION 3   /* raised whenever the pieces are drawn differently (and each release redraws them) */
+#define TOUCH_ART_VERSION 4   /* raised whenever the pieces are drawn differently (and each release redraws them) */
 
 unsigned char *stbi_load_from_memory(const unsigned char *buf, int len, int *x, int *y, int *comp, int req);
 void stbi_image_free(void *p);
