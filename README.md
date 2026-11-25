@@ -4,7 +4,7 @@
 
 **A PC port of Ninja Gaiden Black by static recompilation.**
 
-A native Linux and Windows version of *Ninja Gaiden Black* (Xbox, 2005), with an experimental Android
+A native Linux and Windows version of *Ninja Gaiden Black* (Xbox, 2005), with an Android
 one, made by statically
 recompiling the game's own code to run directly on a PC — not an emulator. It draws with its own
 Vulkan renderer, which takes over the game's Direct3D calls instead of emulating the Xbox GPU. It
@@ -40,7 +40,7 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 ## Features
 
 - Native Linux (AppImage) and Windows (x64) builds; Steam Deck friendly
-- Android (arm64), **experimental**, with Xbox 360 touch controls
+- Android (arm64), with touch controls
 - Render resolution up to 10x, anisotropic filtering, MSAA, sharper shadows
 - 16:9, 16:10, 21:9 and 32:9 as well as 4:3: the 3D fills the screen, the HUD goes to the screen's
   corners, optional HUD-free view, menus keep the game's own 16:9
@@ -97,10 +97,10 @@ PowerShell, `Get-FileHash NinjaGaidenBlack-windows-x64.zip`; on Linux, `sha256su
 If you'd rather not run a prebuilt program, you can build it yourself from your own disc
 ([Building from source](#building-from-source)).
 
-### Android (experimental)
+### Android
 
-The Android version is new and has only been tested on one phone (a Pixel 9a, where it plays at 60 fps).
-Expect problems on other phones, and please report them (below).
+Tested on a Pixel 9a (Mali, 60 fps) and a Pixel 4a (Adreno, with the bundled Turnip driver). Phones
+differ a lot in their GPU drivers: if something is wrong on yours, please report it (below).
 
 **Install:**
 

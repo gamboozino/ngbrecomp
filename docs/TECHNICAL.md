@@ -88,7 +88,7 @@ storage must be keyed on `_MSC_VER`); `<windows.h>` is in every file there (its 
 macros); Windows sleeps in milliseconds, so sub-millisecond waits use a high-resolution waitable
 timer (`vcpu_nap_us`). Under Proton, `XDG_CONFIG_HOME` and `SDL_AUDIODRIVER` do not reach the game.
 
-## Android (experimental)
+## Android
 
 The same code for arm64, built with the NDK (`packaging/android/build.sh`): SDL's Java activity loads the
 game as `libmain.so` (`src/android_main.c` sets its folders from the environment as on Linux, under the

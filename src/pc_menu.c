@@ -299,7 +299,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_LOADDETAIL, "Lower Detail Under Load" },
     { D_LOADDETAIL, "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker." },
     { T_RTHREAD, "Multithreaded Renderer" },
-    { D_RTHREAD, "Drawing on a thread of its own, for slower CPUs. May have bugs. Needs restart." },
+    { D_RTHREAD, "Drawing on a thread of its own, for slower CPUs. Needs restart." },
     { T_INTERCEPT, "Intercept" },
     { D_INTERCEPT, "Tap guard as a hit lands to turn it aside (the Hurricane Pack's move Black left out)." },
     { T_ALLWEAP, "All Weapons" },

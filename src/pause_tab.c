@@ -129,7 +129,7 @@ static const char *const s_help[S_COUNT] = {
     "ARCADE NINJA GAIDEN in the main menu without earning it.",
     "MOVIE THEATER in the main menu without earning it.",
     "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker.",
-    "Drawing on a thread of its own, for slower CPUs. May have bugs. Needs restart.",
+    "Drawing on a thread of its own, for slower CPUs. Needs restart.",
     "Tap guard as a hit lands to turn it aside (the Hurricane Pack's move Black left out).",
     "Every weapon, at Level 1 or at its highest level, with its ammunition. Turned off, they are taken back.",
     "Holding attack no longer charges an Ultimate Technique: only absorbing essence does.",
