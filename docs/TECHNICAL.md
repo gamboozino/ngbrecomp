@@ -117,7 +117,11 @@ from Linux x86-64:
   has no BC formats (`bc_`, `src/d3d/vk/backend.cpp`); the swapchain is made upright with the system
   turning it (`s_system_turns`); glslang is built with HLSL input. GLib is replaced by the slice of it the
   NV2A code uses (`xboxrecomp/src/nv2a_vk/shim/glib-lite`).
-- **Input:** touch controls (`src/touch_pad.c`): an Xbox 360 pad of embedded sprites, drawn by the
+- **Input:** touch controls (`src/touch_pad.c`): an Xbox pad made from the game's own button art at run
+  time (`src/game_prompts.c`; saved in `<save folder>/touch-art` with a `version.txt`, so later starts show
+  them from the first frame; on a first start none are shown until they are made, and if the game's textures
+  are still not read after 20 s of frames, stand-ins: Kenney's sticks and d-pad, `assets/touch`, and dark
+  buttons lettered in Noto Sans), drawn by the
   presenter over the whole window (`layer_draw`, a premultiplied picture blended by one draw), read into
   the keyboard's pad state while no controller is connected and taken through the pad's bindings. The
   prompts are the pad's until a key is pressed.
@@ -417,25 +421,26 @@ as it is, so no binding can lock them up. Play's key prompts follow the bindings
 In the menus Esc is B (back), Q and E are L and R (the pause menu's tabs) and the mouse points;
 in play the mouse is captured and its motion is the right stick. The pointer is shown only in the
 menus while the keyboard and mouse are in use. While the keyboard is in use the
-game's button prompts are keys and mouse buttons instead -- Xelu's dark keyboard and mouse prompts
-(CC0, `assets/prompts/keys`, the same artist's as the controller buttons; a key the set has no picture
-of, its blank key with the key's name; `src/pause_tab.c`), in play the ones bound to each action, in
+game's button prompts are keys and mouse buttons instead -- keycaps made at run time from the game's own
+button art and menu font (`src/game_prompts.c`: the L / R plate wiped, the key's legend in the game's letters;
+arrows, the Windows key and the mouse drawn; nothing cut from the game is kept in the repository or a
+release), `src/pause_tab.c`; until the game's textures are read, or if they cannot be, a plain dark key with the
+key's name typed on it), in play the ones bound to each action, in
 the menus the mouse's buttons (left to choose, right to go back), K, Space, Shift and Q/E;
 `NGB_PAD_PROMPTS=1` keeps the pad's.
 With a PlayStation pad in use (SDL's controller type: a DualShock 3 or 4, a DualSense, or an adapter
-that says so) the prompts are its buttons (#113): Xelu's PS3 set (`assets/prompts/ps`), the symbols in
-their colours on black as on the DualShock 2 of the game's time -- Cross, Circle, Square and Triangle for
+that says so) the prompts are its buttons (#113), made from the game's face disc (its colour and letter
+taken out, the symbols drawn in their colours on it, as on the DualShock 2 of the game's time) -- Cross, Circle, Square and Triangle for
 A, B, X and Y, L2 and R2 for the triggers, L1 and R1 for Black and White (the buttons they are on), over the
 pause menu's L and R plates too (on a dark plate the size of the game's), and R1 drawn the size of L1 (the
 game draws White's icon smaller); the Controls page names them the same way. The Controls page shows the
-two-button actions (Ninpo, Wind Run) as the pad's button pictures, Xelu's Xbox 360 ones on an Xbox pad
-(`assets/prompts/xbox`). With a Nintendo pad (a Switch Pro Controller, Joy-Cons) the prompts are Xelu's
-Switch set (`assets/prompts/switch`), and its face buttons work by position, as on an Xbox pad (SDL's
+two-button actions (Ninpo, Wind Run) as the pad's button pictures, the game's own on an Xbox pad. With a
+Nintendo pad (a Switch Pro Controller, Joy-Cons) the prompts are the game's disc with the Nintendo letters, and its face buttons work by position, as on an Xbox pad (SDL's
 `SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS` off, set in `xbox_InputInit` before the controllers open): the
 bottom button, marked B, is the game's A, and the prompts swap to match. Android's own controller mappings
 go by label only, so there the button marked A is the game's A. The game's Button Settings
 page keeps its picture of the Xbox controller. The Controls page's Button Prompts picks the set: Auto (the
-device in use, as above), Xbox, PlayStation, Nintendo or PC (the keys), saved in `controls.ini`
+device in use, as above), Xbox, Playstation, Nintendo or PC (the keys), saved in `controls.ini`
 (`button_prompts`). `NGB_PAD_PROMPTS=ps` (or `nintendo`) shows that set whatever the setting, any other value
 the Xbox's.
 Start+Back Reset (Controls, `start_back_reset` in `controls.ini`, on by default) is the game's own reset: Start and
@@ -445,6 +450,29 @@ press is added after the strip.
 The techniques' "hold the button" icons (sprites 0x1CE-0x1D3) are a texture of their own, six
 cells with an arrow over the button: with PlayStation or PC prompts each button is redrawn as that set's,
 the game's arrow kept over it (`hold_check`, #125); the keys are play's, not the menu's.
+
+Prompts and touch pieces from the game's art (`src/game_prompts.c`): made at run time from the player's copy
+(the button icons' texture, the Black and White buttons, the d-pad icon, the menus' small font, read from guest
+memory once loaded); nothing cut from the game is in the repository or a release. The shapes are drawn with C
+ports of Pillow's polygon, ellipse and wide-line scan conversion and its bicubic resampling (MIT-CMU,
+`src/LICENSE-Pillow.txt`). The touch pieces are made on a thread of their own and cached in
+`<save folder>/touch-art` (one PNG a piece, each written to a `.tmp` name and renamed, then `version.txt`
+last, only when every piece was written; a missing or other `version.txt` makes them again). Android only;
+`NGB_TOUCH_ART=1` does the same on the other systems, for testing. `NGB_GAME_PROMPTS_OFF=1` keeps the typed prompts
+(the fallback while the art is not read); `NGB_PROMPT_DUMP=<dir>` writes every made prompt and touch piece
+there as PNGs.
+
+The icon (`src/app_icon.c`): the title logo's first letter with its glow, on a black rounded tile, read from
+`demo.afs` -> `demo.spr` (texture 2) in the game folder, so made from the player's files too. It is the
+window's icon (the settings screen's and the game's, `SDL_SetWindowIcon`). On Linux it is
+also written as `$XDG_DATA_HOME/icons/hicolor/<size>/apps/ninja-gaiden-black.png` (default
+`~/.local/share`; 256, 64, 48 and 32), again when `ninja-gaiden-black.version` beside the 256 one names
+another `ICON_VERSION`; no desktop entry is written. The windows' app id (Wayland) and WM_CLASS (X11) are
+`ninja-gaiden-black` (`ngb_app_id_setup`: `SDL_VIDEO_WAYLAND_WMCLASS`, `SDL_VIDEO_X11_WMCLASS`,
+`SDL_APP_ID`, a value the player set kept), the AppImage entry's `StartupWMClass`, so the compositor matches
+the window to that entry. The program file's own icon and the packages' stay the repository's.
+`NGB_NO_ICON=1` (or `NGB_TEST_HIDDEN`) writes no icon files, `NGB_ICON_REFRESH=1` writes them again,
+`NGB_ICON_DUMP=<prefix>` writes `<prefix>_<size>.png` for 256 to 16.
 
 Mods (#179): a file under `<save folder>/mods` with the path a game file has in the game folder (or in the
 hard disk cache, `<save folder>/Cache`, where the game copies its stage files) is read instead of it. Only a

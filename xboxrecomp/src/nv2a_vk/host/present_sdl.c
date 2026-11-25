@@ -35,6 +35,7 @@
 #define MAX_SWAP_IMAGES 8
 
 static SDL_Window *s_window;
+void nv2a_window_made(void *sdl_window);
 static double s_aspect = 4.0 / 3.0;
 static int s_vsync;                /* 0 off, 1 mailbox, 2 adaptive, 3 FIFO */
 static volatile bool s_resized;
@@ -1298,6 +1299,7 @@ int nv2a_window_create(const char *title, int width, int height,
      * Chinese, Korean) could open its candidate box over the game, or hang
      * the window as "Not responding" when the input method stalled. */
     SDL_StopTextInput();
+    nv2a_window_made(s_window);   /* (the host's icon on it) */
     s_win_base = fullscreen == 2 ? 2 : 0;
     s_keep_w = width, s_keep_h = height;   /* (fitted above) */
     if (fullscreen == 2)
@@ -1458,6 +1460,11 @@ static void window_apply(int mode, int w, int h)
 __attribute__((weak)) void nv2a_window_mode_changed(int mode)
 {
     (void)mode;
+}
+
+__attribute__((weak)) void nv2a_window_made(void *sdl_window)
+{
+    (void)sdl_window;
 }
 
 bool nv2a_window_pump(void)

@@ -44,7 +44,7 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 - Render resolution up to 10x, anisotropic filtering, MSAA, sharper shadows
 - 16:9, 16:10, 21:9 and 32:9 as well as 4:3: the 3D fills the screen, the HUD goes to the screen's
   corners, optional HUD-free view, menus keep the game's own 16:9
-- Keyboard and mouse with key prompts in the game, Xbox, PlayStation and Nintendo button prompts,
+- Keyboard and mouse with key prompts in the game, Xbox, Playstation and Nintendo button prompts,
   rebindable controls for keyboard, mouse and controller (Ninpo and Wind Run on any two buttons),
   mouse support in the menus
 - Mods: replacement game files in a `mods` folder, without touching the installed game; texture packs (PNG
@@ -113,7 +113,7 @@ differ a lot in their GPU drivers: if something is wrong on yours, please report
    whether to put it on the phone or on the card). It needs no storage permission. You can delete the
    image afterwards.
 
-Plays with the on-screen touch controls (an Xbox 360 pad), or with any controller the phone supports:
+Plays with the on-screen touch controls (an original Xbox pad), or with any controller the phone supports:
 the touch controls hide while one is connected. Needs Android 10 or newer (13 or newer for full speed:
 the game tells the system how long its frames take, which keeps the CPU clocks up), a GPU with Vulkan
 1.3, or an older Vulkan with its dynamic rendering and synchronization2 as extensions
@@ -154,6 +154,10 @@ otherwise (the disc has only these two). `text_language = japanese` or `english`
 program, with one option a line (`NAME=value`), for the options that have no menu, like `NV2A_TEX_DUMP` for
 texture packs. Each one can also be set in the environment, which wins (and the one beside the saves wins over the
 one next to the program). The log says which files were read.
+
+**Icon:** the program's icon (the title logo's first letter) is made from your own game files, since it is game
+art and not in the release. It is the window's icon, and on Linux it is also written to
+`~/.local/share/icons/hicolor` as `ninja-gaiden-black`, so a menu entry naming that icon shows it.
 
 **Portable mode:** with a file named `portable.txt` next to `NinjaGaidenBlack.exe` (or the AppImage or Mac app),
 all of these go into a `userdata` folder next to it instead. The first-run setup offers this as a
@@ -226,12 +230,12 @@ were.
 
 ## Controls
 
-On Android, an Xbox 360 pad is drawn over the screen: the two sticks, the d-pad, A B X Y, the bumpers
-and triggers, Back, Start and the stick clicks. It hides while a controller is connected.
+On Android, an original Xbox pad is drawn over the screen: the two sticks, the d-pad, A B X Y, Black and
+White, the triggers, Back, Start and the stick clicks, made from the game's own button art. It hides while a controller is connected.
 
 A controller works as on the Xbox. The keyboard and mouse can be used at any time — the game follows
 whichever was touched last, and its button prompts change to match (or stay on one set: "Button
-Prompts" on the "Controls" page, Auto, Xbox, PlayStation, Nintendo or PC).
+Prompts" on the "Controls" page, Auto, Xbox, Playstation, Nintendo or PC).
 
 On a Nintendo controller the buttons work by position, as on an Xbox pad: the bottom face button
 (marked B) jumps, and two-button moves sit where the game puts them; the prompts show its own letters. On Android a Nintendo controller works by label instead (the button marked A jumps).
@@ -355,10 +359,11 @@ If you'd like to support the project: [GitHub Sponsors](https://github.com/spons
 - TGP482's [SCDA-XBERecomp](https://github.com/TGP482/SCDA-XBERecomp) and
   [Xbox-XBERecomp](https://github.com/TGP482/Xbox-XBERecomp): the renderer's shader, vertex and
   texture code, and the sound mixer's model (MIT)
-- Fonts: EB Garamond and Liberation Serif (SIL Open Font License)
-- Keyboard, mouse and controller prompts (the Xbox, PlayStation and Nintendo Switch buttons), and the
-  touch controls' buttons: Xelu's [Free Controller & Key Prompts](https://thoseawesomeguys.com/prompts/) (CC0)
-- The touch controls' sticks and d-pad: Kenney's [Mobile Controls](https://kenney.nl/assets/mobile-controls) (CC0)
+- Fonts: EB Garamond, Liberation Serif and Noto Sans (SIL Open Font License)
+- The touch controls' stand-in pieces (shown only if the game's own art cannot be read): Kenney's
+  [Mobile Controls](https://kenney.nl/assets/mobile-controls) (CC0)
+- [Pillow](https://python-pillow.github.io): its resampling and shape drawing, ported to C for the button
+  prompts and touch pieces made from the game's art (MIT-CMU)
 - Banner lettering: Chakra Petch by Cadson Demak (SIL Open Font License)
 
 ### Contributors

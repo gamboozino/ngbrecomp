@@ -299,7 +299,7 @@ void ngb_bind_step_prompts(int dir)
 
 const char *ngb_bind_prompts_name(int v)
 {
-    static const char *const name[PROMPTS_N] = { "Auto", "Xbox", "PlayStation", "Nintendo", "PC" };
+    static const char *const name[PROMPTS_N] = { "Auto", "Xbox", "Playstation", "Nintendo", "PC" };
     return v >= 0 && v < PROMPTS_N ? name[v] : "";
 }
 
@@ -352,7 +352,7 @@ int ngb_bind_nintendo_position(void)
 #endif
 }
 
-/* The picture (assets/prompts) of the game's button b -- XBOX_BUTTON_A..RTRIGGER, Black for the left bumper,
+/* The prompt picture's name (src/game_prompts.c makes it) for the game's button b -- XBOX_BUTTON_A..RTRIGGER, Black for the left bumper,
  * White for the right -- on the pad the prompts show: set 1 PlayStation, 2 Nintendo (with its layout); NULL for
  * the Xbox's own (the game's). */
 const char *ngb_pad_picture(int set, int b)

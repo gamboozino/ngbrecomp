@@ -160,8 +160,8 @@ javac -source 8 -target 8 -nowarn -Xlint:none -cp "$platform/android.jar" -d "$a
 lic=$apk/assets/licenses
 mkdir -p "$lic"
 toolkit=$(cd "${XBOXRECOMP_DIR:-$repo/xboxrecomp}" && pwd)
-cp "$repo/LICENSE" "$repo/THIRD_PARTY.md" "$repo"/assets/fonts/OFL-*.txt "$repo/assets/prompts/License-Xelu.txt" \
-   "$repo/assets/touch/License-Kenney.txt" "$lic/"
+cp "$repo/LICENSE" "$repo/THIRD_PARTY.md" "$repo"/assets/fonts/OFL-*.txt \
+   "$repo/assets/touch/License-Kenney.txt" "$repo/src/LICENSE-Pillow.txt" "$lic/"
 cp "$repo/src/d3d/NOTICE" "$lic/NOTICE-renderer.txt"
 cp "$toolkit/LICENSE" "$lic/LICENSE-xboxrecomp.txt"
 cp "$toolkit/NOTICE" "$lic/NOTICE-xboxrecomp.txt"

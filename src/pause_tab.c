@@ -796,19 +796,24 @@ static void page_fill(uint32_t *px, float x, float y, float w, float h,
         }
 }
 
-static void page_text(uint32_t *px, uint8_t *m, const char *s, float x, float base,
-                      float size, uint32_t rgb, int align)
+/* Text on the page; squeezed sideways down to min_sx before it is made smaller to fit (1: only smaller) */
+static void page_text_sx(uint32_t *px, uint8_t *m, const char *s, float x, float base,
+                         float size, uint32_t rgb, int align, float min_sx)
 {
     const float k = (float)PAGE_TW / PAGE_W;
-    float w = text_width(&s_font_body, s, size * k, 1.0f);
+    float sx = 1.0f, w = text_width(&s_font_body, s, size * k, 1.0f);
     float room = (align == 2 ? x : align == 1 ? 2 * fminf(x, PAGE_W - x) : PAGE_W - x) - 4;
+    if (w > room * k && min_sx < 1.0f) {       /* narrower first */
+        sx = fmaxf(min_sx, room * k / w);
+        w *= sx;
+    }
     if (w > room * k) {                         /* narrowed to fit the page */
         size *= room * k / w;
         w = room * k;
     }
     float X = x * k - (align == 1 ? w / 2 : align == 2 ? w : 0);
     memset(m, 0, PAGE_TW * PAGE_TH);
-    draw_text(m, PAGE_TW, PAGE_TH, &s_font_body, s, size * k, 1.0f, X, base * k);
+    draw_text(m, PAGE_TW, PAGE_TH, &s_font_body, s, size * k, sx, X, base * k);
     /* A soft dark edge under the letters, as the game's text has. */
     for (int Y = 1; Y < PAGE_TH; Y++)
         for (int Xp = 1; Xp < PAGE_TW; Xp++) {
@@ -828,6 +833,12 @@ static void page_text(uint32_t *px, uint8_t *m, const char *s, float x, float ba
             uint32_t mm = mix(c, rgb, a / oa);
             px[i] = (uint32_t)lroundf(oa * 255) << 24 | (mm & 0xFFFFFF);
         }
+}
+
+static void page_text(uint32_t *px, uint8_t *m, const char *s, float x, float base,
+                      float size, uint32_t rgb, int align)
+{
+    page_text_sx(px, m, s, x, base, size, rgb, align, 1.0f);
 }
 
 #define ROW_Y0 50
@@ -887,7 +898,8 @@ static void key_icon(uint32_t *px, int pw, int ph, float x0, float y0, float x1,
 static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
 {
     page_text(px, m, "Keyboard / Mouse", (s_ctl_cx[0] + s_ctl_cx[1]) / 2, CTL_Y0 - 8, 14, 0x8C8C96, 1);
-    page_text(px, m, "Controller", s_ctl_cx[2], CTL_Y0 - 8, 14, 0x8C8C96, 1);
+    /* (narrowed, not made smaller, beside the page's edge: as tall as Keyboard / Mouse) */
+    page_text_sx(px, m, "Controller", s_ctl_cx[2] - 2, CTL_Y0 - 8, 14, 0x8C8C96, 1, 0.6f);
     page_fill(px, 4, CTL_Y0 - 3, 440, 1, 0xB4B9D2, 0.35f, 0.0f);
     int capturing = ngb_bind_capturing();
     for (int i = 0; i < CTL_SHOWN && s_ctl_top + i < CTL_ROWS; i++) {
@@ -911,7 +923,7 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
                           sel ? 0xF5EB5A : focused ? 0xE6E6EB : 0xA0A0A8, 0, 260);
             char pct[16];
             snprintf(pct, sizeof pct, "%s%d%%%s", sel ? "< " : "", ngb_bind_mouse_sensitivity(), sel ? " >" : "");
-            page_text(px, m, pct, s_ctl_cx[2], y + 18, 15, sel ? 0xFFFFFF : 0xC8C8D0, 1);
+            page_text(px, m, pct, 441, y + 18, 15, sel ? 0xFFFFFF : 0xC8C8D0, 2);   /* (right: clear of the bar at 446) */
             continue;
         }
         if (r == CTL_PROMPTS) {
@@ -921,7 +933,7 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
                           sel ? 0xF5EB5A : focused ? 0xE6E6EB : 0xA0A0A8, 0, 260);
             char v[32];
             snprintf(v, sizeof v, "%s%s%s", sel ? "< " : "", ngb_bind_prompts_name(ngb_bind_prompts()), sel ? " >" : "");
-            page_text(px, m, v, s_ctl_cx[2], y + 18, 15, sel ? 0xFFFFFF : 0xC8C8D0, 1);
+            page_text(px, m, v, 441, y + 18, 15, sel ? 0xFFFFFF : 0xC8C8D0, 2);   /* (right: clear of the bar at 446) */
             continue;
         }
         if (r == CTL_DEF) {                            /* Default Controls */
@@ -1353,19 +1365,18 @@ void ngb_recomp_pictures_off(void)
 /* While the keyboard and mouse are in use (xboxrecomp's
  * xbox_InputKeyboardActive), the game's button icons -- one 128x32 texture,
  * X Y B A L R in 21x23 cells (sprites 5-10) -- are keys and mouse buttons
- * instead: Xelu's dark keyboard and mouse prompts (CC0, assets/prompts/keys,
- * embedded), drawn at KS times the texture's size. In play the keys and
- * buttons bound to the actions (src/bindings.c); in the menus the mouse
- * buttons (choose, back), K, Space, Shift and Q. A key the set has no
- * picture of: its blank key with the key's name. */
+ * instead: keycaps made from the game's own art (src/game_prompts.c), drawn
+ * at KS times the texture's size. In play the keys and buttons bound to the
+ * actions (src/bindings.c); in the menus the mouse buttons (choose, back), K,
+ * Space, Shift and Q. A key the set has no picture of: a blank key with the
+ * key's name. Until the game's art is read, or if it cannot be, every prompt
+ * is typed: the key's or button's name on a plain dark key (typed_icon). */
 int xbox_InputKeyboardActive(void);
 int ngb_menu_up(void);
 
 #include <SDL_scancode.h>
 #include <SDL_timer.h>
-#include "stb_image.h"            /* the decoder is the renderer's (texpack.c) */
-extern const struct { const char *name; const unsigned char *data; const unsigned int *len; } ngb_key_pngs[];
-extern const int ngb_key_png_count;
+#include "game_prompts.h"         /* the prompts made from the game's own art */
 
 #define KC_W 128
 #define KC_H 32
@@ -1433,28 +1444,223 @@ static const char *key_picture(int in)
     }
 }
 
-static uint8_t *key_png(const char *name, int *w, int *h)
+/* What the pictures are made from: 1 once the game's own art is read (src/game_prompts.c: the prompts made
+ * from it), 0 the typed ones meanwhile. Part of each generation below, so what was typed is made again. */
+static unsigned pic_gen(void)
 {
-    for (int i = 0; name && i < ngb_key_png_count; i++)
-        if (!strcmp(ngb_key_pngs[i].name, name)) {
-            int n;
-            return stbi_load_from_memory(ngb_key_pngs[i].data, (int)*ngb_key_pngs[i].len, w, h, &n, 4);
-        }
-    return NULL;
+    return ngb_bind_generation() * 2u + (unsigned)ngb_gp_ready();
 }
 
-/* An embedded picture into px (pw wide) over the box (x0, y0)-(x1, y1), its shape kept, centred, box
- * filtered (straight alpha, over what is there); where it went in at (ox, oy, w, h). 0: no such picture. */
+static int picture_into(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, uint8_t *img,
+                        int iw, int ih, int whole, float at[4]);
+
+/* A plain dark key over the box (ox, oy, w, h), its corners rounded, over what is there: the typed prompts'
+ * (until the game's art is read) */
+static void typed_key(uint32_t *px, int pw, int ph, float ox, float oy, float w, float h)
+{
+    float r = fminf(w, h) * 0.2f, cx = ox + w / 2, cy = oy + h / 2, edge = fmaxf(1.0f, fminf(w, h) * 0.05f);
+    for (int Y = (int)floorf(oy); Y < (int)ceilf(oy + h) && Y < ph; Y++)
+        for (int X = (int)floorf(ox); X < (int)ceilf(ox + w) && X < pw; X++) {
+            if (X < 0 || Y < 0)
+                continue;
+            float dx = fmaxf(0, fabsf(X + 0.5f - cx) - (w / 2 - r)), dy = fmaxf(0, fabsf(Y + 0.5f - cy) - (h / 2 - r));
+            float sd = sqrtf(dx * dx + dy * dy) - r;            /* (negative inside) */
+            float a = fminf(1, fmaxf(0, 0.5f - sd));
+            if (a <= 0)
+                continue;
+            uint32_t c = -sd < edge ? 0x5A5A64 : 0x26262B;      /* a lighter rim */
+            uint32_t d = px[Y * pw + X];
+            float da = (d >> 24) / 255.0f, oa = a + da * (1 - a);
+            uint32_t m = oa > 0 ? mix(d, c, a / oa) : c;
+            px[Y * pw + X] = (uint32_t)lroundf(oa * 255) << 24 | (m & 0xFFFFFF);
+        }
+}
+
+/* The typed prompts' short names: a key's or button's full name ("Mouse Left", "Backspace", "Left Shift") is
+ * unreadable at a prompt's size, so the usual abbreviations; the names already short stay. */
+static const char *typed_short(const char *label)
+{
+    static const struct { const char *from, *to; } k[] = {
+        { "Mouse Left", "LMB" }, { "Mouse Right", "RMB" }, { "Mouse Middle", "MMB" }, { "Mouse 4", "M4" },
+        { "Mouse 5", "M5" }, { "Return", "Enter" }, { "Keypad Enter", "Enter" }, { "Backspace", "Bksp" },
+        { "Escape", "Esc" }, { "Left Shift", "Shift" }, { "Right Shift", "Shift" }, { "Left Ctrl", "Ctrl" },
+        { "Right Ctrl", "Ctrl" }, { "Left Alt", "Alt" }, { "Right Alt", "Alt" }, { "Left GUI", "Win" },
+        { "Right GUI", "Win" }, { "CapsLock", "Caps" }, { "Delete", "Del" }, { "Insert", "Ins" },
+        { "PageUp", "PgUp" }, { "PageDown", "PgDn" }, { "Numlock", "Num" }, { "PrintScreen", "PrtSc" },
+        { "ScrollLock", "ScrLk" }, { "Pause", "Pause" }, { "Application", "Menu" }, { "Select", "Sel" },
+        { "L Stick", "LS" }, { "R Stick", "RS" }, { "D-Pad Up", "Up" }, { "D-Pad Down", "Down" },
+        { "D-Pad Left", "Left" }, { "D-Pad Right", "Right" },
+    };
+    static char kp[16];
+    for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
+        if (!strcmp(label, k[i].from))
+            return k[i].to;
+    if (!strncmp(label, "Keypad ", 7) && strlen(label + 7) <= 2) {   /* "Keypad 8": "KP8" */
+        snprintf(kp, sizeof kp, "KP%s", label + 7);
+        return kp;
+    }
+    return label;
+}
+
+/* A PlayStation face button's symbol for its typed name (0 none): 1 Cross, 2 Circle, 3 Square, 4 Triangle */
+static int typed_symbol_kind(const char *label)
+{
+    return !strcmp(label, "Cross") ? 1 : !strcmp(label, "Circle") ? 2 : !strcmp(label, "Square") ? 3
+         : !strcmp(label, "Triangle") ? 4 : 0;
+}
+
+static float seg_dist(float px_, float py_, float ax, float ay, float bx, float by)
+{
+    float vx = bx - ax, vy = by - ay, wx = px_ - ax, wy = py_ - ay;
+    float t = fmaxf(0, fminf(1, (wx * vx + wy * vy) / (vx * vx + vy * vy)));
+    float dx = wx - t * vx, dy = wy - t * vy;
+    return sqrtf(dx * dx + dy * dy);
+}
+
+/* The symbol drawn as a stroke in its colour (as on the pad) over the key at (ox, oy, dw, dh): far more
+ * legible than its name at a prompt's size */
+static void typed_symbol(uint32_t *px, int pw, int ph, float ox, float oy, float dw, float dh, int kind)
+{
+    static const uint32_t col[5] = { 0, 0x8CB8F0, 0xF07878, 0xE89CD0, 0x48D8A8 };
+    float side = fminf(dw, dh), cx = ox + dw / 2, cy = oy + dh / 2, r = side * 0.27f, t = fmaxf(1.2f, side * 0.085f);
+    float tri[3][2] = { { cx, cy - r * 1.02f }, { cx + r * 1.05f, cy + r * 0.78f }, { cx - r * 1.05f, cy + r * 0.78f } };
+    float q = r * 0.82f, c = r * 0.8f;
+    for (int Y = (int)floorf(oy); Y < (int)ceilf(oy + dh) && Y < ph; Y++)
+        for (int X = (int)floorf(ox); X < (int)ceilf(ox + dw) && X < pw; X++) {
+            if (X < 0 || Y < 0)
+                continue;
+            float x = X + 0.5f, y = Y + 0.5f, d;
+            if (kind == 1)
+                d = fminf(seg_dist(x, y, cx - c, cy - c, cx + c, cy + c), seg_dist(x, y, cx - c, cy + c, cx + c, cy - c));
+            else if (kind == 2)
+                d = fabsf(sqrtf((x - cx) * (x - cx) + (y - cy) * (y - cy)) - r);
+            else if (kind == 3)
+                d = fabsf(fmaxf(fabsf(x - cx), fabsf(y - cy)) - q);
+            else
+                d = fminf(fminf(seg_dist(x, y, tri[0][0], tri[0][1], tri[1][0], tri[1][1]),
+                                seg_dist(x, y, tri[1][0], tri[1][1], tri[2][0], tri[2][1])),
+                          seg_dist(x, y, tri[2][0], tri[2][1], tri[0][0], tri[0][1]));
+            float a = fminf(1, fmaxf(0, t / 2 + 0.5f - d));
+            if (a > 0)
+                px[Y * pw + X] = (px[Y * pw + X] & 0xFF000000u) | (mix(px[Y * pw + X], col[kind], a) & 0xFFFFFF);
+        }
+}
+
+/* label in the set's light grey over the key at (ox, oy, dw, dh), as large as fits: its short name, squeezed
+ * sideways before it is made smaller, and never below a size still read at a prompt's size (a long name may
+ * then reach nearer the key's edges); a PlayStation face button its symbol */
+static void typed_label(uint32_t *px, int pw, int ph, float ox, float oy, float dw, float dh, const char *label)
+{
+    int sym = typed_symbol_kind(label);
+    if (sym) {
+        typed_symbol(px, pw, ph, ox, oy, dw, dh, sym);
+        return;
+    }
+    label = typed_short(label);
+    if (!s_font_bold.data && !stbtt_InitFont(&s_font_bold, ngb_font_label, 0))
+        return;
+    int game = s_game_font;
+    s_game_font = 0;
+    float side = fminf(dw, dh), size = side * 0.6f, sx = 1.0f, room = dw * 0.8f;
+    float tw = text_width(&s_font_bold, label, size, 1.0f);
+    if (tw > room) {                                   /* narrower first, down to 0.72 */
+        sx = fmaxf(0.72f, room / tw);
+        tw *= sx;
+    }
+    if (tw > room) {                                   /* then smaller, down to 0.42 of the key */
+        float k = fmaxf(0.42f / 0.6f, room / tw);
+        size *= k;
+        tw *= k;
+    }
+    if (tw > dw * 0.92f) {                             /* (a long name at the smallest: narrower again) */
+        sx *= dw * 0.92f / tw;
+        tw = dw * 0.92f;
+    }
+    int bx = (int)floorf(ox) - 2, by = (int)floorf(oy) - 2, bw = (int)ceilf(dw) + 4, bh = (int)ceilf(dh) + 4;
+    uint8_t *m = bw > 0 && bh > 0 ? calloc((size_t)bw * bh, 1) : NULL;   /* (the key's box only) */
+    if (m)
+        draw_text(m, bw, bh, &s_font_bold, label, size, sx, ox - bx + (dw - tw) / 2,
+                  oy - by + dh * 0.47f + size * 0.36f);
+    s_game_font = game;
+    for (int y = 0; m && y < bh; y++)
+        for (int x = 0; x < bw; x++) {
+            int X = bx + x, Y = by + y;
+            uint8_t v = m[y * bw + x];
+            if (v && X >= 0 && Y >= 0 && X < pw && Y < ph)
+                px[Y * pw + X] = (px[Y * pw + X] & 0xFF000000u) | (mix(px[Y * pw + X], 0xE4E4E4, v / 255.0f) & 0xFFFFFF);
+        }
+    free(m);
+}
+
+/* A typed prompt: label on a plain key over the box (x0, y0)-(x1, y1), square (wider for a longer label),
+ * centred; where it went in at, as picture_icon */
+static void typed_icon(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, const char *label,
+                       float at[4])
+{
+    float bw = x1 - x0, bh = y1 - y0, side = fminf(bw, bh) * 0.9f, w = side;
+    size_t n = typed_symbol_kind(label) ? 1 : strlen(typed_short(label));
+    if (n > 2)
+        w = fminf(bw, side * (n > 3 ? 1.6f : 1.3f));
+    at[0] = (x0 + x1 - w) / 2;
+    at[1] = (y0 + y1 - side) / 2;
+    at[2] = w;
+    at[3] = side;
+    typed_key(px, pw, ph, at[0], at[1], w, side);
+    typed_label(px, pw, ph, at[0], at[1], w, side, label);
+}
+
+/* A controller button's typed name from its picture's name (src/bindings.c's: "PS3_Cross", "Switch_LT",
+ * "360_Left_Stick_Click"...), as the Controls page names the buttons */
+static void picture_label(const char *name, char *out, size_t n)
+{
+    static const struct { const char *pre, *from, *to; } k[] = {
+        { "Switch_", "LB", "L" }, { "Switch_", "RB", "R" }, { "Switch_", "LT", "ZL" }, { "Switch_", "RT", "ZR" },
+        { "Switch_", "Plus", "+" }, { "Switch_", "Minus", "-" },
+        { "PS3_", "Left_Stick_Click", "L3" }, { "PS3_", "Right_Stick_Click", "R3" },
+        { "", "Left_Stick_Click", "LS" }, { "", "Right_Stick_Click", "RS" },
+        { "", "Left_Stick", "L Stick" }, { "", "Right_Stick", "R Stick" },
+        { "", "Dpad_Up", "Up" }, { "", "Dpad_Down", "Down" }, { "", "Dpad_Left", "Left" }, { "", "Dpad_Right", "Right" },
+    };
+    const char *u = strchr(name, '_'), *b = u ? u + 1 : name;
+    for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
+        if (!strncmp(name, k[i].pre, strlen(k[i].pre)) && !strcmp(b, k[i].from)) {
+            snprintf(out, n, "%s", k[i].to);
+            return;
+        }
+    snprintf(out, n, "%s", b);
+}
+
+/* A prompt picture into px (pw wide) over the box (x0, y0)-(x1, y1): the one made from the game's art (src/
+ * game_prompts.c), its shape kept, centred, box filtered (straight alpha, over what is there); where it went in
+ * at (ox, oy, w, h). A controller's button the game's art has not given (yet): typed. 0: no picture (a key's:
+ * key_icon types it). */
 static int picture_icon(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, const char *name,
                         float at[4])
 {
-    int iw, ih;
-    uint8_t *img = key_png(name, &iw, &ih);
-    if (!img)
+    const NgbPic *g = name ? ngb_gp_prompt(name) : NULL;
+    if (g)
+        return picture_into(px, pw, ph, x0, y0, x1, y1, g->px, g->w, g->h, 1, at);
+    if (!name || strstr(name, "_Key_Dark") || !strcmp(name, "Blank_Black_Normal"))
         return 0;
+    char label[32];
+    picture_label(name, label, sizeof label);
+    typed_icon(px, pw, ph, x0, y0, x1, y1, label, at);
+    return 1;
+}
+
+/* A picture (iw x ih, RGBA) into px as picture_icon puts it; whole: its clear margin kept (made ones are
+ * the game's cells), else cut off. Not freed: the made pictures are kept. */
+static int picture_into(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, uint8_t *img,
+                        int iw, int ih, int whole, float at[4])
+{
     /* the picture without its clear margin, as large as fits, its shape kept */
     int bx0 = iw, by0 = ih, bx1 = -1, by1 = -1;
-    for (int v = 0; v < ih; v++)
+    if (whole) {
+        bx0 = by0 = 0;
+        bx1 = iw - 1;
+        by1 = ih - 1;
+    }
+    for (int v = 0; !whole && v < ih; v++)
         for (int u = 0; u < iw; u++)
             if (img[4 * (v * iw + u) + 3] > 8) {
                 if (u < bx0) bx0 = u;
@@ -1462,10 +1668,8 @@ static int picture_icon(uint32_t *px, int pw, int ph, float x0, float y0, float 
                 if (v < by0) by0 = v;
                 if (v > by1) by1 = v;
             }
-    if (bx1 < bx0) {
-        stbi_image_free(img);
+    if (bx1 < bx0)
         return 0;
-    }
     float bw = (float)(bx1 - bx0 + 1), bh = (float)(by1 - by0 + 1);
     float k = fminf((x1 - x0) / bw, (y1 - y0) / bh), dw = bw * k, dh = bh * k;
     float ox = (x0 + x1 - dw) / 2, oy = (y0 + y1 - dh) / 2;
@@ -1496,39 +1700,29 @@ static int picture_icon(uint32_t *px, int pw, int ph, float x0, float y0, float 
             uint32_t m = oa > 0 ? mix(d, c, a / oa) : c;
             px[Y * pw + X] = (uint32_t)lroundf(oa * 255) << 24 | (m & 0xFFFFFF);
         }
-    stbi_image_free(img);
     return 1;
 }
 
 /* The input's picture into px (pw wide) over the box (x0, y0)-(x1, y1), square, centred (picture_icon); a
- * key the set lacks, its blank key with its name. */
+ * key the set lacks, a blank key with its name: in the game's letters where they have it, else typed; and
+ * every key typed until the game's art is read. */
 static void key_icon(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, int in)
 {
     float at[4];
-    int blank = !picture_icon(px, pw, ph, x0, y0, x1, y1, key_picture(in), at);
-    if (blank && !picture_icon(px, pw, ph, x0, y0, x1, y1, "Blank_Black_Normal", at))
+    if (picture_icon(px, pw, ph, x0, y0, x1, y1, key_picture(in), at))
         return;
-    float ox = at[0], oy = at[1], dw = at[2], dh = at[3], side = fminf(dw, dh);
-    if (blank) {                                       /* the key's name, in the set's light grey */
-        char label[64];
-        ngb_bind_input_name(in, label, sizeof label);
-        if (!s_font_bold.data && !stbtt_InitFont(&s_font_bold, ngb_font_label, 0))
+    char label[64];
+    ngb_bind_input_name(in, label, sizeof label);
+    if (ngb_gp_ready()) {                              /* the key's name in the game's own letters */
+        const NgbPic *g = ngb_gp_key_label(label);
+        if (g && picture_into(px, pw, ph, x0, y0, x1, y1, g->px, g->w, g->h, 1, at))
             return;
-        int game = s_game_font;
-        s_game_font = 0;
-        float size = side * 0.42f, tw = text_width(&s_font_bold, label, size, 1.0f);
-        if (tw > dw * 0.72f) {
-            size *= dw * 0.72f / tw;
-            tw = dw * 0.72f;
+        if (picture_icon(px, pw, ph, x0, y0, x1, y1, "Blank_Black_Normal", at)) {   /* the game's blank key */
+            typed_label(px, pw, ph, at[0], at[1], at[2], at[3], label);
+            return;
         }
-        uint8_t *m = calloc((size_t)pw * ph, 1);
-        draw_text(m, pw, ph, &s_font_bold, label, size, 1.0f, ox + (dw - tw) / 2, oy + dh * 0.45f + size * 0.33f);
-        s_game_font = game;
-        for (int i = 0; i < pw * ph; i++)
-            if (m[i])
-                px[i] = (px[i] & 0xFF000000u) | (mix(px[i], 0xD8D8D8, m[i] / 255.0f) & 0xFFFFFF);
-        free(m);
     }
+    typed_icon(px, pw, ph, x0, y0, x1, y1, label, at);
 }
 
 static GuestTex s_kc[2];                  /* 0 in play, 1 in the menus */
@@ -1542,7 +1736,7 @@ static int kc_make(uint32_t fmt_low)
     int play[6];
     for (int i = 0; i < 6; i++)
         play[i] = ngb_bind_prompt(play_b[i]);
-    s_kc_gen = ngb_bind_generation();
+    s_kc_gen = pic_gen();
     /* in the menus the mouse: a left click chooses (where it points), a right click goes back */
     static const int menu[6] = { BIND_MOUSE | 1, SDL_SCANCODE_K, BIND_MOUSE | 3, SDL_SCANCODE_SPACE,
                                  SDL_SCANCODE_LSHIFT, SDL_SCANCODE_Q };
@@ -1646,6 +1840,48 @@ static int tk_ready(void)
 
 static void sprite(uint32_t id, int x, int y, int z, uint8_t anchor, float sx, float sy, float bright, float alpha);
 
+/* With the game's art read: Q and E drawn as the plates themselves (src/game_prompts.c: the plate's shape and
+ * glow, the letter in its cut), 32 x 32 each at 4x, side by side */
+static GuestTex s_tq;
+static int s_tq_made;                 /* 0 not yet, 1 made, -1 could not */
+
+static int tq_ready(void)
+{
+    if (s_tq_made)
+        return s_tq_made > 0;
+    const NgbPic *q = ngb_gp_tab_key(0), *e = ngb_gp_tab_key(1);
+    s_tq_made = -1;
+    if (!q || !e || q->w != 32 * KS || q->h != 32 * KS || e->w != q->w || e->h != q->h ||
+        !make_texture(&s_tq, 64 * KS, 32 * KS, 0x2A))
+        return 0;
+    uint32_t *px = calloc(64 * KS * 32 * KS, sizeof *px);
+    if (!px)
+        return 0;
+    for (int i = 0; i < 2; i++) {
+        const uint8_t *c = (i ? e : q)->px;
+        for (int y = 0; y < 32 * KS; y++)
+            for (int x = 0; x < 32 * KS; x++, c += 4)
+                px[y * 64 * KS + i * 32 * KS + x] = (uint32_t)c[3] << 24 | (uint32_t)c[0] << 16 |
+                                                    (uint32_t)c[1] << 8 | c[2];
+    }
+    upload(&s_tq, px);
+    free(px);
+    s_tq_made = 1;
+    return 1;
+}
+
+/* The keys' cells in their texture: the made plates' (whole halves) or the embedded keys' (21 x 23) */
+static void tk_cells(int plates)
+{
+    for (int i = 0; i < 2; i++) {
+        uint32_t d = s_tk_defs + i * 0x18;
+        MEMF(d) = i * 0.5f;
+        MEMF(d + 4) = 0;
+        MEMF(d + 8) = i * 0.5f + (plates ? 0.5f : 21.0f / 64);
+        MEMF(d + 12) = plates ? 1.0f : 23.0f / 32;
+    }
+}
+
 static void kc_tab_keys(void)
 {
     if (getenv("NGB_TAB_LOG")) {
@@ -1656,7 +1892,13 @@ static void kc_tab_keys(void)
     int set = ngb_pad_set();      /* -1 the keys, 1 PlayStation, 2 Nintendo: their pictures; 0 the game's own */
     if (!set || s_tab_first[2] <= s_tab_first[0] || !tk_ready())
         return;
-    MEM32(s_tk_entry) = MEM32(s_tk_entry + 4) = s_tk[set < 0 ? 0 : set].hdr;
+    int plates = ngb_gp_ready();
+    if (plates && set > 0)
+        return;                   /* a controller with the game's own art: its L and R plates as they are */
+    if (plates && !tq_ready())
+        plates = 0;
+    MEM32(s_tk_entry) = MEM32(s_tk_entry + 4) = plates ? s_tq.hdr : s_tk[set < 0 ? 0 : set].hdr;
+    tk_cells(plates);
     /* Over the row's L and R plates, at their size: they stay at x 52..84 and 636..668 whichever tab is
      * chosen (the tabs' plates between them grow and move), 44..76 high with the row at rest -- 18.5
      * above the Weapon plate's centre, which follows the row as it slides in */
@@ -1671,6 +1913,11 @@ static void kc_tab_keys(void)
      * under what the item's use draws over the menu, its red flash. Opaque, though: the plates rest at 0.85
      * (their own L and R showed through), faded in and out with them. */
     float a = s_tab_alpha >= 0.85f ? 1.0f : s_tab_alpha / 0.85f;
+    if (plates) {                 /* the plates themselves, on theirs */
+        sprite(TK_SPRITE, 52, y, 0x1D6, 0, 1.0f, 1.0f, s_tab_bright, a);
+        sprite(TK_SPRITE + 1, 636, y, 0x1D6, 0, 1.0f, 1.0f, s_tab_bright, a);
+        return;
+    }
     sprite(TK_SPRITE, 52, y - 1, 0x1D6, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, a);   /* on the 32 x 32 plate */
     sprite(TK_SPRITE + 1, 636, y - 1, 0x1D6, 0, 34.0f / 21, 34.0f / 23, s_tab_bright, a);
 }
@@ -1694,7 +1941,7 @@ static void kc_check(uint32_t id)
         s_kc_made = now && kc_make(MEM32(now + 0xC) & 0xFF) ? 1 : -1;
         if (s_kc_made < 0)
             return;
-    } else if (s_kc_gen != ngb_bind_generation()) {
+    } else if (s_kc_gen != pic_gen()) {
         kc_make(0);                                   /* the bindings changed: play's icons again */
     }
     if (!ours)
@@ -1707,15 +1954,15 @@ static void kc_check(uint32_t id)
 /* With a PlayStation pad in use (ngb_pad_prompts_ps, src/bindings.c), the game's button icons are its
  * buttons instead (#113): the X Y B A L R texture's cells (sprites 5-10) Square, Triangle, Circle, Cross,
  * L2 and R2 (the triggers), and the Black and White buttons' icons (sprites 0xB and 0xC, a texture each)
- * L1 and R1, the buttons they are on. Xelu's PS3 set (CC0, assets/prompts/ps): the symbols in their
- * colours on black buttons, as on the DualShock 2 of the game's time. Each picture goes where its
+ * L1 and R1, the buttons they are on: made from the game's own art (src/game_prompts.c), the symbols in their
+ * colours on dark buttons, as on the DualShock 2 of the game's time; typed until it is read. Each picture goes where its
  * sprite's definition takes it from, at KS times the texture's size. */
 static const struct { uint16_t id; uint8_t slot; uint8_t button; } k_ps[8] = {
     { 5, 0, XBOX_BUTTON_X }, { 6, 0, XBOX_BUTTON_Y }, { 7, 0, XBOX_BUTTON_B }, { 8, 0, XBOX_BUTTON_A },
     { 9, 0, XBOX_BUTTON_LTRIGGER }, { 10, 0, XBOX_BUTTON_RTRIGGER }, { 0xB, 1, XBOX_BUTTON_BLACK },
     { 0xC, 2, XBOX_BUTTON_WHITE },
 };
-/* A Nintendo pad's the same way (#170): Xelu's Switch set, by label or by place (ngb_pad_picture). */
+/* A Nintendo pad's the same way (#170): by label or by place (ngb_pad_picture). */
 static struct {
     GuestTex t;
     uint32_t orig;                /* the game's texture header in the table */
@@ -1801,8 +2048,8 @@ static void ps_check(uint32_t id)
                                                                                                          : now;
     else if (ours != set)
         s_ps[set][slot].orig = s_ps[ours][slot].orig;
-    if (!s_ps[set][slot].made || (set == 1 && s_ps[set][slot].gen != ngb_bind_generation())) {
-        s_ps[set][slot].gen = ngb_bind_generation();
+    if (!s_ps[set][slot].made || s_ps[set][slot].gen != pic_gen()) {
+        s_ps[set][slot].gen = pic_gen();
         s_ps[set][slot].made = ps_make(set, slot, entry, s_ps[set][slot].orig) ? 1 : -1;
         if (s_ps[set][slot].made < 0) {
             MEM32(entry) = s_ps[set][slot].orig;
@@ -1901,9 +2148,10 @@ static void hold_check(uint32_t id)
     }
     if (!ours)
         s_hold.orig = now;
-    if (!s_hold.made[kind] || (kind && s_hold.gen[kind] != ngb_bind_generation())) {
-        /* (the keys' picture is the one the bindings make, Nintendo's the one its layout does) */
-        s_hold.gen[kind] = ngb_bind_generation();
+    if (!s_hold.made[kind] || s_hold.gen[kind] != pic_gen()) {
+        /* (the keys' picture is the one the bindings make, Nintendo's the one its layout does; all of them
+         * again once the game's art is read) */
+        s_hold.gen[kind] = pic_gen();
         s_hold.made[kind] = hold_make(kind, entry, s_hold.orig) ? 1 : -1;
         if (s_hold.made[kind] < 0) {
             MEM32(entry) = s_hold.orig;
@@ -1911,6 +2159,24 @@ static void hold_check(uint32_t id)
         }
     }
     MEM32(entry) = s_hold.t[kind].hdr;
+}
+
+/* The game's own texture header for one of ours put in its place in the table (src/game_prompts.c reads the
+ * game's button icons from there); any other as it is. */
+uint32_t ngb_game_tex_header(uint32_t hdr)
+{
+    if (!hdr)
+        return 0;
+    if (s_kc_made > 0 && (hdr == s_kc[0].hdr || hdr == s_kc[1].hdr))
+        return s_kc_orig;
+    for (int k = 0; k < 2; k++)
+        for (int slot = 0; slot < 3; slot++)
+            if (s_ps[k][slot].made > 0 && hdr == s_ps[k][slot].t.hdr)
+                return s_ps[k][slot].orig;
+    for (int k = 0; k < 3; k++)
+        if (s_hold.made[k] > 0 && hdr == s_hold.t[k].hdr)
+            return s_hold.orig;
+    return hdr;
 }
 
 /* ---------- making it ---------- */
@@ -2316,7 +2582,7 @@ static void pt_draw(void)
     int shown = (s_cat & 7) << 28 | ((s_row + 1) & 0xFF) << 20 | (s_ctl_col & 3) << 18 |
                 (s_cat == CAT_CTL ? s_ctl_top & 0x3F : 0) << 12 | (int)((unsigned)cat_shown(CAT_CHEAT) << 31);
     if (s_cat == CAT_CTL)                             /* and the bindings, and waiting for one, and the pad's set */
-        shown ^= (int)(ngb_bind_generation() & 0x7FF) << 1 ^ ngb_bind_capturing() ^ ngb_pad_set_pad() << 25;
+        shown ^= (int)(pic_gen() & 0x7FF) << 1 ^ ngb_bind_capturing() ^ ngb_pad_set_pad() << 25;
     if (s_drawn.page != 0 || s_focus != s_drawn.focused || shown != s_drawn.row ||
         memcmp(vals, s_drawn.vals, sizeof vals)) {
         draw_page(s_focus, s_cat, s_row);
@@ -2626,7 +2892,7 @@ void ngb_controls_panel_tick(int want)
         return;
     }
     int shown = ((s_ov_row + 1) & 0xFF) << 20 | (s_ctl_col & 3) << 18 | (s_ctl_top & 0x3F) << 12;   /* as the tab's */
-    shown ^= (int)(ngb_bind_generation() & 0x7FF) << 1 ^ ngb_bind_capturing() ^ ngb_pad_set_pad() << 25;
+    shown ^= (int)(pic_gen() & 0x7FF) << 1 ^ ngb_bind_capturing() ^ ngb_pad_set_pad() << 25;
     if (shown != s_ov_drawn) {
         ov_draw();
         s_ov_drawn = shown;
@@ -5458,6 +5724,7 @@ void sub_002216B0(void)
         ngb_title_seen();
         ngb_responsive_title();                        /* (src/responsive.c: Start taken at once) */
     }
+    ngb_gp_poll();                                     /* the game's art for the prompts, once loaded */
     ps_check(MEM32(p) & 0xFFFF);                       /* a PlayStation pad's buttons (#113) */
     hold_check(MEM32(p) & 0xFFFF);                     /* the techniques' "hold" icons too (#125) */
     kc_check(MEM32(p) & 0xFFFF);                       /* keys for the button icons (font glyphs too) */

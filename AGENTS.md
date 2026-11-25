@@ -48,6 +48,8 @@ Test runs must never touch the user's own data or desktop:
 - **Never the real saves or settings** (`~/.local/share/NinjaGaidenBlack`, `~/.config/NinjaGaidenBlack`).
   Copy what you need into a scratch folder and point the game there: `NGB_SAVE_DIR`,
   `XDG_CONFIG_HOME`, `NGB_GAME_DIR`; `NGB_NO_SETTINGS=1` skips the settings screen.
+- **No icons in the real home**: on Linux the game writes its icon to `$XDG_DATA_HOME/icons` (default
+  `~/.local/share/icons`). Set `NGB_NO_ICON=1`, or give the run a private `XDG_DATA_HOME` (and `HOME`).
 - **No sound**: `SDL_AUDIODRIVER=dummy` and `NGB_AUDIO=0` (under Proton only the latter reaches the game).
   With `NGB_AUDIO=0` the mixer still runs on a timer, so `NGB_DSOUND_WAV=<file>` records what would play.
   For timing, record that way: SDL's dummy output pulls about 5% faster than 48 kHz (it sleeps in whole

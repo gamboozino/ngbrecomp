@@ -68,10 +68,11 @@ python3 "$here/dlldeps.py" "$bin/llvm-objdump" "$pkg/NinjaGaidenBlack.exe" \
 cp "$repo/packaging/d3d-seed.bin" "$pkg/share/NinjaGaidenBlack/"
 cp "$repo/packaging/shader-seed/states.bin" "$repo/packaging/shader-seed/pipelines.bin" \
    "$pkg/share/NinjaGaidenBlack/shader-seed/"
-cp "$repo"/assets/fonts/OFL-*.txt "$repo/assets/prompts/License-Xelu.txt" "$pkg/licenses/"
+cp "$repo"/assets/fonts/OFL-*.txt "$pkg/licenses/"
 cp "$repo/LICENSE" "$repo/THIRD_PARTY.md" "$pkg/licenses/"
 toolkit=$(cd "${XBOXRECOMP_DIR:-$repo/xboxrecomp}" && pwd)
 cp "$repo/src/d3d/NOTICE" "$pkg/licenses/NOTICE-renderer.txt"
+cp "$repo/src/LICENSE-Pillow.txt" "$pkg/licenses/"
 cp "$toolkit/LICENSE" "$pkg/licenses/LICENSE-xboxrecomp.txt"
 cp "$toolkit/NOTICE" "$pkg/licenses/NOTICE-xboxrecomp.txt"
 cp "$toolkit/LICENSES/LGPL-2.1.txt" "$pkg/licenses/"

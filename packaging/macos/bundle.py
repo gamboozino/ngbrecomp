@@ -134,8 +134,7 @@ def main():
     licenses = resources / 'licenses'
     licenses.mkdir()
     for source in [*root.glob('assets/fonts/OFL-*.txt'),
-                   root / 'assets/prompts/License-Xelu.txt',
-                   root / 'LICENSE', root / 'THIRD_PARTY.md',
+                   root / 'LICENSE', root / 'THIRD_PARTY.md', root / 'src/LICENSE-Pillow.txt',
                    toolkit / 'LICENSES/LGPL-2.1.txt']:
         shutil.copy2(source, licenses)
     for source, name in ((root / 'src/d3d/NOTICE', 'NOTICE-renderer.txt'),

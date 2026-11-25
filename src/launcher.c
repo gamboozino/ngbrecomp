@@ -625,6 +625,7 @@ int ngb_launcher_run(NgbSettings *s)
                            SDL_WINDOWPOS_CENTERED, LW, LH,
                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_StopTextInput();         /* no typing here: no input method's window over it (see present_sdl.c) */
+    { extern void ngb_app_icon_window(void *); ngb_app_icon_window(win); }   /* (src/app_icon.c) */
     r = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED |
                                           SDL_RENDERER_PRESENTVSYNC) : NULL;
     if (r == NULL && win)

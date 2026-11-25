@@ -475,6 +475,12 @@ private:
 };
 constexpr uint32_t kQuadVertices = 6;
 extern "C" int ngb_pc_setting(int which);
+#ifdef __ANDROID__
+extern "C" __attribute__((weak)) int ngb_touch_shown(void);   // src/touch_pad.c (Android): its controls on screen
+static bool touch_shown() { return ngb_touch_shown && ngb_touch_shown(); }
+#else
+static bool touch_shown() { return false; }   // (no touch controls; macOS's linker refuses a weak symbol never defined)
+#endif
 extern "C" int nv2a_dirty_stamp(const void* host, size_t len, uint64_t* stamp);   // xboxrecomp nv2a_dirty.c
 extern "C" float ngb_hud_shape(void);   // src/pc_menu.c: the menus' and HUD's narrowing
 extern "C" double ngb_aspect_21_9(void);   // src/pc_menu.c: the screen's shape with "21:9" (2:1 to 12:5)
@@ -4039,6 +4045,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                        (hud_piece() || hud_known_ || (threed_ >= 30 && !last3d_prev_));   // (last: a load's first frame)
             };
             if (pk_.stretched) {
+                bool placed = false;   // (HudPlace ran for this draw: hud_bottom_ is this draw's)
                 // The game's 2D in its widescreen mode, the console's 16:9 look, kept 16:9: on a wider screen
                 // (21:9) narrowed to the middle 16:9 (kx), on a narrower one (16:10) shortened to it (ky);
                 // a 2D screen (menus, the title, chapter cards) whole, clipped there; in play the HUD's
@@ -4093,6 +4100,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     float ax = w / 2, ay = h / 2;
                     if (live && !centred) {
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
+                        placed = true;
                         if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
                     }
@@ -4118,6 +4126,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     if (!centred && live) {
                         float ax = w / 2, ay = h / 2;
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
+                        placed = true;
                         c.ext[1] = ax;
                         if ((small < 1 || shaped) && ax != w / 2 && !hud_bottom_ && hud_piece()) {
                             c.ext[0] = (shaped ? ks : km) * small;
@@ -4138,6 +4147,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     // 16:9: nothing to narrow, the HUD's elements only smaller toward their sides (and Corrected, narrower)
                     float ax = w / 2, ay = h / 2;
                     HudPlace(x0, x1, y0, y1, w, h, ax, ay);
+                    placed = true;
                     if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                         hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
                     if (ax != w / 2 && !hud_bottom_ && hud_piece()) {
@@ -4148,6 +4158,18 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     } else if (ax != w / 2 && prompt_ok()) {
                         prompt_ext(ax, 1.0f, ay, 1.0f);   // the prompt (Stretched: as drawn)
                     }
+                }
+                // Touch controls up (Android): the prompt (Interact) a little to the left, off the buttons drawn over
+                // that corner (the right stick's click, A above it). As one more narrowing, by e about a point far to
+                // its right, composed with the one above: each piece moves by about d (the prompt's own pieces by
+                // nearly the same, a few pixels' difference across it)
+                if (placed && live && !centred && hud_bottom_ && prompt_ok() && touch_shown()) {
+                    const float e = 0.02f, d = h * 0.06f;
+                    const float S = c.ext[0] > 0 ? c.ext[0] : 1.0f, A = c.ext[0] > 0 ? c.ext[1] : 0.0f;
+                    const float xa = hud_edge_ >= 0 ? hud_edge_ : w;      // the prompt's outer edge, as placed
+                    const float B = xa - d / e, S2 = (1 - e) * S;
+                    c.ext[0] = S2;
+                    c.ext[1] = ((1 - e) * A * (1 - S) + e * B) / (1 - S2);
                 }
             } else if (n && k < 0.999f && !paused &&
                        (ScreenFrame(threed_) || ((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30) ||

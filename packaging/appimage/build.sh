@@ -110,9 +110,9 @@ cp "$here/../shader-seed/states.bin" "$here/../shader-seed/pipelines.bin" \
 # The fonts built into the program (SIL Open Font License): their licences.
 mkdir -p "$app/usr/share/licenses/NinjaGaidenBlack"
 cp "$repo"/assets/fonts/OFL-*.txt "$app/usr/share/licenses/NinjaGaidenBlack/"
-cp "$repo"/assets/prompts/License-Xelu.txt "$app/usr/share/licenses/NinjaGaidenBlack/"
 cp "$repo/LICENSE" "$repo/THIRD_PARTY.md" "$app/usr/share/licenses/NinjaGaidenBlack/"
 cp "$repo/src/d3d/NOTICE" "$app/usr/share/licenses/NinjaGaidenBlack/NOTICE-renderer.txt"
+cp "$repo/src/LICENSE-Pillow.txt" "$app/usr/share/licenses/NinjaGaidenBlack/"
 cp "$toolkit/LICENSE" "$app/usr/share/licenses/NinjaGaidenBlack/LICENSE-xboxrecomp.txt"
 cp "$toolkit/NOTICE" "$app/usr/share/licenses/NinjaGaidenBlack/NOTICE-xboxrecomp.txt"
 cp "$toolkit/LICENSES/LGPL-2.1.txt" "$app/usr/share/licenses/NinjaGaidenBlack/"
@@ -128,6 +128,7 @@ Exec=NinjaGaidenBlack %f
 Icon=ninja-gaiden-black
 Categories=Game;ActionGame;
 Terminal=false
+StartupWMClass=ninja-gaiden-black
 DESKTOP
 cat > "$app/AppRun" <<'APPRUN'
 #!/bin/sh

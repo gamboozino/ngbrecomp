@@ -23,6 +23,8 @@ void nv2a_window_event_hook(const void *sdl_event);
 /* F11 / Alt+Enter changed the display mode (0 window, 1 fullscreen, 2 borderless), on the window's
  * thread (weak): the menus' setting follows. */
 void nv2a_window_mode_changed(int mode);
+/* The game window, just made (weak): the host gives it its icon. */
+void nv2a_window_made(void *sdl_window);
 /* Mouse motions not the player's -- the window changed under a pointer at rest -- dropped before any
  * watcher or the queue sees them (#281). nv2a_window_create installs it; another SDL window (a
  * settings screen) can too, before it makes the window: installing empties SDL's event queue. A motion pushed by a test script with this id counts as the player's. */

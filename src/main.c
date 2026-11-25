@@ -1154,6 +1154,7 @@ static void env_file(const char *dir)
 int main(int argc, char **argv)
 {
     portable_init();   /* before anything picks a folder (the log's, first) */
+    { extern void ngb_app_id_setup(void); ngb_app_id_setup(); }   /* src/app_icon.c: before SDL's video starts */
     {   /* (before the log, so its options take: NGB_HANG_DUMP and the rest) */
         char dir[4096];
         save_dir_path(dir, sizeof dir);
@@ -1253,6 +1254,8 @@ int main(int argc, char **argv)
     printf("Game directory: %s\n", s_game_dir);
     { extern void ngb_quick_set_game_dir(const char *); ngb_quick_set_game_dir(s_game_dir); }
     { extern void ngb_hud_set_game_dir(const char *); ngb_hud_set_game_dir(s_game_dir); }   /* src/hud.c: Shuriken Icon */
+    { extern void ngb_app_icon_setup(const char *); ngb_app_icon_setup(s_game_dir); }   /* src/app_icon.c: the icon, from the game's logo */
+    { extern void ngb_gp_touch_saved(const char *); ngb_gp_touch_saved(s_save_dir); }   /* src/game_prompts.c: touch pieces kept */
 
 #if defined(_WIN32)
     SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
