@@ -135,7 +135,7 @@ endif()
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/packaging/android/AndroidManifest.xml NGB_VERSION_LINE
      REGEX "android:versionName=")
 string(REGEX REPLACE ".*android:versionName=\"([^\"]+)\".*" "\\1" NGB_VERSION "${NGB_VERSION_LINE}")
-set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/fps_text.c APPEND PROPERTY
+set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/fps_text.c ${CMAKE_CURRENT_SOURCE_DIR}/src/game_prompts.c APPEND PROPERTY
              COMPILE_DEFINITIONS NGB_VERSION="${NGB_VERSION}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
              ${CMAKE_CURRENT_SOURCE_DIR}/packaging/android/AndroidManifest.xml)

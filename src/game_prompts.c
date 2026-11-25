@@ -2225,7 +2225,7 @@ static void dump_touch(const char *dir)
  * them from its first frame, before the game's textures are read, and does not make them again. version.txt,
  * written last, says which drawing of them they are; another (or none) and they are made and saved again. */
 
-#define TOUCH_ART_VERSION 1   /* raised whenever the pieces are drawn differently */
+#define TOUCH_ART_VERSION 2   /* raised whenever the pieces are drawn differently (and each release redraws them) */
 
 unsigned char *stbi_load_from_memory(const unsigned char *buf, int len, int *x, int *y, int *comp, int req);
 void stbi_image_free(void *p);
@@ -2234,7 +2234,10 @@ static char s_touch_dir[4096];
 
 static void touch_stamp(char *out, size_t n)
 {
-    snprintf(out, n, "ngb touch art %d, %d pieces\n", TOUCH_ART_VERSION, TOUCH_N);
+#ifndef NGB_VERSION
+#define NGB_VERSION "dev"
+#endif
+    snprintf(out, n, "ngb touch art %d, %d pieces, %s\n", TOUCH_ART_VERSION, TOUCH_N, NGB_VERSION);
 }
 
 static uint8_t *file_bytes(const char *path, size_t *n)
