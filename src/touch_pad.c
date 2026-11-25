@@ -67,7 +67,7 @@ static const Ctrl s_ctrl[NCTRL] = {
     [LSTICK]  = { STICK,  0, 0.27f,  0.56f,  0.14f,  "left stick", NULL, 0, NULL },
     [RSTICK]  = { STICK,  1, 0.66f,  0.68f,  0.12f,  "right stick", NULL, 0, NULL },   /* (below and inside the
                                                        face buttons, clear of the game's prompts) */
-    [DPAD_ID] = { DPAD,   0, 0.36f,  0.86f,  0.09f,  "d-pad", NULL, 0, NULL },
+    [DPAD_ID] = { DPAD,   0, 0.37f,  0.84f,  0.12f,  "d-pad", NULL, 0, NULL },   /* (0.09 was small: #284) */
     [BA]      = { BUTTON, 1, 0.193f, 0.675f, 0.075f, "A", "A", 0x7CC84E, "button_a" },
     [BB]      = { BUTTON, 1, 0.193f, 0.51f,  0.07f,  "B", "B", 0xE8574F, "button_b" },
     [BX]      = { BUTTON, 1, 0.347f, 0.59f,  0.075f, "X", "X", 0x4C9BEA, "button_x" },
@@ -79,8 +79,9 @@ static const Ctrl s_ctrl[NCTRL] = {
     [RT]      = { BUTTON, 0, 0.060f, 0.088f, 0.047f, "RT", "RT", 0xE6E6E6, "trigger_r" },   /* (the camera: small,
                                                        in the corner clear of the health emblem:
                                                        place_at) */
-    [BACK]    = { BUTTON, 2, -0.11f, 0.90f,  0.04f,  "BACK", "BACK", 0xE6E6E6, "back" },   /* (Back and Start off */
-    [START]   = { BUTTON, 2, 0.11f,  0.90f,  0.04f,  "START", "START", 0xE6E6E6, "start" },   /* the gesture bar) */
+    [BACK]    = { BUTTON, 2, -0.085f, 0.89f, 0.055f, "BACK", "BACK", 0xE6E6E6, "back" },   /* (Back and Start off the */
+    [START]   = { BUTTON, 2, 0.085f, 0.89f,  0.055f, "START", "START", 0xE6E6E6, "start" },   /* gesture bar; larger and
+                                                       nearer each other, both pressed at once for a reset: #284) */
     [LS]      = { BUTTON, 0, 0.09f,  0.90f,  0.04f,  "LS", "LS", 0xE6E6E6, "click_l" },
     [RS]      = { BUTTON, 1, 0.09f,  0.90f,  0.045f, "RS", "RS", 0xE6E6E6, "click_r" },
 };
@@ -189,10 +190,11 @@ static int dpad_dirs(float x, float y)
         return 0;
     float a = atan2f(-dy, dx) * 180.0f / (float)M_PI;   /* 0 right, 90 up */
     int d = 0;
-    if (a > -67.5f && a < 67.5f) d |= XBOX_GAMEPAD_DPAD_RIGHT;
-    if (a > 22.5f && a < 157.5f) d |= XBOX_GAMEPAD_DPAD_UP;
-    if (a > 112.5f || a < -112.5f) d |= XBOX_GAMEPAD_DPAD_LEFT;
-    if (a < -22.5f && a > -157.5f) d |= XBOX_GAMEPAD_DPAD_DOWN;
+    /* (the diagonals 20 degrees wide, not 45: scrolling down a menu took Left or Right too and changed a row, #284) */
+    if (a > -55.0f && a < 55.0f) d |= XBOX_GAMEPAD_DPAD_RIGHT;
+    if (a > 35.0f && a < 145.0f) d |= XBOX_GAMEPAD_DPAD_UP;
+    if (a > 125.0f || a < -125.0f) d |= XBOX_GAMEPAD_DPAD_LEFT;
+    if (a < -35.0f && a > -145.0f) d |= XBOX_GAMEPAD_DPAD_DOWN;
     return d;
 }
 

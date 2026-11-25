@@ -1607,10 +1607,60 @@ static Im held(Im a, int s)
     return o;
 }
 
+/* A face button's letter (X Y B A: 0..3) as strokes in the face's 21 x 23 cell, about the disc's centre: the game's
+ * own letter is 7 pixels tall, and enlarged to a phone's button it was a blur (#284) */
+static void gem_letter(Cv *cv, int k, double cx, double cy, double w)
+{
+    const double h = 4.2;                  /* half the letter's height */
+    Pts p;
+    switch (k) {
+    case 0:                                /* X */
+        p.n = 0; pt(&p, cx - 3.1, cy - h); pt(&p, cx + 3.1, cy + h); cv_stroke(cv, &p, w, 255, 1);
+        p.n = 0; pt(&p, cx + 3.1, cy - h); pt(&p, cx - 3.1, cy + h); cv_stroke(cv, &p, w, 255, 1);
+        break;
+    case 1:                                /* Y */
+        p.n = 0; pt(&p, cx - 3.3, cy - h); pt(&p, cx, cy + 0.3); pt(&p, cx + 3.3, cy - h); cv_stroke(cv, &p, w, 255, 1);
+        p.n = 0; pt(&p, cx, cy + 0.3); pt(&p, cx, cy + h); cv_stroke(cv, &p, w, 255, 1);
+        break;
+    case 2: {                              /* B: the stem, two bowls (the lower one wider) */
+        p.n = 0;
+        pt(&p, cx - 1.2, cy); pt(&p, cx - 2.9, cy); pt(&p, cx - 2.9, cy - h); pt(&p, cx + 0.4, cy - h);
+        for (int i = 1; i < 12; i++) {
+            double t = -M_PI / 2 + M_PI * i / 12;
+            pt(&p, cx + 0.4 + 2.1 * cos(t), cy - h / 2 + 2.1 * sin(t));
+        }
+        pt(&p, cx + 0.4, cy); pt(&p, cx + 0.8, cy);
+        for (int i = 1; i < 12; i++) {
+            double t = -M_PI / 2 + M_PI * i / 12;
+            pt(&p, cx + 0.8 + 2.1 * cos(t), cy + h / 2 + 2.1 * sin(t));
+        }
+        pt(&p, cx + 0.8, cy + h); pt(&p, cx - 2.9, cy + h); pt(&p, cx - 2.9, cy);
+        cv_stroke(cv, &p, w, 255, 1);
+        break;
+    }
+    default:                               /* A */
+        p.n = 0; pt(&p, cx - 3.5, cy + h); pt(&p, cx, cy - h); pt(&p, cx + 3.5, cy + h); cv_stroke(cv, &p, w, 255, 1);
+        p.n = 0; pt(&p, cx - 1.9, cy + 1.2); pt(&p, cx + 1.9, cy + 1.2); cv_stroke(cv, &p, w, 255, 0);
+        break;
+    }
+}
+
 static Im gem(int k)
 {
     Im a = crisp(smooth(face(k), TS), 0.9 * TS, 0.35);
-    return centred(firm_disc(a, TS, CX, CY, R_DISC, 0.5), 192, CX * TS, CY * TS);
+    a = firm_disc(a, TS, CX, CY, R_DISC, 0.5);
+    /* the letter drawn sharp over the game's own: a soft dark edge under it, as the game's letters have, then the
+     * letter in the game's near-white */
+    Cv cv = cv_new(21, 23, TS);
+    gem_letter(&cv, k, CX, CY, 2.0);
+    Mk m = cv_mask(&cv);
+    Cv cvs = cv_new(21, 23, TS);
+    gem_letter(&cvs, k, CX + 0.35, CY + 0.45, 2.9);
+    Mk sh = blur(cv_mask(&cvs), 0.5 * TS);
+    static const float dark[3] = { 0.05f, 0.05f, 0.06f }, light[3] = { 0.96f, 0.96f, 0.95f };
+    ink(a, sh, dark, 0, 0, 0.55f);
+    ink(a, m, light, 0, 0, 1);
+    return centred(a, 192, CX * TS, CY * TS);
 }
 
 static Im black_ball(int s)
@@ -2225,7 +2275,7 @@ static void dump_touch(const char *dir)
  * them from its first frame, before the game's textures are read, and does not make them again. version.txt,
  * written last, says which drawing of them they are; another (or none) and they are made and saved again. */
 
-#define TOUCH_ART_VERSION 2   /* raised whenever the pieces are drawn differently (and each release redraws them) */
+#define TOUCH_ART_VERSION 3   /* raised whenever the pieces are drawn differently (and each release redraws them) */
 
 unsigned char *stbi_load_from_memory(const unsigned char *buf, int len, int *x, int *y, int *comp, int req);
 void stbi_image_free(void *p);
