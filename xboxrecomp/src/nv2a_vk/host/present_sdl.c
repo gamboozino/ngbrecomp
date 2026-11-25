@@ -553,6 +553,14 @@ __attribute__((weak)) bool nv2a_layer_wanted(void)
     return false;
 }
 
+/* Where the picture just given differs from the one given before, as boxes (x0, y0, x1, y1); -1: anywhere */
+__attribute__((weak)) int nv2a_overlay_changed(int (*box)[4], int max)
+{
+    (void)box;
+    (void)max;
+    return -1;
+}
+
 __attribute__((weak)) bool nv2a_overlay_picture(uint32_t win_w, uint32_t win_h, uint32_t *px, size_t max,
                                                 uint32_t *ow, uint32_t *oh, unsigned *serial)
 {
@@ -817,22 +825,46 @@ static void layer_draw(PGRAPHVkState *r, VkCommandBuffer cmd, unsigned f, uint32
         layer_image(r, w, h);
         return;
     }
-    if (!layer_image(r, w, h) || !layer_pipeline(r))
+    if (!layer_image(r, w, h) || !layer_pipeline(r)) {
+        if (serial != s_layer.serial)
+            s_layer.valid = false;   /* (a picture drawn and not sent: the next one whole) */
         return;
+    }
     if (!s_layer.valid || serial != s_layer.serial) {   /* new contents: in this frame's buffer now */
-        vmaFlushAllocation(r->allocator, s_layer.buf_mem[f], 0, VK_WHOLE_SIZE);
-        barrier(cmd, s_layer.img, s_layer.valid ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-        VkBufferImageCopy c = {
-            .bufferRowLength = w,
-            .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .imageExtent = { w, h, 1 },
-        };
-        vkCmdCopyBufferToImage(cmd, s_layer.buf[f], s_layer.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
-        barrier(cmd, s_layer.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        /* (only where it differs from the picture in the image, when the title says where) */
+        enum { BOXES = 64 };
+        int box[BOXES][4], n = s_layer.valid ? nv2a_overlay_changed(box, BOXES) : -1;
+        VkBufferImageCopy c[BOXES];
+        if (n < 0 || n > BOXES) {
+            n = 1;
+            box[0][0] = box[0][1] = 0;
+            box[0][2] = (int)w;
+            box[0][3] = (int)h;
+        }
+        uint32_t nc = 0;
+        for (int i = 0; i < n; i++) {
+            int x0 = box[i][0] < 0 ? 0 : box[i][0], y0 = box[i][1] < 0 ? 0 : box[i][1];
+            int x1 = box[i][2] > (int)w ? (int)w : box[i][2], y1 = box[i][3] > (int)h ? (int)h : box[i][3];
+            if (x0 >= x1 || y0 >= y1)
+                continue;
+            c[nc++] = (VkBufferImageCopy){
+                .bufferOffset = 4 * ((VkDeviceSize)y0 * w + (VkDeviceSize)x0),
+                .bufferRowLength = w,
+                .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .imageOffset = { x0, y0, 0 },
+                .imageExtent = { (uint32_t)(x1 - x0), (uint32_t)(y1 - y0), 1 },
+            };
+        }
+        if (nc) {
+            vmaFlushAllocation(r->allocator, s_layer.buf_mem[f], 0, VK_WHOLE_SIZE);
+            barrier(cmd, s_layer.img, s_layer.valid ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            vkCmdCopyBufferToImage(cmd, s_layer.buf[f], s_layer.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, nc, c);
+            barrier(cmd, s_layer.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        }
         s_layer.serial = serial;
         s_layer.valid = true;
     }

@@ -129,8 +129,13 @@ static Place place_at(const Ctrl *c, float aspect, int standin)
             p.y = 0.79f;
         }
     }
-    if (c == &s_ctrl[DPAD_ID] || (c == &s_ctrl[RSTICK] && aspect >= NARROW)) {   /* (in from the middle on a less
-                                                                               * wide screen) */
+    if (c == &s_ctrl[DPAD_ID]) {   /* right of the game's quick menu (the items' cross, which it works): that is
+                                    * at the lower left of a 16:9 picture, in the middle of a wider screen */
+        float clear = (aspect - 16.0f / 9) / 2 + 0.50f, most = aspect / 2 - 0.28f;   /* (and left of Back) */
+        p.x = p.x > clear ? p.x : clear;
+        p.x = p.x < most ? p.x : most;
+    }
+    if (c == &s_ctrl[RSTICK] && aspect >= NARROW) {   /* (in from the middle on a less wide screen) */
         float most = aspect / 2 - 0.12f;   /* (at 3:2 the right stick clear of X) */
         p.x = p.x < most ? p.x : most;
     }
@@ -521,6 +526,7 @@ typedef struct { uint32_t *px; int w, h, n; unsigned bg; int box[OVER_BOXES][4];
 static Over s_over[OVER_BUFS];
 static Over *s_rec;      /* the buffer being drawn over (NULL: the untouched picture itself) */
 static unsigned s_bg_gen;   /* +1 each untouched picture made */
+static int s_chg[2 * OVER_BOXES][4], s_chg_n = -1;   /* the last picture against the one before (-1: all of it) */
 
 static void over_box(int x0, int y0, int x1, int y1)
 {
@@ -695,50 +701,59 @@ static void draw_idle(void)
     }
 }
 
+/* The picture is drawn in memory of our own and its changed boxes copied into the presenter's buffer: blended
+ * in that buffer itself (the GPU's, mapped: slow to read on a phone) a dragged stick took a Pixel 4a from 60 fps
+ * to 22 at the window's own size. */
+static uint32_t *s_cv;
+static Over s_cvrec;
+
+static void box_copy(uint32_t *to, const uint32_t *from, const Over *o)
+{
+    for (int b = 0; b < o->n; b++)
+        for (int y = o->box[b][1]; y < o->box[b][3]; y++)
+            memcpy(to + (size_t)y * s_w + o->box[b][0], from + (size_t)y * s_w + o->box[b][0],
+                   sizeof(uint32_t) * (size_t)(o->box[b][2] - o->box[b][0]));
+}
+
 static void draw_all(void)
 {
     float u = (float)s_h;
     size_t px = (size_t)s_w * s_h;
     bool fresh = false;
-    if (!s_bg || s_bg_w != s_w || s_bg_h != s_h || s_bg_aspect != d_aspect || s_bg_art != s_art) {
+    uint32_t *out = s_px;
+    if (!s_bg || !s_cv || s_bg_w != s_w || s_bg_h != s_h || s_bg_aspect != d_aspect || s_bg_art != s_art) {
         free(s_bg);
-        s_bg = NULL;
-        draw_idle();
+        free(s_cv);
         s_bg = malloc(sizeof(uint32_t) * px);
-        if (s_bg)
-            memcpy(s_bg, s_px, sizeof(uint32_t) * px);
+        s_cv = malloc(sizeof(uint32_t) * px);
+        if (!s_bg || !s_cv) {
+            free(s_bg);
+            free(s_cv);
+            s_bg = s_cv = NULL;
+            s_bg_gen++;
+            s_chg_n = -1;
+            memset(out, 0, sizeof(uint32_t) * px);   /* (no memory: nothing shown) */
+            return;
+        }
+        s_px = s_cv;
+        draw_idle();
+        memcpy(s_bg, s_cv, sizeof(uint32_t) * px);
         s_bg_w = s_w;
         s_bg_h = s_h;
         s_bg_aspect = d_aspect;
         s_bg_art = s_art;
         s_bg_gen++;
         fresh = true;
-    }
-    Over *o = NULL;
-    for (int i = 0; i < OVER_BUFS; i++)
-        if (s_over[i].px == s_px)
-            o = &s_over[i];
-    if (!o) {            /* (a buffer not seen before: in the place of the one least lately drawn) */
-        static int next;
-        o = &s_over[next++ % OVER_BUFS];
-        o->px = s_px;
-        o->n = -1;
-    }
-    if (fresh) {
-        /* (the untouched picture is in it) */
-    } else if (o->n >= 0 && o->bg == s_bg_gen && o->w == s_w && o->h == s_h) {
-        for (int b = 0; b < o->n; b++)
-            for (int y = o->box[b][1]; y < o->box[b][3]; y++)
-                memcpy(s_px + (size_t)y * s_w + o->box[b][0], s_bg + (size_t)y * s_w + o->box[b][0],
-                       sizeof(uint32_t) * (size_t)(o->box[b][2] - o->box[b][0]));
+    } else if (s_cvrec.n >= 0) {
+        box_copy(s_cv, s_bg, &s_cvrec);       /* (what was over the untouched controls: taken away) */
     } else {
-        memcpy(s_px, s_bg, sizeof(uint32_t) * px);
+        memcpy(s_cv, s_bg, sizeof(uint32_t) * px);
     }
-    o->bg = s_bg_gen;
-    o->w = s_w;
-    o->h = s_h;
-    o->n = s_bg ? 0 : -1;
-    s_rec = o;
+    s_px = s_cv;
+    Over was = s_cvrec;                       /* (the picture before this one) */
+    bool was_ok = !fresh && was.n >= 0;
+    s_cvrec.n = 0;
+    s_rec = &s_cvrec;
     for (int i = 0; i < NCTRL; i++) {
         const Ctrl *c = &s_ctrl[i];
         Place at = place_at(c, d_aspect, s_art == ART_STANDIN);
@@ -772,6 +787,49 @@ static void draw_all(void)
         }
     }
     s_rec = NULL;
+    s_px = out;
+    /* Into the presenter's buffer: where it differs from the picture that buffer holds (drawn some frames ago) */
+    Over *o = NULL;
+    for (int i = 0; i < OVER_BUFS; i++)
+        if (s_over[i].px == out)
+            o = &s_over[i];
+    if (!o) {            /* (a buffer not seen before: in the place of the one least lately drawn) */
+        static int next;
+        o = &s_over[next++ % OVER_BUFS];
+        o->px = out;
+        o->n = -1;
+    }
+    if (o->n >= 0 && s_cvrec.n >= 0 && o->bg == s_bg_gen && o->w == s_w && o->h == s_h) {
+        box_copy(out, s_cv, o);
+        box_copy(out, s_cv, &s_cvrec);
+    } else {
+        memcpy(out, s_cv, sizeof(uint32_t) * px);
+    }
+    o->bg = s_bg_gen;
+    o->w = s_w;
+    o->h = s_h;
+    o->n = s_cvrec.n;
+    if (s_cvrec.n > 0)
+        memcpy(o->box, s_cvrec.box, sizeof(int[4]) * (size_t)s_cvrec.n);
+    /* Where this picture differs from the one before it: what either has over the untouched controls */
+    if (was_ok && s_cvrec.n >= 0) {
+        memcpy(s_chg, was.box, sizeof(int[4]) * (size_t)was.n);
+        memcpy(s_chg + was.n, s_cvrec.box, sizeof(int[4]) * (size_t)s_cvrec.n);
+        s_chg_n = was.n + s_cvrec.n;
+    } else {
+        s_chg_n = -1;
+    }
+}
+
+/* The presenter's, after a picture it was given: the boxes (x0, y0, x1, y1) where it differs from the one given
+ * before, so only those go to the GPU (the whole of it, ten megabytes at a phone's size, on each step of a
+ * dragged stick took the game to 22 fps on a Pixel 4a). -1: all of it. */
+int nv2a_overlay_changed(int (*box)[4], int max)
+{
+    if (s_chg_n < 0 || s_chg_n > max)
+        return -1;
+    memcpy(box, s_chg, sizeof(int[4]) * (size_t)s_chg_n);
+    return s_chg_n;
 }
 
 /* The presenter asks first whether there is a picture at all */
