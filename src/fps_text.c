@@ -12,6 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define BACK 0xFF121212u
@@ -112,19 +113,40 @@ static volatile unsigned s_ver_seen;                      /* frames since the ma
 
 void ngb_version_seen(void) { s_ver_seen = 3; }
 
+/* A notice in the same place, for a while, whatever is up: NGB_NOTICE, from the program that started this one (the
+ * arcade not run, src/launch.c). Taken out of the environment once read, so it is not handed on. */
+static char s_notice[96];
+static int s_notice_frames = -1;                          /* frames left to show it, once lettered; -1 not read yet */
+
 void ngb_version_tick(void)
 {
-    static int last_cap;
+    static int last_cap, last_kind;
     static uint32_t px[MAX_W * MAX_H];
     if (s_ver_seen)
         s_ver_seen--;
+    if (s_notice_frames < 0) {
+        const char *n = getenv("NGB_NOTICE");
+        snprintf(s_notice, sizeof s_notice, "%s", n ? n : "");
+        s_notice_frames = s_notice[0] ? 600 : 0;          /* (10 s) */
+#if defined(_WIN32)
+        _putenv_s("NGB_NOTICE", "");
+#else
+        unsetenv("NGB_NOTICE");
+#endif
+    }
+    int kind = s_notice_frames > 0 ? 2 : s_ver_seen ? 1 : 0;
+    if (kind == 2 && last_kind == 2 && s_ver_w > 0)
+        s_notice_frames--;
     int cap = ngb_fps_cap(ngb_fps_target_h > 0 ? ngb_fps_target_h : 720, NULL);
-    if (!s_ver_seen || cap == last_cap)
+    if (!kind || (cap == last_cap && kind == last_kind))
         return;
     int w, ph;
-    if (!ngb_game_text_picture("v" NGB_VERSION, (float)cap, px, MAX_W, MAX_H, &w, &ph))
+    if (!ngb_game_text_picture(kind == 2 ? s_notice : "v" NGB_VERSION, (float)cap, px, MAX_W, MAX_H, &w, &ph))
         return;                                           /* the font not loaded yet: next frame */
+    if (kind == 2 && last_kind != 2)
+        fprintf(stderr, "[NOTICE] %s\n", s_notice);
     last_cap = cap;
+    last_kind = kind;
     pthread_mutex_lock(&s_ver_lock);
     memcpy(s_ver_px, px, sizeof *px * (size_t)w * ph);
     s_ver_w = w;
@@ -133,8 +155,8 @@ void ngb_version_tick(void)
     pthread_mutex_unlock(&s_ver_lock);
 }
 
-/* Whether the main menu is up (the version to be shown). */
-int ngb_version_shown(void) { return s_ver_seen != 0 && s_ver_w > 0; }
+/* Whether the main menu is up (the version to be shown), or a notice. */
+int ngb_version_shown(void) { return (s_ver_seen != 0 || s_notice_frames > 0) && s_ver_w > 0; }
 
 /* As ngb_fps_picture, for the version's picture. */
 int ngb_version_picture(uint32_t *out, size_t max, int *w, int *h, unsigned *serial)

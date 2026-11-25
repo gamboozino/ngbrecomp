@@ -8,10 +8,11 @@
  * bytes for the next image) and calls HalReturnToFirmware; the runtime hands the page to the hook
  * installed here (xbox_LaunchImageHook), which saves it, points the next program at it
  * (RECOMP_LAUNCH_PAGE: the runtime puts it back where XGetLaunchInfo looks) and starts that program in
- * place of this one: exec on Linux and macOS, a new process and this one ended on Windows. Each image
- * is its own recompiled program, next to this one: NinjaGaidenBlack for default.xbe, NinjaTrilogy for
+ * place of this one: exec on Linux and macOS, a new process and this one ended on Windows, and on Android
+ * the app's process started again into the image's library (src/android_main.c, NgbActivity.relaunch). Each
+ * image is its own recompiled program, next to this one: NinjaGaidenBlack for default.xbe, NinjaTrilogy for
  * NinjaTrilogy.xbe, NinjaTomoe for NinjaTomoe.xbe (the Japanese arcade, launched instead when the game's
- * voices are Japanese).
+ * voices are Japanese); on Android libmain.so, libtrilogy.so and libtomoe.so.
  */
 #include "ngb_launch.h"
 #include "port.h"
@@ -25,6 +26,7 @@
 #include <windows.h>
 #else
 #include <dirent.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <pthread.h>
@@ -76,6 +78,8 @@ void ngb_launch_log_to_file(const char *save_dir, const char *name)
         freopen(log, "a", stdout);
         freopen(log, "a", stderr);
     }
+#elif defined(__ANDROID__)
+    (void)log;   /* (src/android_main.c has it in its log file and logcat already) */
 #else
     if (getenv("NGB_TEST_HIDDEN") || isatty(STDOUT_FILENO))
         return;
@@ -182,31 +186,27 @@ static void quiet_signals(void)
 }
 #endif
 
-/* The program for a guest image path ("D:\NinjaTrilogy.xbe"), next to this one; 0 if there is none. */
-static int s_is_trilogy;
-
-static int program_for(const char *path, char *out, size_t n)
+/* The program prog (NinjaGaidenBlack, NinjaTrilogy, NinjaTomoe) beside this one into out: on Android its library's
+ * short name; 0 if it is not there. */
+static int program_path(const char *prog, char *out, size_t n)
 {
-    /* XAPI writes the device and the file joined by ';': \Device\CdRom0;NinjaTrilogy.xbe */
-    const char *name = path;
-    for (const char *c = path; *c; c++)
-        if (*c == '\\' || *c == ';')
-            name = c + 1;
-    /* NinjaTrilogy names no image when it hands back (XLaunchNewImage(NULL)): the disc's title. In
-     * the game itself an empty path is a reboot to the dashboard, an exit. */
-    if (!*name && s_is_trilogy)
-        name = "default.xbe";
-    const char *prog;
-    if (!strcasecmp(name, "default.xbe"))
-        prog = "NinjaGaidenBlack";
-    else if (!strcasecmp(name, "NinjaTrilogy.xbe"))
-        prog = "NinjaTrilogy";
-    else if (!strcasecmp(name, "NinjaTomoe.xbe"))   /* the Japanese build: the game's voices set to Japanese */
-        prog = "NinjaTomoe";
-    else
-        return 0;
 #ifdef __ANDROID__
-    return 0;   /* (no programs beside it to start: the arcade is not built for Android yet) */
+    {   /* the library, in the app beside this one */
+        const char *lib = !strcmp(prog, "NinjaGaidenBlack") ? "main" : !strcmp(prog, "NinjaTrilogy") ? "trilogy" : "tomoe";
+        Dl_info info;
+        char path[4200];
+        if (!dladdr((void *)program_path, &info) || !info.dli_fname)
+            return 0;
+        snprintf(path, sizeof path, "%s", info.dli_fname);
+        char *slash = strrchr(path, '/');
+        if (!slash)
+            return 0;
+        snprintf(slash + 1, sizeof path - (size_t)(slash + 1 - path), "lib%s.so", lib);
+        if (access(path, R_OK) != 0)
+            return 0;
+        snprintf(out, n, "%s", lib);
+        return 1;
+    }
 #endif
     long len = ngb_exe_path(out, n);
     if (len <= 0)
@@ -224,17 +224,90 @@ static int program_for(const char *path, char *out, size_t n)
     snprintf(slash + 1, n - (size_t)(slash + 1 - out), "%s.exe", prog);
 #else
     snprintf(slash + 1, n - (size_t)(slash + 1 - out), "%s", prog);
+    if (access(out, X_OK) != 0)
+        return 0;
 #endif
     return 1;
 }
 
+/* The program for a guest image path ("D:\NinjaTrilogy.xbe") into out; 0 if there is none. *arcade: one of the
+ * arcade's. */
+static int s_is_trilogy;
+
+static int program_for(const char *path, char *out, size_t n, int *arcade)
+{
+    /* XAPI writes the device and the file joined by ';': \Device\CdRom0;NinjaTrilogy.xbe */
+    const char *name = path;
+    for (const char *c = path; *c; c++)
+        if (*c == '\\' || *c == ';')
+            name = c + 1;
+    /* NinjaTrilogy names no image when it hands back (XLaunchNewImage(NULL)): the disc's title. In
+     * the game itself an empty path is a reboot to the dashboard, an exit. */
+    if (!*name && s_is_trilogy)
+        name = "default.xbe";
+    *arcade = 1;
+    if (!strcasecmp(name, "default.xbe")) {
+        *arcade = 0;
+        return program_path("NinjaGaidenBlack", out, n);
+    }
+    if (!strcasecmp(name, "NinjaTomoe.xbe") &&   /* the Japanese build: the game's voices set to Japanese */
+        program_path("NinjaTomoe", out, n))
+        return 1;
+    if (!strcasecmp(name, "NinjaTrilogy.xbe") || !strcasecmp(name, "NinjaTomoe.xbe"))   /* (else the English one) */
+        return program_path("NinjaTrilogy", out, n);
+    return 0;
+}
+
+static void launch_image(const char *path, const void *page, size_t len);
+
+/* Back to Ninja Gaiden Black as if the arcade had been played and left: the page, its path the game's, handed to it
+ * with a notice it shows (NGB_NOTICE, src/fps_text.c) -- the game started again where it launched the arcade from,
+ * which an arcade that cannot run on this machine, or is not there, leaves it no other way to be (by now its threads
+ * are ended). Returns only when that could not be started either. */
+static void hand_back(const void *page, size_t len, const char *notice)
+{
+    static unsigned char back[0x1000];
+    static const char game[] = "\\Device\\CdRom0;default.xbe";
+    if (len > sizeof back)
+        len = sizeof back;
+    memset(back, 0, sizeof back);
+    if (page)
+        memcpy(back, page, len);
+    else
+        len = sizeof back;
+    memset(back + 8, 0, 520);   /* (the path: after the type and the launching title's id) */
+    memcpy(back + 8, game, sizeof game);
+    fprintf(stderr, "[LAUNCH] back to the game: %s\n", notice);
+    set_env("NGB_NOTICE", notice);
+    launch_image(game, back, len);
+}
+
+#ifdef NGB_NV2A_VK
+const char *nv2a_vk_missing_draw_features(void);   /* xboxrecomp nv2a_vk instance.c */
+#endif
+
 static void launch_image(const char *path, const void *page, size_t len)
 {
     char prog[4200], file[4200], win[64];
-    if (!program_for(path, prog, sizeof prog)) {
+    int arcade = 0;
+    if (!program_for(path, prog, sizeof prog, &arcade)) {
         fprintf(stderr, "[LAUNCH] no program for %s\n", path);
+        if (arcade && !s_is_trilogy)
+            hand_back(page, len, "The arcade Ninja Gaiden is not installed");
         return;
     }
+#ifdef NGB_NV2A_VK
+    if (arcade && !s_is_trilogy) {   /* the arcade draws with xemu's renderer, which needs what this GPU may lack */
+        const char *missing = nv2a_vk_missing_draw_features(), *test = getenv("NGB_TEST_ARCADE_NO_GPU");
+        if (test && !strcmp(test, "1"))   /* (testing: =2 lets the arcade find it out, src/trilogy/main.c) */
+            missing = "geometryShader (NGB_TEST_ARCADE_NO_GPU)";
+        if (missing && *missing) {
+            fprintf(stderr, "[LAUNCH] the arcade's renderer needs what this GPU lacks: %s\n", missing);
+            hand_back(page, len, "The arcade cannot run on this GPU");
+            return;
+        }
+    }
+#endif
     snprintf(file, sizeof file, "%s/launch-page.bin", s_save);
     FILE *f = fopen(file, "wb");
     if (!f || fwrite(page, 1, len, f) != len) {
@@ -262,7 +335,21 @@ static void launch_image(const char *path, const void *page, size_t len)
     set_env("NGB_LAUNCH_WINDOW", win);
     fprintf(stderr, "[LAUNCH] %s: starting %s (window %s)\n", path, prog, win);
     fflush(stderr);
-#if !defined(_WIN32)
+#if defined(__ANDROID__)
+    {
+        /* What the next program is handed (the rest it reads again, env.txt among it): these, set above or by the
+         * game for its arcade (its Audio Output, the frame counter, the render scale, the shaders' folder) -- as an
+         * exec passes them on */
+        static const char *const pass[] = { "RECOMP_LAUNCH_PAGE", "NGB_GAME_DIR", "NGB_SAVE_DIR", "NGB_LAUNCH_WINDOW",
+                                            "NGB_NOTICE", "NGB_AUDIO_OUTPUT", "NV2A_SHOW_FPS", "NV2A_SCALE",
+                                            "NV2A_SHADER_CACHE", NULL };
+        extern int ngb_android_relaunch(const char *lib, const char *const *names);   /* src/android_main.c */
+        if (ngb_android_relaunch(prog, pass))
+            for (int i = 0; i < 100; i++)   /* (ended from outside, at once) */
+                usleep(100000);
+        fprintf(stderr, "[LAUNCH] could not start lib%s.so\n", prog);
+    }
+#elif !defined(_WIN32)
     close_on_exec_all();
     quiet_signals();
     char *args[2] = { prog, NULL };
@@ -289,6 +376,13 @@ static void launch_image(const char *path, const void *page, size_t len)
 #endif
 }
 
+/* The arcade's renderer could not start (xboxrecomp's nv2a_renderer_fatal, src/trilogy/main.c): back to the game,
+ * with the page this program was launched with. Returns only when that could not be started. */
+void ngb_launch_hand_back(const char *notice)
+{
+    hand_back(ngb_launch_page(), 0x1000, notice);
+}
+
 void ngb_launch_init(const char *game_dir, const char *save_dir, int width, int height, int fullscreen)
 {
     extern void (*xbox_LaunchImageHook)(const char *path, const void *page, size_t len);
@@ -301,10 +395,8 @@ void ngb_launch_init(const char *game_dir, const char *save_dir, int width, int 
     note_inherited();
 #endif
     xbox_LaunchImageHook = launch_image;
-    char self[4200];
-    long len = ngb_exe_path(self, sizeof self);
-    if (len > 0) {
-        self[len] = 0;
-        s_is_trilogy = strstr(self, "NinjaTrilogy") != NULL || strstr(self, "NinjaTomoe") != NULL;
-    }
+    ngb_launch_page();   /* (kept now: the runtime takes the file away once it has read it) */
+#ifdef TRILOGY_XBE   /* (the arcade's programs: CMakeLists.txt) */
+    s_is_trilogy = 1;
+#endif
 }

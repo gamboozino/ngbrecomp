@@ -16,5 +16,8 @@ int ngb_launch_window_h(void);
 int ngb_launch_fullscreen(void);
 /* Whether this program was started by another one, and the launch data it left (NULL if none). */
 const unsigned char *ngb_launch_page(void);
+/* The arcade's programs: back to the game, as if left, with a notice it shows (when this one cannot run). Returns
+ * only when the game could not be started. */
+void ngb_launch_hand_back(const char *notice);
 
 #endif

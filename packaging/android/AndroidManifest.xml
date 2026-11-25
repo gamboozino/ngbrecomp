@@ -34,5 +34,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- the process started again into another of the app's programs (the arcade: src/launch.c) -->
+        <activity android:name=".NgbRelaunch"
+            android:process=":relaunch"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="false" />
     </application>
 </manifest>

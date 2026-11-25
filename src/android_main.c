@@ -6,6 +6,9 @@
  * config/ the settings, cache/ the shaders. The log goes to log.txt there and to logcat. An env.txt
  * there (KEY=value lines) sets more, as the environment does on the desktop (NV2A_FPS_LOG=1, NGB_CHEATS=...),
  * and a settings.ini put there replaces the game's settings at the next start (then it is taken away).
+ *
+ * The arcade's programs (src/trilogy/main.c: libtrilogy.so, libtomoe.so) start here too, their log in
+ * log-trilogy.txt; the app's process starts again from one to the other (ngb_android_relaunch, src/launch.c).
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE   /* cpu_set_t, sched_setaffinity */
@@ -16,6 +19,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,7 +27,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <jni.h>
 #include <SDL.h>
+#include <SDL_system.h>
 #undef main   /* (SDL_main.h renames main to SDL_main: this one is the game's) */
 
 int main(int argc, char **argv);   /* src/main.c */
@@ -300,6 +306,71 @@ static void seed_path(void)
         setenv("NGB_D3D_SEED", path, 0);
 }
 
+/* The app's process started again into another of its libraries (lib: "main", "trilogy", "tomoe"), with the variables
+ * named (those set), as an exec would pass them on (NgbActivity.relaunch: "NAME=value" each, ended by a 0 byte, in
+ * UTF-8 as they are -- a JNI string would want modified UTF-8). Returns only when it could not ask. */
+struct relaunch { const char *lib; const char *const *names; };
+static int relaunch_call(const struct relaunch *r)
+{
+    JNIEnv *env = SDL_AndroidGetJNIEnv();
+    jobject act = SDL_AndroidGetActivity();
+    if (!env || !act) {
+        fprintf(stderr, "[LAUNCH] relaunch: no %s\n", !env ? "JNI" : "activity");
+        return 0;
+    }
+    static char blob[16384];
+    size_t len = 0;
+    for (int i = 0; r->names[i]; i++) {
+        const char *v = getenv(r->names[i]);
+        size_t need = v ? strlen(r->names[i]) + strlen(v) + 2 : 0;
+        if (!v || len + need > sizeof blob)
+            continue;
+        len += (size_t)snprintf(blob + len, sizeof blob - len, "%s=%s", r->names[i], v) + 1;
+    }
+    int ok = 0;
+    jclass cls = (*env)->GetObjectClass(env, act);
+    jmethodID m = (*env)->GetMethodID(env, cls, "relaunch", "(Ljava/lang/String;[B)V");
+    jstring name = (*env)->NewStringUTF(env, r->lib);
+    jbyteArray vars = (*env)->NewByteArray(env, (jsize)len);
+    if (vars)
+        (*env)->SetByteArrayRegion(env, vars, 0, (jsize)len, (const jbyte *)blob);
+    if (m && vars && name) {
+        (*env)->CallVoidMethod(env, act, m, name, vars);
+        ok = !(*env)->ExceptionCheck(env);
+    }
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionDescribe(env);   /* (into logcat) */
+        (*env)->ExceptionClear(env);
+    }
+    if (!ok)
+        fprintf(stderr, "[LAUNCH] relaunch: %s\n", !m ? "no NgbActivity.relaunch" : !vars || !name ? "out of memory"
+                                                    : "NgbActivity.relaunch failed (logcat)");
+    if (name)
+        (*env)->DeleteLocalRef(env, name);
+    if (vars)
+        (*env)->DeleteLocalRef(env, vars);
+    (*env)->DeleteLocalRef(env, cls);
+    (*env)->DeleteLocalRef(env, act);
+    return ok;
+}
+
+/* (on a thread of its own: the caller is the game's, which the virtual CPU's signals and guest registers are
+ * about, and JNI attaches a thread for good) */
+static void *relaunch_thread(void *r)
+{
+    return (void *)(intptr_t)relaunch_call(r);
+}
+
+int ngb_android_relaunch(const char *lib, const char *const *names)
+{
+    struct relaunch r = { lib, names };
+    pthread_t t;
+    void *ok = NULL;
+    if (pthread_create(&t, NULL, relaunch_thread, &r) != 0 || pthread_join(t, &ok) != 0)
+        return 0;
+    return (int)(intptr_t)ok;
+}
+
 int SDL_main(int argc, char **argv)
 {
     (void)argc;
@@ -317,7 +388,11 @@ int SDL_main(int argc, char **argv)
     }
     seed_path();
     char log_path[1024];
+#ifdef TRILOGY_XBE   /* (the arcade's: the game's log.txt kept) */
+    snprintf(log_path, sizeof log_path, "%s/log-trilogy.txt", base ? base : ".");
+#else
     snprintf(log_path, sizeof log_path, "%s/log.txt", base ? base : ".");
+#endif
     FILE *log = fopen(log_path, "w");
     if (pipe(s_log_pipe) == 0) {
         setvbuf(stdout, NULL, _IOLBF, 0);

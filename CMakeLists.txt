@@ -330,10 +330,12 @@ endif()
 # NinjaTrilogy.xbe is the English build, NinjaTomoe.xbe the Japanese one (the game picks it when its
 # voices are set to Japanese): one program each, from tools/pipeline_trilogy.sh [tomoe]. Each is built
 # when its code has been generated. They draw with the GPU model's own NV2A renderer, so they need it.
+# On Android each is a library beside libmain.so (libtrilogy.so, libtomoe.so) with the same start as the game's
+# (src/android_main.c) and its touch controls: the app's process starts again into it (src/launch.c).
 
 function(ngb_arcade_program target output gen_dir xbe dsound)
     file(GLOB gen_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/${gen_dir}/*.c")
-    if(NOT gen_sources OR NOT NGB_NV2A_VK OR ANDROID)   # (not on Android yet)
+    if(NOT gen_sources OR NOT NGB_NV2A_VK)
         return()
     endif()
     # with its DirectSound hooks (src/audio, tools/take_dsound.py trilogy|tomoe)
@@ -360,7 +362,7 @@ function(ngb_arcade_program target output gen_dir xbe dsound)
             -Wno-parentheses-equality -Wno-tautological-compare
             -Wno-incompatible-pointer-types-discards-qualifiers)
     endif()
-    add_executable(${target}
+    set(sources
         src/trilogy/main.c
         src/launch.c
         src/recomp_manual.c
@@ -369,6 +371,11 @@ function(ngb_arcade_program target output gen_dir xbe dsound)
         $<TARGET_OBJECTS:${target}_gen>
         $<TARGET_OBJECTS:ngb_audio>
         $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/ngb.rc>)
+    if(ANDROID)
+        add_library(${target} SHARED ${sources} src/android_main.c src/android_gpu.c src/touch_pad.c)
+    else()
+        add_executable(${target} ${sources})
+    endif()
     target_link_libraries(${target} PRIVATE xboxrecomp xbox_nv2a_vk)
     target_compile_definitions(${target} PRIVATE NGB_NV2A_VK TRILOGY_XBE="${xbe}")
     if(NGB_TRILOGY_ABI_CHECK)
@@ -382,7 +389,14 @@ function(ngb_arcade_program target output gen_dir xbe dsound)
         ${XBOXRECOMP_DIR}/src/nv2a_vk/host
         ${XBOXRECOMP_DIR}/third_party/stb)
     set_target_properties(${target} PROPERTIES OUTPUT_NAME ${output})
-    if(WIN32)
+    if(ANDROID)   # (as libmain.so, above)
+        string(TOLOWER ${gen_dir} lib)
+        string(REPLACE "gen_" "" lib ${lib})
+        set_target_properties(${target} PROPERTIES OUTPUT_NAME ${lib})
+        target_link_options(${target} PRIVATE -Wl,-Bsymbolic)
+        target_include_directories(${target} PRIVATE ${NGB_ADRENOTOOLS_INCLUDE})
+        target_link_libraries(${target} PRIVATE android log m SDL2::SDL2 ${NGB_ADRENOTOOLS} ${NGB_LINKERNSBYPASS})
+    elseif(WIN32)
         set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE TRUE)
         target_link_libraries(${target} PRIVATE winmm dbghelp shell32 ole32)
     else()

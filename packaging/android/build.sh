@@ -13,7 +13,7 @@
 #
 # Needs: the Android SDK (ANDROID_HOME, default ~/Android/Sdk) with an NDK, build-tools and a platform, a JDK,
 # cmake, ninja, curl, git, python3 (with venv: Mesa's build tools go into one there), bison, flex. The
-# recompiled code must already be generated (tools/pipeline.sh).
+# recompiled code must already be generated (tools/pipeline.sh; the arcade's, tools/pipeline_trilogy.sh [tomoe]).
 set -euo pipefail
 trap 'echo "Failed: see the logs in ${out:-build/android-release} and ${deps:-build/android-deps}." >&2' ERR
 
@@ -134,9 +134,19 @@ fi
 # The game
 android_cmake "$repo" "$out/build" -DCMAKE_FIND_ROOT_PATH="$prefix" -DCMAKE_PREFIX_PATH="$prefix" \
     -DXBOXRECOMP_DIR="$(cd "${XBOXRECOMP_DIR:-$repo/xboxrecomp}" && pwd)" >"$out/configure.log"
-ninja -C "$out/build" -j"${JOBS:-$(nproc)}" ninja_gaiden_black >"$out/build.log"
+# the arcade's programs, libtrilogy.so and libtomoe.so, when their code has been generated (tools/pipeline_trilogy.sh)
+arcade=()
+for a in trilogy tomoe; do
+    if [ -n "$(ls "$repo"/src/recomp/gen_$a/*.c 2>/dev/null)" ]; then
+        arcade+=(ninja_$a)
+    else
+        arg=; [ $a = tomoe ] && arg=" tomoe"
+        echo "Warning: no src/recomp/gen_$a (tools/pipeline_trilogy.sh$arg): lib$a.so left out of the APK." >&2
+    fi
+done
+ninja -C "$out/build" -j"${JOBS:-$(nproc)}" ninja_gaiden_black "${arcade[@]}" >"$out/build.log"
 
-# The APK: SDL's Java side and our activity, the manifest, the two libraries
+# The APK: SDL's Java side and our activities, the manifest, the libraries
 apk=$out/apk
 rm -rf "${apk:?}"
 mkdir -p "$apk/classes" "$apk/dex" "$apk/root/lib/$abi"
@@ -165,6 +175,9 @@ cp "$deps/src/mesa-$mesa/docs/license.rst" "$lic/LICENSE-Mesa-Turnip.txt"
 cp "$apk/dex/classes.dex" "$apk/root/"
 ndkbin=$(echo "$ndk"/toolchains/llvm/prebuilt/*/bin)
 "$ndkbin/llvm-strip" -o "$apk/root/lib/$abi/libmain.so" "$out/build/libmain.so"
+for lib in libtrilogy libtomoe; do
+    [ ! -f "$out/build/$lib.so" ] || "$ndkbin/llvm-strip" -o "$apk/root/lib/$abi/$lib.so" "$out/build/$lib.so"
+done
 cp "$prefix/lib/libSDL2.so" "$apk/root/lib/$abi/"
 for lib in libhook_impl libmain_hook; do   # (libadrenotools' hooks: the two the driver loading uses)
     cp "$prefix/lib/$lib.so" "$apk/root/lib/$abi/"

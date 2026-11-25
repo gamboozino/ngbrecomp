@@ -276,7 +276,9 @@ static void kernel_data_init(void)
                     fprintf(stderr, "  Launch data: type %u from title 0x%08X, path '%.64s'\n",
                             BRIDGE_MEM32(page), BRIDGE_MEM32(page + 4), (const char *)((uintptr_t)page + 8 + g_xbox_mem_offset));
                 }
-                /* Used: a later restart of this program (Return to Main Menu) is not a launch again. */
+                /* Used: a later restart of this program (Return to Main Menu, or the app started again on
+                 * Android) is not a launch again. */
+                remove(lp);
 #if defined(_WIN32)
                 _putenv_s("RECOMP_LAUNCH_PAGE", "");
 #else

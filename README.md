@@ -122,8 +122,7 @@ the game tells the system how long its frames take, which keeps the CPU clocks u
 On Adreno GPUs (Snapdragon phones) whose own driver lacks what the game needs, it uses Turnip, Mesa's
 open driver for Adreno, built into the app; otherwise the phone's own.
 
-Not there yet on Android: the arcade Ninja Gaiden, and "Return to Main Menu" from the pause menu (it
-closes the game instead).
+Not there yet on Android: "Return to Main Menu" from the pause menu (it closes the game instead).
 
 **Reporting a problem:** open an issue and give the phone's model, its chip (Snapdragon, Tensor,
 Dimensity, Exynos...), the Android version, what happened, and the log: `log.txt` in
@@ -276,7 +275,8 @@ Other keys: **F10** frame-rate counter, **F11** or **Alt+Enter** fullscreen.
 
 The 1988 arcade Ninja Gaiden is a separate program on the disc (`NinjaTrilogy.xbe`, and
 `NinjaTomoe.xbe` for the Japanese version) that the Xbox switches to. It is recompiled too: the
-packages carry `NinjaTrilogy` and `NinjaTomoe` next to the game, and the game hands over to them from
+packages carry `NinjaTrilogy` and `NinjaTomoe` next to the game (on Android, `libtrilogy.so` and
+`libtomoe.so`: the app starts again into them, and back), and the game hands over to them from
 the main menu's **ARCADE NINJA GAIDEN** and the cabinet in Han's Bar. In the arcade, Back pauses:
 **B** quits back to Ninja Gaiden Black, **Y** goes to the arcade's title. It opens in the window mode
 the game was in.

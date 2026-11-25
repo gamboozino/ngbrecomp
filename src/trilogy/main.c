@@ -58,6 +58,40 @@ extern bool apu_hook_handle_mmio(PCONTEXT ctx, uintptr_t fault_addr, uint32_t fa
 
 static char s_game_dir[4096], s_save_dir[4096];
 
+/* xboxrecomp's NV2A renderer could not start (pgraph.c; on the PFIFO thread, the others running): its weak one
+ * exit()s, which ended the game at a black screen. Back to the game instead, as if the arcade had been left, with
+ * a notice there; the process ended without its teardown if even that cannot start (#192). */
+void nv2a_renderer_fatal(const char *detail)
+{
+    fprintf(stderr, "[ARCADE] the renderer could not start: %s\n", detail ? detail : "");
+    fflush(stderr);
+    ngb_launch_hand_back("The arcade cannot run on this GPU");
+    fflush(NULL);
+    _exit(1);
+}
+
+#ifdef __ANDROID__
+#include <SDL.h>
+#undef main   /* (SDL_main.h renames it: SDL_main is src/android_main.c's) */
+#include "input/xinput_xbox.h"
+/* The touch controls (src/touch_pad.c), the pad the game reads while no controller is connected: while a finger
+ * is on one; else the keys' own layout (xboxrecomp input/xinput_device.c) */
+int xbox_keyboard_map(const Uint8 *k, Uint32 mouse, XBOX_INPUT_STATE *st)
+{
+    extern void ngb_touch_map(XBOX_INPUT_STATE *st);
+    (void)k;
+    (void)mouse;
+    int any;
+    memset(st, 0, sizeof *st);
+    ngb_touch_map(st);
+    any = st->Gamepad.wButtons || st->Gamepad.sThumbLX || st->Gamepad.sThumbLY || st->Gamepad.sThumbRX ||
+          st->Gamepad.sThumbRY;
+    for (int i = 0; i < 8; i++)
+        any |= st->Gamepad.bAnalogButtons[i] != 0;
+    return any;
+}
+#endif
+
 static void set_default(const char *name, const char *value)
 {
     if (getenv(name))
@@ -162,6 +196,11 @@ static void *guest_main(void *unused)
     }
     g_xbox_mem_offset = xbox_GetMemoryOffset();
 
+    {   /* NGB_TEST_ARCADE_NO_GPU=2 (testing): as if the renderer could not start (src/launch.c takes 1) */
+        const char *t = getenv("NGB_TEST_ARCADE_NO_GPU");
+        if (t && !strcmp(t, "2"))
+            nv2a_renderer_fatal("NGB_TEST_ARCADE_NO_GPU=2");
+    }
     Nv2aVkOptions o = { .headless = getenv("NGB_RENDERER") && !strcmp(getenv("NGB_RENDERER"), "null") };
     if (xbox_Nv2aVkStart(&o) != 0) {
         fprintf(stderr, "Cannot start the GPU.\n");

@@ -37,6 +37,16 @@ static bool s_push_descriptor_enabled;
  * rendering and synchronization2 as extensions: what the Direct3D renderer needs, the same. */
 static bool s_dynamic_rendering_ext, s_sync2_ext;
 
+/* xboxrecomp: the features xemu's own drawing needs that the device lacks, by name, comma-separated ("" none),
+ * once a device was chosen: a host whose other program draws with this renderer (ngb-recomp's arcade, src/launch.c)
+ * asks before starting it. NULL before. */
+static char s_missing_draw[256];
+static bool s_missing_draw_known;
+const char *nv2a_vk_missing_draw_features(void)
+{
+    return __atomic_load_n(&s_missing_draw_known, __ATOMIC_ACQUIRE) ? s_missing_draw : NULL;
+}
+
 /* xboxrecomp: a Vulkan loader of the host's own choosing, its vkGetInstanceProcAddr (Android: Turnip, Mesa's
  * driver for Adreno, through libadrenotools: ngb-recomp's src/android_gpu.c); by default none, the system's. */
 __attribute__((weak)) PFN_vkGetInstanceProcAddr nv2a_vk_custom_loader(void)
@@ -616,7 +626,13 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
                          || getenv("NGB_D3D_KEEP_NV2A");
 #endif
     bool all_required_features_available = true;
+    s_missing_draw[0] = 0;
     for (int i = 0; i < ARRAY_SIZE(desired_features); i++) {
+        if (desired_features[i].required && desired_features[i].available != VK_TRUE) {
+            size_t len = strlen(s_missing_draw);
+            snprintf(s_missing_draw + len, sizeof s_missing_draw - len, "%s%s", len ? ", " : "",
+                     desired_features[i].name);
+        }
         if (desired_features[i].required && require_draw_features &&
             desired_features[i].available != VK_TRUE) {
             fprintf(stderr,
@@ -627,6 +643,7 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         *desired_features[i].enabled = desired_features[i].available;
     }
 
+    __atomic_store_n(&s_missing_draw_known, true, __ATOMIC_RELEASE);
     if (!all_required_features_available) {
         error_setg(errp, "Device does not support required features");
         return false;
