@@ -1017,7 +1017,16 @@ static void *vblank_thread(void *unused)
             /* At most 4 ms by the clock, not 40 naps of 0.1 ms: where the kernel rounds a short sleep up to a
              * millisecond or more, those took 40 ms and more on every tick without a flip (a 30 fps movie's
              * every other tick), the clock fell behind and movies played at 20 fps (#244) */
-            int64_t flip_by = g_get_monotonic_time() + 4000;
+            /* NV2A_FLIP_WAIT_MS: how long a tick waits for the title's flip (4 by default; #288: a title running
+             * a few ms late on a slow CPU misses the tick instead, where 0.9.73's naps waited 20 ms and more on
+             * Windows) */
+            static int wait_us = -1;
+            if (wait_us < 0) {
+                const char *e = getenv("NV2A_FLIP_WAIT_MS");
+                int ms = e ? atoi(e) : 4;
+                wait_us = (ms < 0 ? 0 : ms > 40 ? 40 : ms) * 1000;
+            }
+            int64_t flip_by = g_get_monotonic_time() + wait_us;
             while (__atomic_load_n(&nv2a_pcrtc_start_writes, __ATOMIC_ACQUIRE) == flips &&
                    g_get_monotonic_time() < flip_by)
                 vcpu_nap_us(100);

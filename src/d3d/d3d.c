@@ -261,6 +261,22 @@ int d3d_hook(int fn)
         s_frame_thread = 1;
         recomp_load_sample(RECOMP_LOAD_GAME);   /* the threads' CPU time in the log every five seconds */
         recomp_load_report();
+        {   /* NGB_TEST_SWAP_BURN_US=<us>[:<up to us more>]: the game thread kept busy that long each frame, a test
+             * standing in for a slower CPU (#288) */
+            static int burn = -1, more;
+            if (burn < 0) {
+                const char *e = getenv("NGB_TEST_SWAP_BURN_US"), *c = e ? strchr(e, ':') : NULL;
+                burn = e ? atoi(e) : 0;
+                more = c ? atoi(c + 1) : 0;
+            }
+            if (burn > 0) {
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                long long until = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000 + burn + (more > 0 ? rand() % more : 0);
+                do clock_gettime(CLOCK_MONOTONIC, &ts);
+                while (ts.tv_sec * 1000000LL + ts.tv_nsec / 1000 < until);
+            }
+        }
     }
     if (s_hle < 0) {
         const char *e = getenv("NGB_RENDERER");
