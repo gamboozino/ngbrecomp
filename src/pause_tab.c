@@ -80,7 +80,7 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_SKIP, S_LAUNCHER, S_MSAA, S_HEALTH, S_NINPO, S_ESSENCE, S_ALLDIFF, S_SCARABS, S_ALLCOST, S_EXTRACOST,
        S_GLOW, S_QUICKFREEZE, S_QUICKSCALE, S_INFITEMS, S_INFAMMO, S_POSAUDIO, S_HUD, S_AUDIOOUT,
        S_MISSIONS, S_ARCADE, S_MOVIES, S_LOADDETAIL, S_RTHREAD, S_INTERCEPT, S_ALLWEAP,
-       S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
+       S_ESSCHARGE, S_CUTSKIP, S_DPAD_UTCAM /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
        S_HUDSTYLE, S_HUDASPECT, S_TALISMAN, S_CROSSHAIR, S_INTERP,
        S_UNUSED46 /* (taken, with no row: cheats_unlocked, src/ingame_menu.c) */, S_SHURIKEN,
@@ -94,7 +94,8 @@ static const char *const s_label[S_COUNT] = {
     "Golden Scarabs", "All Costumes", "Extra Costume", "Bloom", "Quick Menu Pause",
     "Quick Menu", "Infinite Items", "Infinite Projectiles", "Positional Audio", "HUD",
     "Audio Output", "Missions", "Arcade Ninja Gaiden", "Movie Theater", "Lower Detail Under Load",
-    "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
+    "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene",
+    "D-Pad Camera While Charging",
     "Responsive Menus", "All Armlets", "All Scrolls",
     "One Hit Kill", "Unlocks", "HUD Style", "HUD Aspect", "Talisman of Rebirth",
     "Bow Crosshair", "Frame Interpolation", "", "Shuriken Icon",
@@ -135,7 +136,7 @@ static const char *const s_help[S_COUNT] = {
     "Every weapon, at Level 1 or at its highest level, with its ammunition. Turned off, they are taken back.",
     "Holding attack no longer charges an Ultimate Technique: only absorbing essence does.",
     "Start skips any movie or in-game cutscene, watched before or not. Off: as on the Xbox.",
-    "",
+    "On: while charging an Ultimate Technique the D-pad turns the camera; the left stick still aims the release.",
     "Start at the title, in a cutscene's opening wait and after equipping in the pause menu works at once.",
     "Every armlet and band. Turned off, they are taken back.",
     "The Izuna Drop, Counter Attack and Guillotine Throw scrolls. Turned off, they are taken back.",
@@ -163,7 +164,8 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_HUDASPECT, S_SKIP },   /* (a full page) */
     { S_POSAUDIO, S_AUDIOOUT, -1 },
     /* (no Talisman of Rebirth: equipped from the item page, src/talisman.c) */
-    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_CROSSHAIR, S_SHURIKEN, -1 },
+    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_DPAD_UTCAM, S_RESPONSIVE, S_CROSSHAIR,
+      S_SHURIKEN },
     { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
     { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },

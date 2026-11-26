@@ -105,7 +105,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
  * MOVIE THEATER unlocked (src/cheats.c, saved), 29 Lower Detail Under Load (src/d3d/d3d.c), 30 the render thread
- * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats), 41 HUD Style (#121), 42 HUD Aspect, 43 Talisman of Rebirth, 44 Bow Crosshair, 45 Frame Interpolation (src/d3d/gpu/threaded.cpp), 47 Shuriken Icon (src/hud.c). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
+ * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 D-Pad Camera While Charging (src/bindings.c, #150; the GPU driver was), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats), 41 HUD Style (#121), 42 HUD Aspect, 43 Talisman of Rebirth, 44 Bow Crosshair, 45 Frame Interpolation (src/d3d/gpu/threaded.cpp), 47 Shuriken Icon (src/hud.c). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
  * cheats' not. */
 int ngb_cheat(int which);
 void ngb_cheat_set(int which, int on);
@@ -187,6 +187,7 @@ int ngb_pc_setting(int which)
     case 31: return s_running.intercept;
     case 33: return s_running.essence_charging;
     case 34: return s_running.skip_cutscenes;
+    case 35: return s_running.dpad_ut_camera;
     case 36: return s_running.responsive_menus;
     case 25: return s_running.audio_output;
     default: return s_running.show_fps;
@@ -237,6 +238,7 @@ void ngb_pc_set_setting(int which, int value)
     case 31: s_running.intercept = value < 0 ? 0 : value > 2 ? 2 : value; break;
     case 33: s_running.essence_charging = !!value; break;
     case 34: s_running.skip_cutscenes = !!value; break;
+    case 35: s_running.dpad_ut_camera = !!value; break;
     case 36: s_running.responsive_menus = !!value; break;
     case 25:   /* the mixer's at the next start; the arcade's at its next */
         s_running.audio_output = value < 0 ? 0 : value > 2 ? 2 : value;

@@ -227,6 +227,12 @@ absorbed while charging (sub_001E2EB0) raises the level itself and sets the coun
 mark (0x65, 0xDD). With the option on, the count's steps of a few frames are taken back each frame, so only
 essence raises the level.
 
+D-Pad Camera While Charging (Gameplay; `src/bindings.c`, `src/ut_charge.c`, #150): while that charging action
+(kind 0xB9) is on, the option gives the d-pad to the camera's right stick on the host side, before inversion
+and Camera Sensitivity; it clears the d-pad buttons so no bound action or pair fires, and leaves the left stick
+alone for the release's direction. The keyboard's bound d-pad keys and the Android touch pad go through the same
+test. Off unless chosen.
+
 Skip Any Cutscene (Gameplay; `src/cutscene_skip.c`, #139): sub_001DBEE0 runs the events, the in-game
 cutscenes among them, once a frame, and Start skips the one playing when Start is down (bit 0x10 of the player's
 buttons at 0xD219A8, 0x78 a player), the event has been watched (one byte an event from 0xDB9477, by its number at
