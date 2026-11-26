@@ -650,6 +650,14 @@ public:
         else if (held_) nv2a_present_set_external(held_->image, held_->w, held_->h);
         held_ = nullptr;
     }
+    void ShowHeldRepeated(int again, int64_t step_us) override {
+        if (!held_) return;
+        nv2a_present_set_external(held_->image, held_->w, held_->h);
+        int64_t t0 = nv2a_present_now_us();   // (after it: it can wait for a refresh)
+        for (int i = 1; i <= again; i++)
+            nv2a_present_set_external_at(held_->image, held_->w, held_->h, t0 + step_us * i);
+        held_ = nullptr;
+    }
     bool replay_ = false;   // a frame drawn again (frame interpolation)
     // the replay's render targets its own (targets_' key, bits 61-62): the game's keep what its frame drew (a
     // motion blur building on the last picture builds on the last of its own kind)
@@ -743,6 +751,9 @@ private:
     VkSampler edge_sampler_ = VK_NULL_HANDLE;
     uint32_t edge_frames_ = 0;
     bool edge_use_ = false;   // (else the bars black: null2d_, cleared)
+    bool barred_last_ = false;   // the frame before shown with bars (a 2D screen of its own art)
+    uint32_t fed_frames_ = 0;    // frames the bars were kept over a fading menu
+    bool edge_fast_ = false;     // the fill follows the picture at once (a menu fading out)
     void EdgeSample(Image& src, float bars, float bars_y);
     int display_next_ = 0;
     // the quality settings (nv2a_quality_get), read once a frame: display-sized targets render
@@ -2278,7 +2289,7 @@ void VulkanBackend::EdgeSample(Image& src, float bars, float bars_y) {
     VkRect2D sc{{0, 0}, {16, 4}};
     d_.vkCmdSetViewport(cmd_, 0, 1, &vpt);
     d_.vkCmdSetScissor(cmd_, 0, 1, &sc);
-    const float bc[4] = {0, 0, 0, first ? 1.0f : 0.04f};   // the first frame: as it is
+    const float bc[4] = {0, 0, 0, first ? 1.0f : edge_fast_ ? 0.3f : 0.04f};   // the first frame: as it is
     d_.vkCmdSetBlendConstants(cmd_, bc);
     d_.vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
     VkDescriptorImageInfo im0{VK_NULL_HANDLE, src.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -5335,14 +5346,24 @@ void VulkanBackend::Present(const Surface& front) {
                              presents_, pk_.stretched, ScreenFrame(threed_), threed_, offscreen3d_,
                              ngb_frame_draws, paused_now_, paused_cover_);
             float bars = 0, bars_y = 0;
+            bool fed_back = false;
             if (pk_.stretched && ScreenFrame(threed_) && t->gw >= 640) {   // (not in play: 3D the screen's shape)
                 float km = pk_.hud_shape * 4.0f / 3.0f, ky = 0.75f / pk_.hud_shape;
                 if (km < 0.999f) bars = (1 - km) / 2;
                 if (ky < 0.999f) bars_y = (1 - ky) / 2;
                 // a menu drawn over the paused game (the save statue's) shows the game around it; the menus with
                 // their own art over the whole screen (the pause menu's) draw no paused game, and keep the bars
-                if (paused_now_) bars = bars_y = 0;
+                // -- as does such a menu closing: for a dozen frames the game draws the frame before over the
+                // whole screen (its fade), which is the menu's own picture again, black beyond its 16:9, not the
+                // paused game. The bars stay until a frame of the game's 3D, their fill following the fade.
+                // (for a fade's length at most: a menu over the paused game entered from a barred screen keeps
+                // no bars after it)
+                fed_back = paused_now_ && barred_last_ && fed_frames_ < 30;
+                fed_frames_ = fed_back ? fed_frames_ + 1 : 0;
+                if (paused_now_ && !fed_back) bars = bars_y = 0;
             }
+            barred_last_ = bars > 0 || bars_y > 0;
+            edge_fast_ = fed_back;
             if (t->gw >= 640) HudGroup(float(t->gw), float(t->gh));
             static int edge_fill = -1;   // NGB_BAR_FILL=0: black bars
             if (edge_fill < 0) edge_fill = !(std::getenv("NGB_BAR_FILL") && *std::getenv("NGB_BAR_FILL") == '0');

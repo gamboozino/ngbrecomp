@@ -96,6 +96,9 @@ public:
     // presenter's microsecond clock; 0 at once)
     virtual void SetHold(bool) {}
     virtual void ShowHeld(int64_t /*at_us*/) {}
+    // the held picture now and `again` more times, step_us apart: a frame without in-between pictures (a menu,
+    // a cut) still shown at the display's rate, which on a variable-refresh display otherwise jumps (it flickers)
+    virtual void ShowHeldRepeated(int /*again*/, int64_t /*step_us*/) { ShowHeld(0); }
 
 private:
     uint32_t fence_ = 0;

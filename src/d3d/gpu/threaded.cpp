@@ -693,7 +693,9 @@ private:
             inner_->ReplayShowAt(0);
             inner_->ShowHeld(base + step * (k - 1));
         } else {
-            inner_->ShowHeld(0);
+            // (no pictures between: the frame's own at their times too, so the display is given as many)
+            if (k > 1 && whole) inner_->ShowHeldRepeated(k - 1, int64_t(frame_us_ / k));
+            else inner_->ShowHeld(0);
             inner_->ReplaySkipped();
         }
         presented_ = false;   // (the replay's own present)
