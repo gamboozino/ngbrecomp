@@ -181,6 +181,7 @@ int ngb_pc_setting(int which)
     case 45: return s_running.frame_interp;
     case 46: return s_running.cheats_unlocked;
     case 47: return s_running.shuriken_icon;
+    case 48: return s_running.touch_layout;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 31: return s_running.intercept;
@@ -230,6 +231,7 @@ void ngb_pc_set_setting(int which, int value)
     case 45: s_running.frame_interp = value < 0 ? 0 : value > 3 ? 3 : value; break;   /* at the next frame (src/d3d/hle.cpp) */
     case 46: s_running.cheats_unlocked = !!value; break;
     case 47: s_running.shuriken_icon = !!value; break;
+    case 48: s_running.touch_layout = value == 1; break;   /* (src/touch_pad.c's switch) */
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 31: s_running.intercept = value < 0 ? 0 : value > 2 ? 2 : value; break;

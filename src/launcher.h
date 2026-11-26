@@ -33,6 +33,7 @@ typedef struct NgbSettings {
     int frame_interp;       /* Graphics > Frame Interpolation (src/d3d/gpu/threaded.cpp, #226): 0 off, 1 Full Rate, 2 Half Rate, 3 2x */
     int text_language;      /* settings.ini text_language (no menu, #236): 0 auto (the system's language), 1 English, 2 Japanese */
     int bow_crosshair;      /* Gameplay > Bow Crosshair: a dot in the middle while aiming a bow in first person (src/camera.c, #228) */
+    int touch_layout;       /* Android: the touch controls' layout, 0 the default, 1 Classic (src/touch_pad.c, #285) */
     int shuriken_icon;      /* Gameplay > Shuriken Icon: the HUD's projectile box for the Shuriken and Windmill Shuriken too (src/hud.c, #276) */
     int cheats_unlocked;    /* the Cheats asked for once ("Use cheats?" Yes): until then they stay locked (src/pause_tab.c) */
     int hud_aspect;         /* Display > HUD Aspect: 0 stretched as the game's widescreen mode draws it, 1 its own shape (the renderer narrows only the HUD's elements: src/d3d/vk/backend.cpp, #220 #219) */

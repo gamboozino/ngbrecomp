@@ -52,7 +52,7 @@ extern const int ngb_touch_png_count;   /* (CMakeLists.txt: the stand-in pieces 
 __attribute__((weak)) const NgbPic *ngb_gp_touch(const char *piece);
 
 enum Kind { BUTTON, STICK, DPAD };
-enum Id { LSTICK, RSTICK, DPAD_ID, BA, BB, BX, BY, LB, RB, LT, RT, BACK, START, LS, RS, NCTRL };
+enum Id { LSTICK, RSTICK, DPAD_ID, BA, BB, BX, BY, LB, RB, LT, RT, BACK, START, LS, RS, SWAP, NCTRL };
 
 typedef struct {
     enum Kind kind;
@@ -85,14 +85,53 @@ static const Ctrl s_ctrl[NCTRL] = {
                                                        nearer each other, both pressed at once for a reset: #284) */
     [LS]      = { BUTTON, 0, 0.09f,  0.90f,  0.04f,  "LS", "LS", 0xE6E6E6, "click_l" },
     [RS]      = { BUTTON, 1, 0.09f,  0.90f,  0.045f, "RS", "RS", 0xE6E6E6, "click_r" },
+    [SWAP]    = { BUTTON, 0, 0.05f,  0.36f,  0.035f, "layout", "<>", 0xE6E6E6, "swap" },   /* the layout switch */
 };
+
+/* Classic: the places of 0.9.x's controls, in the same pictures (#285: Block held by a left finger at the top
+ * left, the camera's RT at the top right with the camera toggle (RS) under it, the left stick low and large where
+ * the thumb rests, the face buttons lower). Start and Back stay in the middle (#284). The switch beside the left
+ * stick, at the left edge, changes between this and the default, kept in settings.ini (touch_layout). */
+static const struct { int edge; float x, y, r; } s_classic[NCTRL] = {
+    [LSTICK]  = { 0, 0.30f, 0.70f, 0.17f },
+    [RSTICK]  = { 1, 0.72f, 0.66f, 0.12f },
+    [DPAD_ID] = { 0, 0.74f, 0.84f, 0.12f },
+    [BA]      = { 1, 0.28f, 0.70f, 0.075f },
+    [BB]      = { 1, 0.16f, 0.58f, 0.07f },
+    [BX]      = { 1, 0.40f, 0.58f, 0.075f },
+    [BY]      = { 1, 0.28f, 0.46f, 0.075f },
+    [LB]      = { 0, 0.30f, 0.28f, 0.05f },
+    [RB]      = { 1, 0.30f, 0.28f, 0.05f },
+    [LT]      = { 0, 0.13f, 0.14f, 0.085f },
+    [RT]      = { 1, 0.13f, 0.14f, 0.085f },
+    [BACK]    = { 2, -0.085f, 0.89f, 0.055f },
+    [START]   = { 2, 0.085f, 0.89f, 0.055f },
+    [LS]      = { 0, 0.09f, 0.90f, 0.04f },
+    [RS]      = { 1, 0.09f, 0.30f, 0.045f },
+    [SWAP]    = { 0, 0.05f, 0.40f, 0.035f },
+};
+int ngb_pc_setting(int which);                    /* src/ingame_menu.c (48: the touch layout) */
+void ngb_pc_set_setting(int which, int value);
+#pragma weak ngb_pc_setting
+#pragma weak ngb_pc_set_setting
+static int s_layout = -1, s_layout_save;          /* 0 the default, 1 Classic (under s_lock); to be saved */
+static unsigned s_serial = 1;
+/* (under s_lock, on the game's side: touch_init) the layout, read from the settings; the controls are drawn only
+ * once it is known, so never in one layout and found in the other */
+static void layout_known(void)
+{
+    if (s_layout < 0) {
+        s_layout = ngb_pc_setting && ngb_pc_setting(48) == 1;
+        s_serial++;
+    }
+}
 
 static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 static float s_aspect = 16.0f / 9;            /* the window's width over its height */
 static bool s_down[NCTRL];
 static float s_stick[2][2];                   /* each stick's knob, -1..1 (y down) */
 static int s_dpad;                            /* XBOX_GAMEPAD_DPAD_* bits */
-static unsigned s_serial = 1;                 /* +1 each change of what the picture shows */
+/* s_serial: +1 each change of what the picture shows (declared with the layout, above) */
 static int s_art_shown;                       /* the controls drawn (the last picture's; any thread reads it) */
 
 #define MAX_FINGERS 10
@@ -110,12 +149,20 @@ typedef struct { float x, y, r; } Place;
 
 static int s_standin_places;   /* the stand-ins shown (under s_lock; d_standin the picture's copy) */
 
-static Place place_at(const Ctrl *c, float aspect, int standin)
+static Place place_at(const Ctrl *c, float aspect, int standin, int layout)
 {
     if (standin && (c == &s_ctrl[LB] || c == &s_ctrl[RB]))
         c = &s_ctrl[c == &s_ctrl[LB] ? RB : LB];
     Place p = { c->x, c->y, c->r };
-    if (aspect < NARROW) {
+    int edge = c->edge;
+    if (layout == 1) {
+        int i = (int)(c - s_ctrl);
+        p.x = s_classic[i].x;
+        p.y = s_classic[i].y;
+        p.r = s_classic[i].r;
+        edge = s_classic[i].edge;
+    }
+    if (aspect < NARROW && layout != 1) {
         if (c == &s_ctrl[LT]) {
             p.x = 0.44f;
             p.y = 0.27f;
@@ -129,26 +176,40 @@ static Place place_at(const Ctrl *c, float aspect, int standin)
             p.y = 0.79f;
         }
     }
+    if (layout == 1 && aspect < 1.7f && (c == &s_ctrl[LSTICK] || c == &s_ctrl[DPAD_ID])) {
+        /* Classic on a less wide screen (16:10, 4:3): the left stick a little smaller and further out, the d-pad
+         * between it and Back, as large as fits there */
+        float room0 = 0.25f + 0.14f, room1 = aspect / 2 - 0.14f, r = (room1 - room0) / 2.2f;
+        if (c == &s_ctrl[LSTICK]) {
+            p.x = 0.25f;
+            p.r = 0.14f;
+        } else {
+            p.r = r < 0.06f ? 0.06f : r > 0.12f ? 0.12f : r;
+            p.x = (room0 + room1) / 2;
+        }
+        p.x = edge == 2 ? aspect / 2 + p.x : edge ? aspect - p.x : p.x;
+        return p;
+    }
     if (c == &s_ctrl[DPAD_ID]) {   /* right of the game's quick menu (the items' cross, which it works): that is
                                     * at the lower left of a 16:9 picture, in the middle of a wider screen */
         float clear = (aspect - 16.0f / 9) / 2 + 0.50f, most = aspect / 2 - 0.28f;   /* (and left of Back) */
         p.x = p.x > clear ? p.x : clear;
         p.x = p.x < most ? p.x : most;
     }
-    if (c == &s_ctrl[RSTICK] && aspect >= NARROW) {   /* (in from the middle on a less wide screen) */
+    if (c == &s_ctrl[RSTICK] && aspect >= NARROW && layout != 1) {   /* (in from the middle on a less wide screen) */
         float most = aspect / 2 - 0.12f;   /* (at 3:2 the right stick clear of X) */
         p.x = p.x < most ? p.x : most;
     }
-    if (c == &s_ctrl[RT] && aspect < 1.7f)
+    if (c == &s_ctrl[RT] && aspect < 1.7f && layout != 1)
         p.y = 0.26f;   /* RT under the health emblem on a less wide screen (16:10, 4:3), where the HUD comes in
                         * over its corner */
-    p.x = c->edge == 2 ? aspect / 2 + p.x : c->edge ? aspect - p.x : p.x;
+    p.x = edge == 2 ? aspect / 2 + p.x : edge ? aspect - p.x : p.x;
     return p;
 }
 
 static Place place(const Ctrl *c)
 {
-    return place_at(c, s_aspect, s_standin_places);
+    return place_at(c, s_aspect, s_standin_places, s_layout == 1);
 }
 
 /* The control under (x, y) (screen heights), the sticks and pad found from a little way off */
@@ -255,6 +316,15 @@ static int SDLCALL touch_watch(void *unused, SDL_Event *ev)
         int c = hit(x, y, false);
         for (f = 0; c >= 0 && f < MAX_FINGERS && s_finger[f].used; f++)
             ;
+        if (c == SWAP && f < MAX_FINGERS) {   /* the other layout: all let go, nothing held across it */
+            memset(s_finger, 0, sizeof s_finger);
+            memset(s_down, 0, sizeof s_down);
+            memset(s_stick, 0, sizeof s_stick);
+            s_dpad = 0;
+            s_layout = s_layout != 1;
+            s_layout_save = 1;
+            f = 0;
+        }
         if (c >= 0 && f < MAX_FINGERS) {
             xbox_InputTouchUsed();   /* (the pad's prompts, not the keyboard's) */
             s_finger[f].used = true;
@@ -318,6 +388,9 @@ static void touch_init(void)
     static int done;
     if (__atomic_exchange_n(&done, 1, __ATOMIC_ACQ_REL))
         return;
+    pthread_mutex_lock(&s_lock);
+    layout_known();
+    pthread_mutex_unlock(&s_lock);
     SDL_AddEventWatch(touch_watch, NULL);
 }
 
@@ -326,6 +399,12 @@ void ngb_touch_map(XBOX_INPUT_STATE *st)
 {
     touch_init();
     let_go();
+    pthread_mutex_lock(&s_lock);
+    int save = s_layout_save ? s_layout : -1;   /* (written here, on the game's side, not on Android's UI thread) */
+    s_layout_save = 0;
+    pthread_mutex_unlock(&s_lock);
+    if (save >= 0 && ngb_pc_set_setting)
+        ngb_pc_set_setting(48, save);
     pthread_mutex_lock(&s_lock);
     WORD b = st->Gamepad.wButtons | (WORD)s_dpad;
     if (s_down[BACK]) b |= XBOX_GAMEPAD_BACK;
@@ -358,6 +437,7 @@ static uint32_t *s_px;   /* the picture being drawn (the presenter's buffer), an
 static int s_w, s_h;
 static bool d_down[NCTRL];
 static float d_stick[2][2], d_aspect;
+static int d_layout;
 static int d_dpad;
 
 typedef struct { uint8_t *px; int w, h; } Sprite;   /* straight-alpha RGBA */
@@ -682,6 +762,7 @@ static uint32_t *s_bg;
 static int s_bg_w, s_bg_h;
 static float s_bg_aspect;
 static enum Art s_bg_art;
+static int s_bg_layout = -1;
 
 static void draw_idle(void)
 {
@@ -689,7 +770,7 @@ static void draw_idle(void)
     memset(s_px, 0, sizeof(uint32_t) * (size_t)s_w * s_h);
     for (int i = 0; i < NCTRL; i++) {
         const Ctrl *c = &s_ctrl[i];
-        Place at = place_at(c, d_aspect, s_art == ART_STANDIN);
+        Place at = place_at(c, d_aspect, s_art == ART_STANDIN, d_layout);
         float cx = at.x * u, cy = at.y * u, r = at.r * u;
         if (c->kind == STICK)
             draw_piece("pad", cx, cy, 2 * r, 2 * r, IDLE);
@@ -721,7 +802,8 @@ static void draw_all(void)
     size_t px = (size_t)s_w * s_h;
     bool fresh = false;
     uint32_t *out = s_px;
-    if (!s_bg || !s_cv || s_bg_w != s_w || s_bg_h != s_h || s_bg_aspect != d_aspect || s_bg_art != s_art) {
+    if (!s_bg || !s_cv || s_bg_w != s_w || s_bg_h != s_h || s_bg_aspect != d_aspect || s_bg_art != s_art ||
+        s_bg_layout != d_layout) {
         free(s_bg);
         free(s_cv);
         s_bg = malloc(sizeof(uint32_t) * px);
@@ -742,6 +824,7 @@ static void draw_all(void)
         s_bg_h = s_h;
         s_bg_aspect = d_aspect;
         s_bg_art = s_art;
+        s_bg_layout = d_layout;
         s_bg_gen++;
         fresh = true;
     } else if (s_cvrec.n >= 0) {
@@ -756,7 +839,7 @@ static void draw_all(void)
     s_rec = &s_cvrec;
     for (int i = 0; i < NCTRL; i++) {
         const Ctrl *c = &s_ctrl[i];
-        Place at = place_at(c, d_aspect, s_art == ART_STANDIN);
+        Place at = place_at(c, d_aspect, s_art == ART_STANDIN, d_layout);
         float cx = at.x * u, cy = at.y * u, r = at.r * u;
         bool on = d_down[i];
         if (c->kind == STICK) {
@@ -879,6 +962,10 @@ bool nv2a_overlay_picture(uint32_t win_w, uint32_t win_h, uint32_t *px, size_t m
         pthread_mutex_unlock(&s_lock);
         return false;
     }
+    if (s_layout < 0) {           /* (not drawn before the game's side has read the layout: the settings are its) */
+        pthread_mutex_unlock(&s_lock);
+        return false;
+    }
     unsigned now = s_serial;
     bool changed = *serial != now;
     if (changed) {
@@ -886,6 +973,7 @@ bool nv2a_overlay_picture(uint32_t win_w, uint32_t win_h, uint32_t *px, size_t m
         memcpy(d_stick, s_stick, sizeof d_stick);
         d_dpad = s_dpad;
         d_aspect = s_aspect;
+        d_layout = s_layout == 1;   /* (known: layout_known above) */
     }
     pthread_mutex_unlock(&s_lock);
     *ow = (uint32_t)w;

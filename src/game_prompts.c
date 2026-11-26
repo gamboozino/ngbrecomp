@@ -1903,6 +1903,33 @@ static Im start_back(int start)
     return a;
 }
 
+/* The touch layout's switch (src/touch_pad.c): Back's small black ball with two arrows, one over the other, the
+ * top one right and the lower one left, in Start and Back's ink and shadow */
+static Im swap_piece(void)
+{
+    Im a = ball_black(SMALL_S, 1);
+    Cv cv = cv_new(TN / 2, TN / 2, 2);
+    double q = 3.0 * SMALL_S / 2, m = TN / 4.0;
+    for (int k = 0; k < 2; k++) {
+        double sg = k ? -1 : 1, yc = m + (k ? 0.5 : -0.5) * q, t = 0.15 * q;
+        Pts p = { .n = 0 };
+        pt(&p, m - sg * 0.95 * q, yc - t); pt(&p, m + sg * 0.15 * q, yc - t);
+        pt(&p, m + sg * 0.15 * q, yc - 0.42 * q); pt(&p, m + sg * 0.95 * q, yc);
+        pt(&p, m + sg * 0.15 * q, yc + 0.42 * q); pt(&p, m + sg * 0.15 * q, yc + t);
+        pt(&p, m - sg * 0.95 * q, yc + t);
+        cv_poly(&cv, &p, 255);
+    }
+    Mk mk = cv_mask(&cv), sh = mk_new(mk.w, mk.h);
+    int off = SMALL_S / 8;
+    for (int y = off; y < mk.h; y++)
+        for (int x = off; x < mk.w; x++)
+            MV(sh, x, y) = MV(mk, x - off, y - off);
+    static const float black[3] = { 0, 0, 0 };
+    ink(a, sh, black, 0, 0, 0.6f);
+    ink(a, mk, k_ink, 0, 0, 1);
+    return a;
+}
+
 /* The L / R plate without its letter, 21 x 21 at scale s: the game's face and its two-step bevels (their greys
  * the plate's own, read mid-edge), the corners mitred */
 static Im plate_drawn(int s)
@@ -2327,6 +2354,7 @@ static const char *const k_touch[] = {
     "button_a_lit", "button_b_lit", "button_x_lit", "button_y_lit", "button_black_lit", "button_white_lit",
     "trigger_l_lit", "trigger_r_lit", "back_lit", "start_lit", "click_l_lit", "click_r_lit", "nub_lit",
     "pad", "pad_lit", "dpad", "dpad_north_lit", "dpad_south_lit", "dpad_west_lit", "dpad_east_lit",
+    "swap", "swap_lit",
 };
 #define TOUCH_N ((int)(sizeof k_touch / sizeof k_touch[0]))
 static NgbPic s_touch[TOUCH_N];
@@ -2379,6 +2407,23 @@ static void build_touch(void)
     tmp_release();
     for (int l = 1; l <= 4; l++) {
         s_touch[28 + l] = to_pic(dpad_arm(l));
+        tmp_release();
+    }
+    {   /* the layout switch, held as Back is */
+        Im base = swap_piece(), lit;
+        s_touch[33] = to_pic(base);
+        lit = im_copy(base);
+        double lim = BALL_R * SMALL_S;
+        for (int y = 0; y < TN; y++)
+            for (int x = 0; x < TN; x++) {
+                float *p = PX(lit, x, y);
+                if (hypot(x + 0.5 - TN / 2.0, y + 0.5 - TN / 2.0) < lim)
+                    for (int c = 0; c < 3; c++)
+                        p[c] = clip01(p[c] * 1.25 + 0.05);
+                else
+                    p[3] = clip01(p[3] * 1.9);
+            }
+        s_touch[34] = to_pic(lit);
         tmp_release();
     }
 }
@@ -2485,7 +2530,7 @@ static void dump_touch(const char *dir)
  * them from its first frame, before the game's textures are read, and does not make them again. version.txt,
  * written last, says which drawing of them they are; another (or none) and they are made and saved again. */
 
-#define TOUCH_ART_VERSION 4   /* raised whenever the pieces are drawn differently (and each release redraws them) */
+#define TOUCH_ART_VERSION 5   /* raised whenever the pieces are drawn differently (and each release redraws them) */
 
 unsigned char *stbi_load_from_memory(const unsigned char *buf, int len, int *x, int *y, int *comp, int req);
 void stbi_image_free(void *p);

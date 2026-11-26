@@ -217,6 +217,8 @@ void ngb_settings_load(NgbSettings *s)
             s->text_language = !SDL_strncasecmp(val, "en", 2) ? 1 : !SDL_strncasecmp(val, "ja", 2) ? 2 : 0;   /* english, en, Japanese, ja... */
         } else if (!strcmp(key, "bow_crosshair")) {
             s->bow_crosshair = atoi(val) != 0;
+        } else if (!strcmp(key, "touch_layout")) {
+            s->touch_layout = atoi(val) == 1;
         } else if (!strcmp(key, "shuriken_icon")) {
             s->shuriken_icon = atoi(val) != 0;
         } else if (!strcmp(key, "hud_aspect")) {
@@ -324,6 +326,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "talisman_of_rebirth = %d\n", s->talisman);
     fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
     fprintf(f, "shuriken_icon = %d\n", s->shuriken_icon);
+    fprintf(f, "touch_layout = %d\n", s->touch_layout);
     fprintf(f, "text_language = %s\n", s->text_language == 2 ? "japanese" : s->text_language == 1 ? "english" : "auto");
     fprintf(f, "frame_interpolation = %d\n", s->frame_interp);
     fprintf(f, "audio_output = %d\n", s->audio_output);
