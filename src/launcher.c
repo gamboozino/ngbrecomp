@@ -103,6 +103,13 @@ static void snap_size(NgbSettings *s)
 
 void ngb_settings_snap_size(NgbSettings *s) { snap_size(s); }
 
+/* The touch controls' opacity (their button, Android): 30..100 percent in tens */
+int ngb_touch_opacity_value(int v)
+{
+    v = (v + 5) / 10 * 10;
+    return v < 30 ? 30 : v > 100 ? 100 : v;
+}
+
 /* The quick menu's size: 25 to 150 percent in quarters, or 0 (Off). A size saved before (in tens) is the
  * nearest quarter. */
 int ngb_quick_scale_value(int v)
@@ -153,6 +160,8 @@ void ngb_settings_load(NgbSettings *s)
     s->smooth_glow = 2;   /* Bloom On (#270): the game's bloom, steady at any render scale */
     s->talisman = 1;
     s->quick_menu_scale = 0;    /* the quick menu off unless chosen (Gameplay) */
+    s->touch_opacity = 100;     /* (the touch controls as 1.0.2 drew them) */
+    s->touch_layout = 1;        /* Classic (#285) */
     s->skip_intro = 0;
     s->show_launcher = 1;
 
@@ -162,7 +171,8 @@ void ngb_settings_load(NgbSettings *s)
     if (!f)
         return;
     s->width = s->height = 0;
-    int defaults = 0;   /* the defaults the file was written under (0: before 0.9.40, 3: 0.9.40, 4: 0.9.44, 5: 0.9.52, 6: 0.9.81) */
+    int defaults = 0;   /* the defaults the file was written under (0: before 0.9.40, 3: 0.9.40, 4: 0.9.44, 5: 0.9.52, 6: 0.9.81,
+                         * 7: 1.0.3) */
     while (fgets(line, sizeof line, f)) {
         char key[64], val[128];
         if (sscanf(line, " %63[^= ] = %127[^\r\n]", key, val) != 2)
@@ -219,6 +229,8 @@ void ngb_settings_load(NgbSettings *s)
             s->bow_crosshair = atoi(val) != 0;
         } else if (!strcmp(key, "touch_layout")) {
             s->touch_layout = atoi(val) == 1;
+        } else if (!strcmp(key, "touch_opacity")) {
+            s->touch_opacity = ngb_touch_opacity_value(atoi(val));
         } else if (!strcmp(key, "shuriken_icon")) {
             s->shuriken_icon = atoi(val) != 0;
         } else if (!strcmp(key, "hud_aspect")) {
@@ -276,6 +288,10 @@ void ngb_settings_load(NgbSettings *s)
      * gets it once, whatever it had */
     if (defaults < 6)
         s->positional_audio = 1;
+    /* 1.0.3 made Classic the touch layout's default (#285): every file from before gets it once (they all had the
+     * other written, chosen or not); its switch goes back */
+    if (defaults < 7)
+        s->touch_layout = 1;
     snap_size(s);
 }
 
@@ -295,7 +311,7 @@ void ngb_settings_save(const NgbSettings *s)
         return;
     }
     fprintf(f, "# Ninja Gaiden Black settings (the settings screen writes this file)\n");
-    fprintf(f, "defaults = 6\n");
+    fprintf(f, "defaults = 7\n");
     fprintf(f, "aspect = %s\n", ASPECT_NAMES[s->aspect]);
     fprintf(f, "window = %dx%d\n", s->width, s->height);
     fprintf(f, "fullscreen = %d\n", s->fullscreen);
@@ -327,6 +343,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
     fprintf(f, "shuriken_icon = %d\n", s->shuriken_icon);
     fprintf(f, "touch_layout = %d\n", s->touch_layout);
+    fprintf(f, "touch_opacity = %d\n", ngb_touch_opacity_value(s->touch_opacity));
     fprintf(f, "text_language = %s\n", s->text_language == 2 ? "japanese" : s->text_language == 1 ? "english" : "auto");
     fprintf(f, "frame_interpolation = %d\n", s->frame_interp);
     fprintf(f, "audio_output = %d\n", s->audio_output);

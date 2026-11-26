@@ -105,7 +105,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
  * MOVIE THEATER unlocked (src/cheats.c, saved), 29 Lower Detail Under Load (src/d3d/d3d.c), 30 the render thread
- * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats), 41 HUD Style (#121), 42 HUD Aspect, 43 Talisman of Rebirth, 44 Bow Crosshair, 45 Frame Interpolation (src/d3d/gpu/threaded.cpp), 47 Shuriken Icon (src/hud.c). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
+ * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 Intercept (src/intercept.c), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats), 41 HUD Style (#121), 42 HUD Aspect, 43 Talisman of Rebirth, 44 Bow Crosshair, 45 Frame Interpolation (src/d3d/gpu/threaded.cpp), 47 Shuriken Icon (src/hud.c), 48 the touch layout and 49 Touch Opacity (src/touch_pad.c). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
  * cheats' not. */
 int ngb_cheat(int which);
 void ngb_cheat_set(int which, int on);
@@ -182,6 +182,7 @@ int ngb_pc_setting(int which)
     case 46: return s_running.cheats_unlocked;
     case 47: return s_running.shuriken_icon;
     case 48: return s_running.touch_layout;
+    case 49: return ngb_touch_opacity_value(s_running.touch_opacity);
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 31: return s_running.intercept;
@@ -232,6 +233,7 @@ void ngb_pc_set_setting(int which, int value)
     case 46: s_running.cheats_unlocked = !!value; break;
     case 47: s_running.shuriken_icon = !!value; break;
     case 48: s_running.touch_layout = value == 1; break;   /* (src/touch_pad.c's switch) */
+    case 49: s_running.touch_opacity = ngb_touch_opacity_value(value); break;   /* (src/touch_pad.c, at once) */
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 31: s_running.intercept = value < 0 ? 0 : value > 2 ? 2 : value; break;
@@ -1784,6 +1786,8 @@ static void apply_and_close(void)
     if (n->scale != o->scale || n->anisotropy != o->anisotropy || n->msaa != o->msaa ||
         n->shadow_scale != o->shadow_scale)
         nv2a_set_quality(n->scale, n->anisotropy, n->shadow_scale, n->msaa);
+    s_cfg.touch_layout = o->touch_layout;   /* (the touch controls' own, set meanwhile by their buttons: src/touch_pad.c) */
+    s_cfg.touch_opacity = o->touch_opacity;
     if (memcmp(n, o, sizeof *n) && !getenv("NGB_NO_SETTINGS"))
         ngb_settings_save(n);
     s_running = *n;
@@ -1810,6 +1814,8 @@ static void activate(int key)
         } else if (s_sel == ROW_RESUME) {
             apply_and_close();
         } else if (s_quit_armed) {
+            s_cfg.touch_layout = s_running.touch_layout;   /* (as apply_and_close: the touch controls' own) */
+            s_cfg.touch_opacity = s_running.touch_opacity;
             if (memcmp(&s_cfg, &s_running, sizeof s_cfg) && !getenv("NGB_NO_SETTINGS"))
                 ngb_settings_save(&s_cfg);
             SDL_Event q = { .type = SDL_QUIT };
