@@ -45,7 +45,6 @@ typedef struct NgbSettings {
     int essence_charging;   /* Gameplay > Essence-Only Charging (src/ut_charge.c, #120) */
     int skip_cutscenes;     /* Gameplay > Skip Any Cutscene (src/cutscene_skip.c, #139) */
     int responsive_menus;   /* Gameplay > Responsive Menus (src/responsive.c, #116) */
-    int dpad_ut_camera;     /* Gameplay > D-Pad Camera While Charging (src/bindings.c, #150) */
     /* Hard, Very Hard and Master Ninja offered without clearing the one before */
 } NgbSettings;
 

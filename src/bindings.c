@@ -26,7 +26,6 @@ int ngb_quick_controls_active(void);
 int ngb_quick_frozen(void);
 int ngb_menu_up(void);   /* src/menu_mouse.c */
 int ngb_menu_up_controls(void);
-int ngb_pc_setting(int which);   /* src/ingame_menu.c: 35 D-pad camera while charging (src/ut_charge.c) */
 int ngb_ut_charging(void);       /* src/ut_charge.c: Ryu's charging action now */
 
 /* What an action presses on the game's pad. */
@@ -252,6 +251,7 @@ static void identity_check(void)
 static int s_invert[2][2];
 static int s_third_start;
 static int s_soft_reset = 1;   /* Start+Back Reset: the game's own reset to the title (#195) */
+static int s_dpad_camera;      /* D-Pad Camera While Charging (#150) */
 static int s_mouse_pct = 100;   /* Camera Sensitivity, percent: the right stick, mouse and keys (#67) */
 static int s_prompts;           /* Button Prompts: 0 Auto (the device in use), 1 Xbox, 2 PlayStation, 3 Nintendo, 4 PC */
 #define PROMPTS_N 5
@@ -265,6 +265,7 @@ void ngb_bind_defaults(void)
     s_third_start = 1;   /* (on from 0.9.45) */
     s_soft_reset = 1;
     soft_reset_apply();
+    s_dpad_camera = 0;
     s_mouse_pct = 100;
     s_prompts = 0;
     for (int a = 0; a < A_COUNT; a++) {
@@ -553,6 +554,7 @@ static void save(void)
     fprintf(f, "invert_first_person_x = %d\n", s_invert[1][0]);
     fprintf(f, "third_person_on_load = %d\n", s_third_start);
     fprintf(f, "start_back_reset = %d\n", s_soft_reset);
+    fprintf(f, "dpad_camera_charging = %d\n", s_dpad_camera);
     fprintf(f, "mouse_sensitivity = %d\n", s_mouse_pct);
     fprintf(f, "button_prompts = %s\n", s_prompts_ini[s_prompts]);
     fclose(f);
@@ -603,6 +605,10 @@ void ngb_bind_load(void)
         }
         if (!strcmp(key, "start_back_reset")) {
             s_soft_reset = atoi(val) != 0;
+            continue;
+        }
+        if (!strcmp(key, "dpad_camera_charging")) {
+            s_dpad_camera = atoi(val) != 0;
             continue;
         }
         if (!strcmp(key, "defaults")) {
@@ -817,6 +823,20 @@ void ngb_bind_set_soft_reset(int on)
     save();
 }
 
+int ngb_bind_dpad_camera(void)
+{
+    ensure();
+    return s_dpad_camera;
+}
+
+void ngb_bind_set_dpad_camera(int on)
+{
+    ensure();
+    s_dpad_camera = on != 0;
+    s_gen++;
+    save();
+}
+
 /* Camera Sensitivity: 25 to 300 percent in quarters; a step up or down (round) */
 int ngb_bind_mouse_sensitivity(void)
 {
@@ -859,13 +879,13 @@ static int camera_scale(int v)
     return v < 0 ? -m : m;
 }
 
-/* D-pad camera while charging a Ultimate Technique (Gameplay, #150): the charge holds Attack down and the left
+/* D-pad camera while charging an Ultimate Technique (Controls, #150): the charge holds Attack down and the left
  * stick aims the release, so the D-pad, otherwise idle, turns the camera. Off unless chosen, and only in play --
  * a menu (or a quick menu taking the controls) keeps its own D-pad. The stick is filled in before inversion and
  * Camera Sensitivity, so it is turned just as the right stick is, in either view. */
 static int ut_camera_wanted(void)
 {
-    return ngb_pc_setting(35) && ngb_ut_charging() && !ngb_quick_frozen() && !ngb_quick_controls_active();
+    return s_dpad_camera && ngb_ut_charging() && !ngb_quick_frozen() && !ngb_quick_controls_active();
 }
 
 /* The right stick as the player wants the camera turned (in play only), for the view it turns now:
@@ -903,9 +923,15 @@ void ngb_bind_play_state(const Uint8 *k, Uint32 mouse, XBOX_INPUT_STATE *st, int
     memset(st->Gamepad.bAnalogButtons, 0, sizeof st->Gamepad.bAnalogButtons);
     int quick = ngb_quick_controls_active();
     int utcam = ut_camera_wanted();   /* (quick excluded there: its D-pad is its own) */
+    static unsigned eaten;   /* D-pad keys the camera had: no press from them until let go (#150) */
     for (int a = 0; a < A_QUICK_WEAPONS; a++) {
-        if (utcam && a >= A_DPAD_UP && a <= A_DPAD_RIGHT)
-            continue;
+        if (a >= A_DPAD_UP && a <= A_DPAD_RIGHT) {
+            unsigned bit = 1u << (a - A_DPAD_UP);
+            int down = input_down(s_bind[a][0], k, mouse) || input_down(s_bind[a][1], k, mouse);
+            eaten = utcam && down ? eaten | bit : down ? eaten : eaten & ~bit;
+            if (utcam || (eaten & bit))
+                continue;
+        }
         if (((!quick || !quick_input(s_bind[a][0])) && input_down(s_bind[a][0], k, mouse)) ||
             ((!quick || !quick_input(s_bind[a][1])) && input_down(s_bind[a][1], k, mouse)))
             press(st, &s_act[a], 255, axes);
@@ -1027,12 +1053,18 @@ void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port)
         menu_held_note(st, port);
         return;
     }
+    static WORD dp_eaten[4];   /* a port's D-pad buttons the camera had: kept from the game until let go */
+    WORD dp = st->Gamepad.wButtons &
+              (XBOX_GAMEPAD_DPAD_UP | XBOX_GAMEPAD_DPAD_DOWN | XBOX_GAMEPAD_DPAD_LEFT | XBOX_GAMEPAD_DPAD_RIGHT);
+    if (port < 4) {
+        dp_eaten[port] &= dp;   /* (one let go is free again) */
+        st->Gamepad.wButtons &= (WORD)~dp_eaten[port];
+    }
     if (ut_camera_wanted()) {
         /* The D-pad is taken for the camera before the pad's buttons are rebuilt: no D-pad action or pair
-         * fires from it while charging, and the game's camera sees the stick. */
-        WORD dp = st->Gamepad.wButtons &
-                  (XBOX_GAMEPAD_DPAD_UP | XBOX_GAMEPAD_DPAD_DOWN | XBOX_GAMEPAD_DPAD_LEFT |
-                   XBOX_GAMEPAD_DPAD_RIGHT);
+         * fires from it while charging (nor as the charge ends, still held), and the game's camera sees the stick. */
+        if (port < 4)
+            dp_eaten[port] = dp;
         if (dp) {
             int rx = (dp & XBOX_GAMEPAD_DPAD_RIGHT ? 32767 : 0) - (dp & XBOX_GAMEPAD_DPAD_LEFT ? 32767 : 0);
             int ry = (dp & XBOX_GAMEPAD_DPAD_UP ? 32767 : 0) - (dp & XBOX_GAMEPAD_DPAD_DOWN ? 32767 : 0);

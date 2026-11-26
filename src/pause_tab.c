@@ -80,7 +80,7 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_SKIP, S_LAUNCHER, S_MSAA, S_HEALTH, S_NINPO, S_ESSENCE, S_ALLDIFF, S_SCARABS, S_ALLCOST, S_EXTRACOST,
        S_GLOW, S_QUICKFREEZE, S_QUICKSCALE, S_INFITEMS, S_INFAMMO, S_POSAUDIO, S_HUD, S_AUDIOOUT,
        S_MISSIONS, S_ARCADE, S_MOVIES, S_LOADDETAIL, S_RTHREAD, S_INTERCEPT, S_ALLWEAP,
-       S_ESSCHARGE, S_CUTSKIP, S_DPAD_UTCAM /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
+       S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
        S_HUDSTYLE, S_HUDASPECT, S_TALISMAN, S_CROSSHAIR, S_INTERP,
        S_UNUSED46 /* (taken, with no row: cheats_unlocked, src/ingame_menu.c) */, S_SHURIKEN,
@@ -94,8 +94,7 @@ static const char *const s_label[S_COUNT] = {
     "Golden Scarabs", "All Costumes", "Extra Costume", "Bloom", "Quick Menu Pause",
     "Quick Menu", "Infinite Items", "Infinite Projectiles", "Positional Audio", "HUD",
     "Audio Output", "Missions", "Arcade Ninja Gaiden", "Movie Theater", "Lower Detail Under Load",
-    "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene",
-    "D-Pad Camera While Charging",
+    "Multithreaded Renderer", "Intercept", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
     "Responsive Menus", "All Armlets", "All Scrolls",
     "One Hit Kill", "Unlocks", "HUD Style", "HUD Aspect", "Talisman of Rebirth",
     "Bow Crosshair", "Frame Interpolation", "", "Shuriken Icon",
@@ -136,7 +135,7 @@ static const char *const s_help[S_COUNT] = {
     "Every weapon, at Level 1 or at its highest level, with its ammunition. Turned off, they are taken back.",
     "Holding attack no longer charges an Ultimate Technique: only absorbing essence does.",
     "Start skips any movie or in-game cutscene, watched before or not. Off: as on the Xbox.",
-    "On: while charging an Ultimate Technique the D-pad turns the camera; the left stick still aims the release.",
+    "",
     "Start at the title, in a cutscene's opening wait and after equipping in the pause menu works at once.",
     "Every armlet and band. Turned off, they are taken back.",
     "The Izuna Drop, Counter Attack and Guillotine Throw scrolls. Turned off, they are taken back.",
@@ -164,8 +163,7 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_HUDASPECT, S_SKIP },   /* (a full page) */
     { S_POSAUDIO, S_AUDIOOUT, -1 },
     /* (no Talisman of Rebirth: equipped from the item page, src/talisman.c) */
-    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_DPAD_UTCAM, S_RESPONSIVE, S_CROSSHAIR,
-      S_SHURIKEN },
+    { S_QUICKSCALE, S_QUICKFREEZE, S_INTERCEPT, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_CROSSHAIR, S_SHURIKEN, -1 },
     { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
     { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },
@@ -175,38 +173,42 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
 #include "input/xinput_xbox.h"   /* (XBOX_BUTTON_*: the buttons the prompts picture) */
 /* The list's rows: first the settings (#274: below the actions they went unseen) -- On/Off rows: Invert Camera
  * X and Y (the third-person camera, #26), Invert First-Person X (#33, #63; its up/down is the game's own 1st
- * Person Camera Control), Start in Third Person (#23), Start+Back Reset; then Camera Sensitivity and Button
- * Prompts; then the actions, from CTL_BIND0 (action = row - CTL_BIND0); then Default Controls */
+ * Person Camera Control), Start in Third Person (#23), D-Pad Camera While Charging (#150), Start+Back Reset; then
+ * Camera Sensitivity and Button Prompts; then the actions, from CTL_BIND0 (action = row - CTL_BIND0); then Default Controls */
 #define CTL_INVX 0
-#define CTL_RESET 4               /* Start+Back Reset (#195) */
-#define CTL_MOUSE 5               /* Camera Sensitivity: a value, Left / Right (#67) */
-#define CTL_PROMPTS 6             /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
-#define CTL_BIND0 7               /* the first action's row */
+#define CTL_RESET 5               /* Start+Back Reset (#195); 4 is D-Pad Camera While Charging (#150) */
+#define CTL_MOUSE 6               /* Camera Sensitivity: a value, Left / Right (#67) */
+#define CTL_PROMPTS 7             /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
+#define CTL_BIND0 8               /* the first action's row */
 #define CTL_DEF  (CTL_BIND0 + A_COUNT)
 #define CTL_ROWS (CTL_DEF + 1)
 #define CTL_IS_BIND(r) ((r) >= CTL_BIND0 && (r) < CTL_DEF)
 #define CTL_TOGGLE(r) ((r) >= CTL_INVX && (r) <= CTL_RESET)
-static const char *const s_ctl_toggle_name[5] = {
-    "Invert Camera X", "Invert Camera Y", "Invert First-Person X", "Start in Third Person", "Start+Back Reset",
+static const char *const s_ctl_toggle_name[6] = {
+    "Invert Camera X", "Invert Camera Y", "Invert First-Person X", "Start in Third Person",
+    "D-Pad Camera While Charging", "Start+Back Reset",
 };
-static const char *const s_ctl_toggle_help[5] = {
+static const char *const s_ctl_toggle_help[6] = {
     "Turns the third-person camera the other way left and right (play only).",
     "Turns the third-person camera the other way up and down (play only).",
     "Turns the first-person view the other way left and right (play only).",
     "After loading, the right stick turns the camera instead of looking in first person.",
+    "While charging an Ultimate Technique the d-pad turns the camera; the left stick still aims the release.",
     "Holding Start and Back (Select) goes back to the title screen. Off: the game ignores it.",
 };
 static int ctl_toggle_get(int r)
 {
     int k = r - CTL_INVX;
-    return k == 4 ? ngb_bind_soft_reset() : k == 3 ? ngb_bind_third_person_start()
+    return k == 5 ? ngb_bind_soft_reset() : k == 4 ? ngb_bind_dpad_camera() : k == 3 ? ngb_bind_third_person_start()
          : k == 2 ? ngb_bind_invert(1, 0) : ngb_bind_invert(0, k);
 }
 static void ctl_toggle_flip(int r)
 {
     int k = r - CTL_INVX;
-    if (k == 4)
+    if (k == 5)
         ngb_bind_set_soft_reset(!ngb_bind_soft_reset());
+    else if (k == 4)
+        ngb_bind_set_dpad_camera(!ngb_bind_dpad_camera());
     else if (k == 3)
         ngb_bind_set_third_person_start(!ngb_bind_third_person_start());
     else if (k == 2)
@@ -2504,7 +2506,12 @@ static int ctl_keys(int key, int *row, int strip)
             play_sound(1);
             break;
         }
-        if (!CTL_IS_BIND(*row))                        /* (the On/Off rows, Default Controls: no columns) */
+        if (CTL_TOGGLE(*row)) {                        /* (an On/Off row: either way flips it, as on the other pages) */
+            ctl_toggle_flip(*row);
+            play_sound(1);
+            break;
+        }
+        if (!CTL_IS_BIND(*row))                        /* (Default Controls: no columns) */
             break;
         int c = s_ctl_col + (key == K_LEFT ? -1 : 1);
         if (c >= 0 && c <= 2 && !(c == 2 && CTL_IS_BIND(*row) && ngb_bind_pad_fixed(*row - CTL_BIND0))) {

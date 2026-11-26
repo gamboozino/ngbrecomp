@@ -203,10 +203,8 @@ of the pause menu. Changes apply at once and are saved.
 - **Gameplay** (each off unless chosen): the Quick Menu, an NG2-style d-pad menu for weapons, Ninpo
   and items, and whether the game pauses while it is open; **Intercept** (Black or Hurricane), the Hurricane
   Pack's guard counter Black left out: tap guard as an attack lands to turn it aside; **Essence-Only
-  Charging**, Ultimate Techniques charged only by absorbing essence, not by holding attack (#120);
-  **D-Pad Camera While Charging**, the d-pad turning the camera while an Ultimate Technique charges, the left
-  stick still aiming the release (#150); **Skip Any Cutscene**, Start skipping movies and in-game cutscenes not
-  yet watched (#139); **Responsive Menus**, Start
+  Charging**, Ultimate Techniques charged only by absorbing essence, not by holding attack (#120); **Skip Any
+  Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
   ignores it for a while (#116); **Bow Crosshair**, a dot where the arrow will land while aiming a bow in first
   person, the game's own glow from an arrow's head (#228); **Shuriken Icon**, the HUD's projectile box for the
@@ -266,6 +264,8 @@ Control. **Camera Sensitivity** (25%–300%) sets how fast the mouse, the right 
 turn it; over 100% the camera turns faster than the game's own top speed (the third-person camera's
 left and right; its up and down stays the game's). Holding Start and Back (Select) is the game's own reset to
 the title screen; turn off **Start+Back Reset** (Controls) if another program uses that combination.
+**D-Pad Camera While Charging** (Controls, off by default) gives the d-pad to the camera while an Ultimate
+Technique charges, the left stick still aiming the release (#150).
 
 With the **Quick Menu** on (RECOMP SETTINGS → Gameplay), Up and Down on the d-pad (or the Up / Down
 arrows, 1 / 2) open it on the melee weapons or the items, and Left and Right on the previous or next

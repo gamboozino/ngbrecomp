@@ -58,6 +58,10 @@ void ngb_bind_set_third_person_start(int on);
  * Start while Back is held (#195). On by default. */
 int ngb_bind_soft_reset(void);
 void ngb_bind_set_soft_reset(int on);
+/* D-Pad Camera While Charging (Controls, #150): while an Ultimate Technique charges, the d-pad turns the camera
+ * as the right stick does. Off by default. */
+int ngb_bind_dpad_camera(void);
+void ngb_bind_set_dpad_camera(int on);
 /* Camera Sensitivity (Controls): the camera's camera speed in percent; a step either way */
 int ngb_bind_mouse_sensitivity(void);
 float ngb_bind_camera_boost(void);   /* the cameras' turn: Camera Sensitivity over 100% (src/camera.c) */
