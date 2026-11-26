@@ -149,6 +149,7 @@ packages are signed ad hoc, without Developer ID signing or notarization.
 
 **Text language:** the game's text follows the system's language, Japanese on a Japanese system and English
 otherwise (the disc has only these two). `text_language = japanese` or `english` in `settings.ini` overrides it.
+The voices (English or Japanese) are the game's own choice in OPTIONS, with either text language. The arcade Ninja Gaiden starts its Japanese version when the text is Japanese.
 
 **Options (`env.txt`):** a text file named `env.txt` beside the saves (the first row above), or next to the
 program, with one option a line (`NAME=value`), for the options that have no menu, like `NV2A_TEX_DUMP` for

@@ -326,7 +326,7 @@ endif()
 # without Qt the game asks through zenity/kdialog.
 # ── The arcade Ninja Gaiden the cabinet and the main menu launch (#18, src/trilogy/main.c) ──
 # NinjaTrilogy.xbe is the English build, NinjaTomoe.xbe the Japanese one (the game picks it when its
-# voices are set to Japanese): one program each, from tools/pipeline_trilogy.sh [tomoe]. Each is built
+# text is set to Japanese): one program each, from tools/pipeline_trilogy.sh [tomoe]. Each is built
 # when its code has been generated. They draw with the GPU model's own NV2A renderer, so they need it.
 # On Android each is a library beside libmain.so (libtrilogy.so, libtomoe.so) with the same start as the game's
 # (src/android_main.c) and its touch controls: the app's process starts again into it (src/launch.c).

@@ -28,8 +28,9 @@ struct, `xboxrecomp/templates/runtime/recomp_regs.h`, which the pipeline copies 
 members.
 
 The arcade Ninja Gaiden (#18) is another program on the disc that the Xbox reboots into
-(`XLaunchNewImage`): `NinjaTrilogy.xbe`, or `NinjaTomoe.xbe` (the Japanese build, chosen by the game's
-region flag 0xDB9890). Each is lifted the same way (`tools/pipeline_trilogy.sh [tomoe]`, into
+(`XLaunchNewImage`): `NinjaTrilogy.xbe`, or `NinjaTomoe.xbe` (the Japanese build, chosen when the text is
+Japanese: the game's flag 0xDB9890, from the system language or `text_language`). Each is lifted the same
+way (`tools/pipeline_trilogy.sh [tomoe]`, into
 `src/recomp/gen_trilogy` / `gen_tomoe`) and built as its own program from `src/trilogy/main.c`, drawn by
 the GPU model's own NV2A renderer. `src/launch.c` is the reboot: the runtime hands it the launch data
 page, which it saves and passes on (`RECOMP_LAUNCH_PAGE`), then it starts the other program in place

@@ -12,7 +12,7 @@
  * the app's process started again into the image's library (src/android_main.c, NgbActivity.relaunch). Each
  * image is its own recompiled program, next to this one: NinjaGaidenBlack for default.xbe, NinjaTrilogy for
  * NinjaTrilogy.xbe, NinjaTomoe for NinjaTomoe.xbe (the Japanese arcade, launched instead when the game's
- * voices are Japanese); on Android libmain.so, libtrilogy.so and libtomoe.so.
+ * text is Japanese); on Android libmain.so, libtrilogy.so and libtomoe.so.
  */
 #include "ngb_launch.h"
 #include "port.h"
@@ -250,7 +250,7 @@ static int program_for(const char *path, char *out, size_t n, int *arcade)
         *arcade = 0;
         return program_path("NinjaGaidenBlack", out, n);
     }
-    if (!strcasecmp(name, "NinjaTomoe.xbe") &&   /* the Japanese build: the game's voices set to Japanese */
+    if (!strcasecmp(name, "NinjaTomoe.xbe") &&   /* the Japanese build: the game's text set to Japanese */
         program_path("NinjaTomoe", out, n))
         return 1;
     if (!strcasecmp(name, "NinjaTrilogy.xbe") || !strcasecmp(name, "NinjaTomoe.xbe"))   /* (else the English one) */
