@@ -221,7 +221,9 @@ of the pause menu. Changes apply at once and are saved.
   is on keeps what it gave
 - **Controls**: rebind every action (two keys or mouse buttons and a controller button each; Ninpo
   and Wind Run can take two controller buttons pressed together); camera inversion; start in third
-  person; Camera Sensitivity; Button Prompts; Toggle HUD (not bound unless chosen). The page shows
+  person; D-Pad Camera While Charging; Camera Sensitivity; Start+Back Reset; Button Prompts; Button
+  Resolution (High: the prompts drawn sharper above 1x, in the game's style); Toggle HUD (not bound unless
+  chosen). The page shows
   each binding as its key or button picture. A key or button bound to an action is taken from the
   one that had it (Pause always keeps a controller button). The bindings follow the game's own
   Button Settings: an action keeps its key or button whatever the game's Options assign

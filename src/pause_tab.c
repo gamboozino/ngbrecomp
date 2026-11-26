@@ -173,17 +173,20 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
 #include "input/xinput_xbox.h"   /* (XBOX_BUTTON_*: the buttons the prompts picture) */
 /* The list's rows: first the settings (#274: below the actions they went unseen) -- On/Off rows: Invert Camera
  * X and Y (the third-person camera, #26), Invert First-Person X (#33, #63; its up/down is the game's own 1st
- * Person Camera Control), Start in Third Person (#23), D-Pad Camera While Charging (#150), Start+Back Reset; then
- * Camera Sensitivity and Button Prompts; then the actions, from CTL_BIND0 (action = row - CTL_BIND0); then Default Controls */
+ * Person Camera Control), Start in Third Person (#23), D-Pad Camera While Charging (#150), then Camera
+ * Sensitivity -- the camera's together --; Start+Back Reset (On/Off too), Button Prompts and Button Resolution; then the actions, from CTL_BIND0 (action = row - CTL_BIND0); then Default
+ * Controls */
 #define CTL_INVX 0
-#define CTL_RESET 5               /* Start+Back Reset (#195); 4 is D-Pad Camera While Charging (#150) */
-#define CTL_MOUSE 6               /* Camera Sensitivity: a value, Left / Right (#67) */
+#define CTL_MOUSE 5               /* Camera Sensitivity: a value, Left / Right (#67); 4 is D-Pad Camera While Charging (#150) */
+#define CTL_RESET 6               /* Start+Back Reset (#195): an On/Off row after the camera's */
 #define CTL_PROMPTS 7             /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
-#define CTL_BIND0 8               /* the first action's row */
+#define CTL_RES 8                 /* Button Resolution: Original, High (src/bindings.c) */
+#define CTL_BIND0 9               /* the first action's row */
 #define CTL_DEF  (CTL_BIND0 + A_COUNT)
 #define CTL_ROWS (CTL_DEF + 1)
 #define CTL_IS_BIND(r) ((r) >= CTL_BIND0 && (r) < CTL_DEF)
-#define CTL_TOGGLE(r) ((r) >= CTL_INVX && (r) <= CTL_RESET)
+#define CTL_TOGGLE(r) (((r) >= CTL_INVX && (r) <= CTL_INVX + 4) || (r) == CTL_RESET)
+#define CTL_TOGGLE_K(r) ((r) == CTL_RESET ? 5 : (r) - CTL_INVX)   /* (its place in the two lists below) */
 static const char *const s_ctl_toggle_name[6] = {
     "Invert Camera X", "Invert Camera Y", "Invert First-Person X", "Start in Third Person",
     "D-Pad Camera While Charging", "Start+Back Reset",
@@ -198,13 +201,13 @@ static const char *const s_ctl_toggle_help[6] = {
 };
 static int ctl_toggle_get(int r)
 {
-    int k = r - CTL_INVX;
+    int k = CTL_TOGGLE_K(r);
     return k == 5 ? ngb_bind_soft_reset() : k == 4 ? ngb_bind_dpad_camera() : k == 3 ? ngb_bind_third_person_start()
          : k == 2 ? ngb_bind_invert(1, 0) : ngb_bind_invert(0, k);
 }
 static void ctl_toggle_flip(int r)
 {
-    int k = r - CTL_INVX;
+    int k = CTL_TOGGLE_K(r);
     if (k == 5)
         ngb_bind_set_soft_reset(!ngb_bind_soft_reset());
     else if (k == 4)
@@ -981,10 +984,12 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
         if (CTL_TOGGLE(r)) {                           /* the camera's On/Off rows */
             if (sel)
                 page_fill(px, 10, y + 2, 440, ROW_H - 4, 0x6E64DC, 0.85f, 0.05f);
-            page_text_fit(px, m, s_ctl_toggle_name[r - CTL_INVX], CTL_NAME_X + 6, y + 19, 18,
+            page_text_fit(px, m, s_ctl_toggle_name[CTL_TOGGLE_K(r)], CTL_NAME_X + 6, y + 19, 18,
                           sel ? 0xF5EB5A : focused ? 0xE6E6EB : 0xA0A0A8, 0, 260);
-            page_text(px, m, ctl_toggle_get(r) ? "On" : "Off", s_ctl_cx[2], y + 18, 15,
-                      sel ? 0xFFFFFF : 0xC8C8D0, 1);
+            const char *v = ctl_toggle_get(r) ? "On" : "Off";
+            char sv[16];
+            snprintf(sv, sizeof sv, "%s%s%s", sel ? "< " : "", v, sel ? " >" : "");   /* (Left / Right flip it too) */
+            page_text(px, m, sv, 441, y + 18, 15, sel ? 0xFFFFFF : 0xC8C8D0, 2);   /* (right, as the value rows below) */
             continue;
         }
         if (r == CTL_MOUSE) {
@@ -1005,6 +1010,17 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
             char v[32];
             snprintf(v, sizeof v, "%s%s%s", sel ? "< " : "", ngb_bind_prompts_name(ngb_bind_prompts()), sel ? " >" : "");
             page_text(px, m, v, 441, y + 18, 15, sel ? 0xFFFFFF : 0xC8C8D0, 2);   /* (right: clear of the bar at 446) */
+            continue;
+        }
+        if (r == CTL_RES) {
+            if (sel)
+                page_fill(px, 10, y + 2, 440, ROW_H - 4, 0x6E64DC, 0.85f, 0.05f);
+            page_text_fit(px, m, "Button Resolution", CTL_NAME_X + 6, y + 19, 18,
+                          sel ? 0xF5EB5A : focused ? 0xE6E6EB : 0xA0A0A8, 0, 260);
+            char v[32];
+            snprintf(v, sizeof v, "%s%s%s", sel ? "< " : "", ngb_bind_prompt_high() ? "High" : "Original",
+                     sel ? " >" : "");
+            page_text(px, m, v, 441, y + 18, 15, sel ? 0xFFFFFF : 0xC8C8D0, 2);
             continue;
         }
         if (r == CTL_DEF) {                            /* Default Controls */
@@ -1072,11 +1088,13 @@ static void draw_controls(uint32_t *px, uint8_t *m, int focused, int row)
     else if (focused && row == CTL_DEF)
         help = "Every action as it was.";
     else if (focused && CTL_TOGGLE(row))
-        help = s_ctl_toggle_help[row - CTL_INVX];
+        help = s_ctl_toggle_help[CTL_TOGGLE_K(row)];
     else if (focused && row == CTL_MOUSE)
         help = "How fast the right stick and the mouse turn the camera (play only).";
     else if (focused && row == CTL_PROMPTS)
         help = "The buttons the prompts show. Auto: whichever controller or keyboard is in use.";
+    else if (focused && row == CTL_RES)
+        help = "Original: as sharp as the game's own buttons. High: drawn sharper, the Xbox buttons too.";
     else if (focused && row >= 0)
         help = s_ctl_col == 2 && ngb_bind_pad_fixed(row - CTL_BIND0) ? ngb_bind_help(row - CTL_BIND0)
              : ngb_pad_prompts_ps() ? "Cross: change   Square / Delete: clear   (play only; the menus keep theirs)"
@@ -1916,15 +1934,17 @@ static void sprite(uint32_t id, int x, int y, int z, uint8_t anchor, float sx, f
  * glow, the letter in its cut), 32 x 32 each at 4x, side by side */
 static GuestTex s_tq;
 static int s_tq_made;                 /* 0 not yet, 1 made, -1 could not */
+static unsigned s_tq_gen;             /* (made again when Button Resolution changes) */
 
 static int tq_ready(void)
 {
-    if (s_tq_made)
+    if (s_tq_made && (s_tq_made < 0 || s_tq_gen == pic_gen()))
         return s_tq_made > 0;
+    s_tq_gen = pic_gen();
     const NgbPic *q = ngb_gp_tab_key(0), *e = ngb_gp_tab_key(1);
     s_tq_made = -1;
     if (!q || !e || q->w != 32 * KS || q->h != 32 * KS || e->w != q->w || e->h != q->h ||
-        !make_texture(&s_tq, 64 * KS, 32 * KS, 0x2A))
+        (!s_tq.hdr && !make_texture(&s_tq, 64 * KS, 32 * KS, 0x2A)))
         return 0;
     uint32_t *px = calloc(64 * KS * 32 * KS, sizeof *px);
     if (!px)
@@ -1961,7 +1981,8 @@ static void kc_tab_keys(void)
         if (n++ % 120 == 0)
             fprintf(stderr, "[TAB] tick: kbm %d first %.1f..%.1f\n", xbox_InputKeyboardActive(), s_tab_first[0], s_tab_first[2]);
     }
-    int set = ngb_pad_set();      /* -1 the keys, 1 PlayStation, 2 Nintendo: their pictures; 0 the game's own */
+    int set = ngb_pad_set();      /* -1 the keys, 1 PlayStation, 2 Nintendo: their pictures; 0 the game's own plates
+                                   * (with Button Resolution High too: the Xbox's L and R are its plates) */
     if (!set || s_tab_first[2] <= s_tab_first[0] || !tk_ready())
         return;
     int plates = ngb_gp_ready();
@@ -2040,7 +2061,8 @@ static struct {
     uint32_t orig;                /* the game's texture header in the table */
     int made;                     /* 0 not yet, 1 made, -1 could not */
     unsigned gen;                 /* (Nintendo's: the layout it was made for) */
-} s_ps[2][3];                     /* [0 PlayStation, 1 Nintendo]: 0 the cells' texture, 1 Black's, 2 White's */
+} s_ps[3][3];                     /* [0 PlayStation, 1 Nintendo, 2 the Xbox's with Button Resolution High]: 0 the
+                                   * cells' texture, 1 Black's, 2 White's */
 
 static int ps_make(int set, int slot, uint32_t entry, uint32_t hdr)
 {
@@ -2091,22 +2113,30 @@ static void ps_white_size(uint32_t def, int big)
     }
 }
 
+/* The set ps_check puts in: 0 PlayStation, 1 Nintendo, 2 the Xbox's drawn (Button Resolution High); -1 the game's
+ * own (or the keys') */
+static int ps_set(void)
+{
+    int set = ngb_pad_set();
+    return set == 1 ? 0 : set == 2 ? 1 : set == 0 && ngb_bind_prompt_high() ? 2 : -1;
+}
+
 /* Each button icon the game queues, before the keyboard's (kc_check): the PlayStation or Nintendo pictures
- * while such a pad is in use, else the game's own back. */
+ * while such a pad is in use, the Xbox's drawn with Button Resolution High, else the game's own back. */
 static void ps_check(uint32_t id)
 {
     if (id < 5 || id > 0xC)
         return;
-    int slot = id <= 10 ? 0 : (int)id - 10, set = ngb_pad_set() - 1;
+    int slot = id <= 10 ? 0 : (int)id - 10, set = ps_set();
     uint32_t def = sprite_def(id);
     if (!def)
         return;
     uint32_t entry = 0x8DBB28 + MEM32(def + 0x10) * 8, now = MEM32(entry);
     int ours = -1;                /* the set whose texture is there now */
-    for (int k = 0; k < 2; k++)
+    for (int k = 0; k < 3; k++)
         if (s_ps[k][slot].made > 0 && now == s_ps[k][slot].t.hdr)
             ours = k;
-    if (set < 0 || set > 1 || s_ps[set][slot].made < 0) {
+    if (set < 0 || s_ps[set][slot].made < 0) {
         if (ours >= 0)
             MEM32(entry) = s_ps[ours][slot].orig;
         if (slot == 2)
@@ -2114,7 +2144,7 @@ static void ps_check(uint32_t id)
         return;
     }
     if (slot == 2)
-        ps_white_size(def, 1);
+        ps_white_size(def, set < 2);   /* (the Xbox's White stays the smaller button) */
     if (ours < 0)                 /* (the keys' texture there: the game's is the one it replaced) */
         s_ps[set][slot].orig = slot == 0 && s_kc_made > 0 && (now == s_kc[0].hdr || now == s_kc[1].hdr) ? s_kc_orig
                                                                                                          : now;
@@ -2138,10 +2168,10 @@ static void ps_check(uint32_t id)
  * prompts each button is that one's picture instead, the game's arrow over it. They are play's buttons,
  * so the keyboard's are play's keys, not the menu's. */
 static struct {
-    GuestTex t[3];                /* 0 PlayStation, 1 the keys, 2 Nintendo */
+    GuestTex t[4];                /* 0 PlayStation, 1 the keys, 2 Nintendo, 3 the Xbox's (Button Resolution High) */
     uint32_t orig;                /* the game's texture header in the table */
-    int made[3];                  /* 0 not yet, 1 made, -1 could not */
-    unsigned gen[3];              /* the bindings the keys' (and Nintendo's layout) one was made from */
+    int made[4];                  /* 0 not yet, 1 made, -1 could not */
+    unsigned gen[4];              /* the bindings the keys' (and Nintendo's layout) one was made from */
 } s_hold;
 
 /* Whether the cell's pixel (x, y) is the arrow: its shaft, then its head narrowing to the tip. */
@@ -2177,7 +2207,7 @@ static int hold_make(int kind, uint32_t entry, uint32_t hdr)
             if (in)
                 key_icon(px, w * KS, h * KS, x0, y0, x1, y1, in);
         } else {
-            picture_icon(px, w * KS, h * KS, x0, y0, x1, y1, ngb_pad_picture(kind ? 2 : 1, play_b[i]), at);
+            picture_icon(px, w * KS, h * KS, x0, y0, x1, y1, ngb_pad_picture(kind == 0 ? 1 : kind, play_b[i]), at);
         }
     }
     /* The game's arrow over them, two rows higher (the top two are clear): a PlayStation button is
@@ -2211,8 +2241,9 @@ static void hold_check(uint32_t id)
     if (!def || !y || MEM32(def + 0x10) != MEM32(y + 0x10))   /* (the cells of one texture only) */
         return;
     uint32_t entry = 0x8DBB28 + MEM32(def + 0x10) * 8, now = MEM32(entry);
-    int ours = now && (now == s_hold.t[0].hdr || now == s_hold.t[1].hdr || now == s_hold.t[2].hdr);
-    int set = ngb_pad_set(), kind = set < 0 ? 1 : set == 1 ? 0 : set == 2 ? 2 : -1;
+    int ours = now && (now == s_hold.t[0].hdr || now == s_hold.t[1].hdr || now == s_hold.t[2].hdr ||
+                       now == s_hold.t[3].hdr);
+    int set = ngb_pad_set(), kind = set < 0 ? 1 : set == 1 ? 0 : set == 2 ? 2 : ngb_bind_prompt_high() ? 3 : -1;
     if (kind < 0 || s_hold.made[kind] < 0) {
         if (ours)
             MEM32(entry) = s_hold.orig;               /* the controller's icons back */
@@ -2241,11 +2272,11 @@ uint32_t ngb_game_tex_header(uint32_t hdr)
         return 0;
     if (s_kc_made > 0 && (hdr == s_kc[0].hdr || hdr == s_kc[1].hdr))
         return s_kc_orig;
-    for (int k = 0; k < 2; k++)
+    for (int k = 0; k < 3; k++)
         for (int slot = 0; slot < 3; slot++)
             if (s_ps[k][slot].made > 0 && hdr == s_ps[k][slot].t.hdr)
                 return s_ps[k][slot].orig;
-    for (int k = 0; k < 3; k++)
+    for (int k = 0; k < 4; k++)
         if (s_hold.made[k] > 0 && hdr == s_hold.t[k].hdr)
             return s_hold.orig;
     return hdr;
@@ -2506,6 +2537,11 @@ static int ctl_keys(int key, int *row, int strip)
             play_sound(1);
             break;
         }
+        if (*row == CTL_RES) {
+            ngb_bind_step_prompt_high();
+            play_sound(1);
+            break;
+        }
         if (CTL_TOGGLE(*row)) {                        /* (an On/Off row: either way flips it, as on the other pages) */
             ctl_toggle_flip(*row);
             play_sound(1);
@@ -2530,6 +2566,10 @@ static int ctl_keys(int key, int *row, int strip)
         } else if (*row == CTL_PROMPTS) {
             ngb_bind_step_prompts(1);
             play_sound(6);
+        } else if (*row == CTL_RES) {
+            ngb_bind_step_prompt_high();
+            play_sound(6);
+
         } else if (*row == CTL_DEF) {
             ngb_bind_defaults();
             ngb_bind_set(0, 0, ngb_bind_get(0, 0));   /* saved */

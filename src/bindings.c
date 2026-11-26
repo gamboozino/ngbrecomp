@@ -256,6 +256,7 @@ static int s_mouse_pct = 100;   /* Camera Sensitivity, percent: the right stick,
 static int s_prompts;           /* Button Prompts: 0 Auto (the device in use), 1 Xbox, 2 PlayStation, 3 Nintendo, 4 PC */
 #define PROMPTS_N 5
 static const char *const s_prompts_ini[PROMPTS_N] = { "auto", "xbox", "playstation", "nintendo", "pc" };
+static int s_prompt_high;       /* Button Resolution: 0 Original (the game's), 1 High (src/game_prompts.c) */
 
 static void soft_reset_apply(void);
 
@@ -268,6 +269,7 @@ void ngb_bind_defaults(void)
     s_dpad_camera = 0;
     s_mouse_pct = 100;
     s_prompts = 0;
+    s_prompt_high = 0;
     for (int a = 0; a < A_COUNT; a++) {
         s_bind[a][0] = s_act[a].key0;
         s_bind[a][1] = s_act[a].key1;
@@ -304,6 +306,22 @@ const char *ngb_bind_prompts_name(int v)
 {
     static const char *const name[PROMPTS_N] = { "Auto", "Xbox", "Playstation", "Nintendo", "PC" };
     return v >= 0 && v < PROMPTS_N ? name[v] : "";
+}
+
+/* Button Resolution (the Controls page): Original, the prompts as sharp as the game's own (its 21 x 23 buttons,
+ * enlarged), or High, drawn at four times that, the Xbox's too (src/game_prompts.c, src/pause_tab.c) */
+int ngb_bind_prompt_high(void)
+{
+    ensure();
+    return s_prompt_high;
+}
+
+void ngb_bind_step_prompt_high(void)
+{
+    ensure();
+    s_prompt_high = !s_prompt_high;
+    s_gen++;                    /* (the prompts' textures made again) */
+    save();
 }
 
 static int prompts_forced(void)   /* NGB_PAD_PROMPTS: 2 PlayStation, 3 Nintendo, 1 Xbox, 0 not set */
@@ -356,21 +374,24 @@ int ngb_bind_nintendo_position(void)
 }
 
 /* The prompt picture's name (src/game_prompts.c makes it) for the game's button b -- XBOX_BUTTON_A..RTRIGGER, Black for the left bumper,
- * White for the right -- on the pad the prompts show: set 1 PlayStation, 2 Nintendo (with its layout); NULL for
- * the Xbox's own (the game's). */
+ * White for the right -- on the pad the prompts show: set 1 PlayStation, 2 Nintendo (with its layout), 3 the Xbox's
+ * as Button Resolution High draws them; NULL for any other (the game's own). */
 const char *ngb_pad_picture(int set, int b)
 {
     static const char *const ps[8] = { "PS3_Cross", "PS3_Circle", "PS3_Square", "PS3_Triangle",
                                        "PS3_L1", "PS3_R1", "PS3_L2", "PS3_R2" };
     static const char *const ns[8] = { "Switch_A", "Switch_B", "Switch_X", "Switch_Y",
                                        "Switch_LB", "Switch_RB", "Switch_LT", "Switch_RT" };
+    static const char *const xs[8] = { "360_A", "360_B", "360_X", "360_Y", "360_LB", "360_RB", "360_LT", "360_RT" };
     int i = b == XBOX_BUTTON_A ? 0 : b == XBOX_BUTTON_B ? 1 : b == XBOX_BUTTON_X ? 2 : b == XBOX_BUTTON_Y ? 3
           : b == XBOX_BUTTON_BLACK ? 4 : b == XBOX_BUTTON_WHITE ? 5 : b == XBOX_BUTTON_LTRIGGER ? 6
           : b == XBOX_BUTTON_RTRIGGER ? 7 : -1;
-    if (i < 0 || set < 1 || set > 2)
+    if (i < 0 || set < 1 || set > 3)
         return NULL;
     if (set == 1)
         return ps[i];
+    if (set == 3)
+        return xs[i];
     if (ngb_bind_nintendo_position() && i < 4)
         i ^= 1;                                    /* the face buttons by place: A <-> B, X <-> Y */
     return ns[i];
@@ -557,6 +578,7 @@ static void save(void)
     fprintf(f, "dpad_camera_charging = %d\n", s_dpad_camera);
     fprintf(f, "mouse_sensitivity = %d\n", s_mouse_pct);
     fprintf(f, "button_prompts = %s\n", s_prompts_ini[s_prompts]);
+    fprintf(f, "button_resolution = %s\n", s_prompt_high ? "high" : "original");
     fclose(f);
 }
 
@@ -619,6 +641,10 @@ void ngb_bind_load(void)
             for (int i = 0; i < PROMPTS_N; i++)
                 if (!SDL_strcasecmp(val, s_prompts_ini[i]))
                     s_prompts = i;
+            continue;
+        }
+        if (!strcmp(key, "button_resolution")) {
+            s_prompt_high = !SDL_strcasecmp(val, "high");
             continue;
         }
         if (!strcmp(key, "nintendo_layout"))   /* (a choice in the 0.9.56 test builds) */
@@ -1053,18 +1079,17 @@ void xbox_pad_remap(XBOX_INPUT_STATE *st, DWORD port)
         menu_held_note(st, port);
         return;
     }
-    static WORD dp_eaten[4];   /* a port's D-pad buttons the camera had: kept from the game until let go */
+    static WORD dp_eaten[5];   /* a port's D-pad buttons the camera had: kept from the game until let go (4: the
+                                * keyboard's and touch pad's, src/keyboard.c) */
     WORD dp = st->Gamepad.wButtons &
               (XBOX_GAMEPAD_DPAD_UP | XBOX_GAMEPAD_DPAD_DOWN | XBOX_GAMEPAD_DPAD_LEFT | XBOX_GAMEPAD_DPAD_RIGHT);
-    if (port < 4) {
-        dp_eaten[port] &= dp;   /* (one let go is free again) */
-        st->Gamepad.wButtons &= (WORD)~dp_eaten[port];
-    }
+    WORD *eaten = &dp_eaten[port < 5 ? port : 4];
+    *eaten &= dp;   /* (one let go is free again) */
+    st->Gamepad.wButtons &= (WORD)~*eaten;
     if (ut_camera_wanted()) {
         /* The D-pad is taken for the camera before the pad's buttons are rebuilt: no D-pad action or pair
          * fires from it while charging (nor as the charge ends, still held), and the game's camera sees the stick. */
-        if (port < 4)
-            dp_eaten[port] = dp;
+        *eaten = dp;
         if (dp) {
             int rx = (dp & XBOX_GAMEPAD_DPAD_RIGHT ? 32767 : 0) - (dp & XBOX_GAMEPAD_DPAD_LEFT ? 32767 : 0);
             int ry = (dp & XBOX_GAMEPAD_DPAD_UP ? 32767 : 0) - (dp & XBOX_GAMEPAD_DPAD_DOWN ? 32767 : 0);
