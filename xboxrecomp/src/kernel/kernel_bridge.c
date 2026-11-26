@@ -6545,13 +6545,21 @@ static NTSTATUS ke_guest_event_wait(uint32_t va, DWORD timeout_ms)
         if (__atomic_load_n(ss, __ATOMIC_SEQ_CST) != 0 ||
             (gen && __atomic_load_n(gen, __ATOMIC_SEQ_CST) != gen0))
             continue;
+        DWORD r;
         if (timeout_ms == INFINITE) {
-            WaitForSingleObject(h, INFINITE);
+            r = WaitForSingleObject(h, INFINITE);
         } else {
             ULONGLONG now = GetTickCount64();
             if (now >= deadline)
                 return STATUS_TIMEOUT;
-            WaitForSingleObject(h, (DWORD)(deadline - now));
+            r = WaitForSingleObject(h, (DWORD)(deadline - now));
+        }
+        if (r == WAIT_FAILED) {   /* (the handle closed meanwhile, its VA's mapping replaced: the one now, or
+                                   * a short nap rather than a spin until SignalState is set, #286) */
+            HANDLE now_h = ke_object_handle(va);
+            if (now_h == h)
+                vcpu_nap_us(1000);
+            h = now_h;
         }
     }
 }

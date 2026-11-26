@@ -264,8 +264,9 @@ VOID WakeAllConditionVariable(PCONDITION_VARIABLE cv)
 /* Waitable kernel objects                                               */
 /* ===================================================================== */
 
-typedef enum { K_EVENT, K_SEM, K_MUTEX, K_THREAD, K_TIMER, K_HEAP,
-               K_FILEMAP, K_FILE, K_WAITABLE_TIMER } w32_kind;
+typedef enum { K_EVENT = 1 /* (memory freed and zeroed is no kind) */, K_SEM, K_MUTEX, K_THREAD, K_TIMER, K_HEAP,
+               K_FILEMAP, K_FILE, K_WAITABLE_TIMER,
+               K_CLOSED /* its last handle closed, kept a while (obj_release) */ } w32_kind;
 
 #define W32_MAX_APC 16
 
@@ -432,12 +433,22 @@ static void obj_release(w32_object *o)
 {
     if (InterlockedDecrement(&o->refcount) > 0)
         return;
-    if (o->kind == K_FILE) {
+    /* Closed under its lock, once: anything still on it sees it closed (a waiter is woken to find it so) */
+    pthread_mutex_lock(&o->lock);
+    w32_kind k = o->kind;
+    if (k != K_CLOSED) {
+        o->kind = K_CLOSED;
+        pthread_cond_broadcast(&o->cond);
+    }
+    pthread_mutex_unlock(&o->lock);
+    if (k == K_CLOSED)
+        return;                   /* (closed already: a stale handle's CloseHandle) */
+    if (k == K_FILE) {
         if (o->fd >= 0) close(o->fd);
         free(o->file_path);
-    } else if (o->kind == K_FILEMAP) {
+    } else if (k == K_FILEMAP) {
         if (o->fd >= 0) close(o->fd);
-    } else if (o->kind == K_THREAD) {
+    } else if (k == K_THREAD) {
         /* Nothing joins a thread (a wait is on its object), so its stack and the rest of it were never
          * given back: each thread the title started and ended kept its 8 MB stack, the pages it used
          * counting -- the process grew by megabytes a minute (the file worker of each read). With the
@@ -447,13 +458,28 @@ static void obj_release(w32_object *o)
             pthread_detach(o->thread);
         host_sem_destroy(&o->park_sem);
         host_sem_destroy(&o->park_ack);
-    } else if (o->kind == K_WAITABLE_TIMER) {
+    } else if (k == K_WAITABLE_TIMER) {
         /* Waitable timers: no special cleanup needed */
     }
-    pthread_mutex_destroy(&o->lock);
-    pthread_cond_destroy(&o->cond);
-    pthread_cond_destroy(&o->gate);
-    free(o);
+    /* Not freed yet: a handle is the object's address, and one can be used after it is closed -- as the arcade
+     * (NinjaTrilogy.xbe) starts again from its pause menu's Return to Main Menu it closes events other threads
+     * are still on, and the writes into the freed objects ended the app on Android (#286). Kept, closed, which
+     * the calls on a handle refuse (SetEvent and the rest test the kind first, a wait fails), and freed once
+     * 4096 more have closed. */
+    static w32_object *closed[4096];
+    static unsigned next;
+    static pthread_mutex_t closed_lock = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&closed_lock);
+    w32_object *old = closed[next];
+    closed[next] = o;
+    next = (next + 1) % (sizeof closed / sizeof closed[0]);
+    pthread_mutex_unlock(&closed_lock);
+    if (old) {
+        pthread_mutex_destroy(&old->lock);
+        pthread_cond_destroy(&old->cond);
+        pthread_cond_destroy(&old->gate);
+        free(old);
+    }
 }
 
 /* ---- fd-backed file handle (for the file-I/O HLE) -------------------- */
@@ -571,6 +597,10 @@ static DWORD wait_single(w32_object *o, DWORD ms)
 
     for (;;) {
         int ready = 0;
+        if (o->kind == K_CLOSED) {
+            result = WAIT_FAILED;
+            break;
+        }
         switch (o->kind) {
         case K_EVENT:  ready = o->signaled || (o->manual_reset && o->set_gen != gen0); break;
         case K_THREAD: ready = o->exited;   break;
@@ -615,6 +645,16 @@ static DWORD wait_single(w32_object *o, DWORD ms)
     return result;
 }
 
+/* A reference for a wait, unless the object is closed already (0: it is) */
+static int obj_ref(w32_object *o)
+{
+    LONG c = __atomic_load_n(&o->refcount, __ATOMIC_ACQUIRE);
+    while (c > 0)
+        if (__atomic_compare_exchange_n(&o->refcount, &c, c + 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            return 1;
+    return 0;
+}
+
 DWORD WaitForSingleObject(HANDLE h, DWORD ms)
 {
     DWORD r;
@@ -624,9 +664,14 @@ DWORD WaitForSingleObject(HANDLE h, DWORD ms)
     r = wait_single((w32_object *)h, 0);
     if (r != WAIT_TIMEOUT || ms == 0)
         return r;
+    /* the object held while waited on, as Windows does: closed meanwhile (its last other handle), it is still
+     * there when the wait ends */
+    if (!obj_ref((w32_object *)h))
+        return WAIT_FAILED;
     vcpu_block_begin();
     r = wait_single((w32_object *)h, ms);
     vcpu_block_end();
+    obj_release((w32_object *)h);
     return r;
 }
 
@@ -655,9 +700,24 @@ DWORD WaitForMultipleObjectsEx(DWORD count, const HANDLE *handles, BOOL waitAll,
     DWORD r = wfmo_inner(count, handles, waitAll, 0, alertable);
     if (r != WAIT_TIMEOUT || ms == 0)
         return r;
-    vcpu_block_begin();
-    r = wfmo_inner(count, handles, waitAll, ms, alertable);
-    vcpu_block_end();
+    /* each object held while waited on, as WaitForSingleObject holds its one */
+    DWORD held = 0;
+    for (; held < count; held++) {
+        w32_object *o = (w32_object *)handles[held];
+        if (o && o != PSEUDO_CURRENT_THREAD && o != PSEUDO_CURRENT_PROCESS && !obj_ref(o))
+            break;
+    }
+    if (held == count) {
+        vcpu_block_begin();
+        r = wfmo_inner(count, handles, waitAll, ms, alertable);
+        vcpu_block_end();
+    } else
+        r = WAIT_FAILED;
+    while (held-- > 0) {
+        w32_object *o = (w32_object *)handles[held];
+        if (o && o != PSEUDO_CURRENT_THREAD && o != PSEUDO_CURRENT_PROCESS)
+            obj_release(o);
+    }
     return r;
 }
 
@@ -674,13 +734,19 @@ static DWORD wfmo_inner(DWORD count, const HANDLE *handles, BOOL waitAll,
 
         if (waitAll) {
             DWORD got = 0;
-            for (DWORD i = 0; i < count; i++)
-                if (WaitForSingleObject(handles[i], 0) == WAIT_OBJECT_0) got++;
+            for (DWORD i = 0; i < count; i++) {
+                DWORD one = WaitForSingleObject(handles[i], 0);
+                if (one == WAIT_FAILED) return WAIT_FAILED;
+                if (one == WAIT_OBJECT_0) got++;
+            }
             if (got == count) return WAIT_OBJECT_0;
         } else {
-            for (DWORD i = 0; i < count; i++)
-                if (WaitForSingleObject(handles[i], 0) == WAIT_OBJECT_0)
+            for (DWORD i = 0; i < count; i++) {
+                DWORD one = WaitForSingleObject(handles[i], 0);
+                if (one == WAIT_FAILED) return WAIT_FAILED;
+                if (one == WAIT_OBJECT_0)
                     return WAIT_OBJECT_0 + i;
+            }
         }
 
         if (timed) {
