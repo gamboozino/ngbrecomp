@@ -13,6 +13,7 @@ int xbox_mod_file(const char *rel, char *out, size_t n);   /* xboxrecomp kernel_
 
 int ngb_pc_setting(int which);
 void ngb_pc_set_setting(int which, int value);   /* src/ingame_menu.c */
+int ngb_ut_charging(void);   /* src/ut_charge.c */
 
 static SDL_SpinLock s_lock;
 static NgbQuickMenu s_menu;
@@ -129,6 +130,15 @@ void ngb_quick_poll(void)
         bits &= ~(unsigned)NGB_BIND_HUD_BIT;
     }
     SDL_AtomicLock(&s_lock);
+    if (ngb_pc_setting(35) && ngb_ut_charging() && !ngb_quick_controls_active()) {
+        /* the D-pad is the camera while a Ultimate Technique charges (src/bindings.c, #150): no quick-menu
+         * open queued from it, and a button still held as the charge ends is not a press then */
+        s_request = 0;
+        s_request_step = 0;
+        s_held = bits;
+        SDL_AtomicUnlock(&s_lock);
+        return;
+    }
     if (!ngb_pc_setting(20))
     {
         /* Off must release modal input, including the held-button block.
