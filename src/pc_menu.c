@@ -67,7 +67,6 @@ enum { ROW_SCREEN, ROW_MOVIE, ROW_PC, ROW_DEFAULT, ROW_EXIT,
        ROW_MISSIONS, ROW_ARCADE, ROW_MOVIES, ROW_UNLOCKS, ROW_LOADDETAIL, ROW_RTHREAD, ROW_INTERCEPT,
        ROW_ALLWEAP, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_ALLARM, ROW_ALLSCROLL, ROW_ONEHIT,
        ROW_HUDSTYLE, ROW_HUDASPECT, ROW_TALISMAN, ROW_CROSSHAIR, ROW_INTERP, ROW_SHURIKEN,
-       ROW_DPAD_UTCAM,
 };
 
 static int is_ours(int page) { return page >= PAGE_GFX && page < PAGE_GFX + N_OURS; }
@@ -84,7 +83,7 @@ static const uint8_t s_rows_gfx[] = { ROW_RENDER, ROW_TEXTURE, ROW_MSAA, ROW_SHA
 static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_HUDASPECT, ROW_SKIP };
 static const uint8_t s_rows_sound[] = { ROW_POSAUDIO, ROW_AUDIOOUT };
 static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_INTERCEPT, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_CROSSHAIR,
-                                      ROW_SHURIKEN, ROW_DPAD_UTCAM };   /* (Talisman of Rebirth: equipped from the item page, src/talisman.c) */
+                                      ROW_SHURIKEN };   /* (Talisman of Rebirth: equipped from the item page, src/talisman.c) */
 static const uint8_t s_rows_cheat[] = { ROW_HEALTH, ROW_NINPO, ROW_ESSENCE, ROW_SCARABS, ROW_INFITEMS, ROW_INFAMMO,
                                         ROW_ONEHIT, ROW_UNLOCKS };
 static const uint8_t s_rows_ctrl[] = { ROW_BACK };   /* (under the Controls panel, src/pause_tab.c: a page has a row) */
@@ -138,8 +137,6 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_ALLWEAP0 0x20212            /* + 0..2: All Weapons' Off, Level 1, Max Level (#268) */
 #define T_SHURIKEN 0x20215            /* Shuriken Icon (src/hud.c, #276) */
 #define D_SHURIKEN 0x20216
-#define T_DPAD_UTCAM 0x20217          /* D-Pad Camera While Charging (src/bindings.c, #150) */
-#define D_DPAD_UTCAM 0x20218
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -260,8 +257,6 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { D_CROSSHAIR, "On: a dot in the middle of the screen while aiming a bow in first person." },
     { T_SHURIKEN, "Shuriken Icon" },
     { D_SHURIKEN, "On: the HUD shows the Shuriken or Windmill Shuriken when one is equipped." },
-    { T_DPAD_UTCAM, "D-Pad Camera While Charging" },
-    { D_DPAD_UTCAM, "On: while charging an Ultimate Technique the D-pad turns the camera; the left stick still aims the release." },
     { T_INTERP, "Frame Interpolation" },
     { D_INTERP, "Experimental. Pictures between the game's frames, on a 120 Hz or faster display." },
     { T_INTERP0 + 0, "Off" }, { T_INTERP0 + 1, "Full Rate" }, { T_INTERP0 + 2, "Half Rate" }, { T_INTERP0 + 3, "2x" },
@@ -452,7 +447,7 @@ static uint32_t make_labels(const uint8_t *kinds, int n)
                                    T_AUDIOOUT, T_MISSIONS, T_ARCADE, T_MOVIES, T_UNLOCKS, T_LOADDETAIL, T_RTHREAD,
                                    T_INTERCEPT, T_ALLWEAP, T_ESSCHARGE, T_CUTSKIP, T_RESPONSIVE, T_ALLARM,
                                    T_ALLSCROLL, T_ONEHIT, T_HUDSTYLE, T_HUDASPECT, T_TALISMAN,
-                                   T_CROSSHAIR, T_INTERP, T_SHURIKEN, T_DPAD_UTCAM };
+                                   T_CROSSHAIR, T_INTERP, T_SHURIKEN };
     uint32_t va = xbox_HeapAlloc(4 * n, 4);
     for (int i = 0; i < n; i++)
         MEM32(va + 4 * i) = id[kinds[i]];
@@ -913,7 +908,6 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
     case ROW_ALLWEAP: return T_ALLWEAP0 + (uint32_t)ngb_pc_setting(32);
     case ROW_ESSCHARGE: return ngb_pc_setting(33) ? T_ON : T_OFF;
     case ROW_CUTSKIP: return ngb_pc_setting(34) ? T_ON : T_OFF;
-    case ROW_DPAD_UTCAM: return ngb_pc_setting(35) ? T_ON : T_OFF;
     case ROW_RESPONSIVE: return ngb_pc_setting(36) ? T_ON : T_OFF;
     case ROW_ALLARM: return ngb_pc_setting(37) ? T_ON : T_OFF;
     case ROW_ALLSCROLL: return ngb_pc_setting(38) ? T_ON : T_OFF;
@@ -990,7 +984,6 @@ static int pc_value_change(int row, int delta)
     case ROW_ALLWEAP: ngb_pc_set_setting(32, (ngb_pc_setting(32) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_ESSCHARGE: ngb_pc_set_setting(33, !ngb_pc_setting(33)); break;
     case ROW_CUTSKIP: ngb_pc_set_setting(34, !ngb_pc_setting(34)); break;
-    case ROW_DPAD_UTCAM: ngb_pc_set_setting(35, !ngb_pc_setting(35)); break;
     case ROW_RESPONSIVE: ngb_pc_set_setting(36, !ngb_pc_setting(36)); break;
     case ROW_ALLARM: ngb_pc_set_setting(37, !ngb_pc_setting(37)); break;
     case ROW_ALLSCROLL: ngb_pc_set_setting(38, !ngb_pc_setting(38)); break;
@@ -2154,7 +2147,7 @@ void sub_00220870(void)
                                            D_RESPONSIVE & 0xFFFF, D_ALLARM & 0xFFFF, D_ALLSCROLL & 0xFFFF,
                                            D_ONEHIT & 0xFFFF, D_HUDSTYLE & 0xFFFF,
                                            D_HUDASPECT & 0xFFFF, D_TALISMAN & 0xFFFF, D_CROSSHAIR & 0xFFFF,
-                                           D_INTERP & 0xFFFF, D_SHURIKEN & 0xFFFF, D_DPAD_UTCAM & 0xFFFF };
+                                           D_INTERP & 0xFFFF, D_SHURIKEN & 0xFFFF };
     RECOMP_ENTRY(0x00220870u);
     uint32_t out = ecx;
     uint32_t level = MEM16(0x8DE430), tab = MEM16(0x8DE4CC), row = MEM16(0x8DE468);

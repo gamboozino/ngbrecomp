@@ -129,9 +129,10 @@ void ngb_quick_poll(void)
         hud_held = hud;
         bits &= ~(unsigned)NGB_BIND_HUD_BIT;
     }
+    int utcam = ngb_bind_dpad_camera() && ngb_ut_charging();   /* (asked outside s_lock) */
     SDL_AtomicLock(&s_lock);
-    if (ngb_pc_setting(35) && ngb_ut_charging() && !ngb_quick_controls_active()) {
-        /* the D-pad is the camera while a Ultimate Technique charges (src/bindings.c, #150): no quick-menu
+    if (utcam && !(ngb_pc_setting(20) && (s_open || s_block))) {   /* (ngb_quick_controls_active, s_lock held) */
+        /* the D-pad is the camera while an Ultimate Technique charges (src/bindings.c, #150): no quick-menu
          * open queued from it, and a button still held as the charge ends is not a press then */
         s_request = 0;
         s_request_step = 0;

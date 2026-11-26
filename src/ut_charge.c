@@ -19,8 +19,9 @@
 int ngb_pc_setting(int which);   /* src/ingame_menu.c: 33 Essence-Only Charging */
 extern ptrdiff_t g_xbox_mem_offset;
 
-/* Whether Ryu is in the charging action now (kind 0xB9, the player block's +4). The D-pad camera option
- * (35, #150) asks this from the host's input reads, which can come before the guest's memory is mapped. */
+/* Whether Ryu is in the charging action now (kind 0xB9, the byte at the player block's +4). D-Pad Camera
+ * While Charging (Controls, src/bindings.c, #150) asks this from the host's input reads, which can come
+ * before the guest's memory is mapped. */
 int ngb_ut_charging(void)
 {
     if (!g_xbox_mem_offset)
@@ -29,7 +30,7 @@ int ngb_ut_charging(void)
     if (p >= 0x20)
         return 0;
     uint32_t b = 0x4968B0u + p * 0xDD0u + 4u;
-    return MEM16(b) == 0xB9;
+    return MEM8(b) == 0xB9;   /* (a byte: the next one is not the high half -- B9 too while charging) */
 }
 
 /* Once a frame (src/cheats.c) */
