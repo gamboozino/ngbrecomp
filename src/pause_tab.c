@@ -35,6 +35,7 @@
 #define RECOMP_GENERATED_CODE
 #include "recomp_funcs.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -422,10 +423,23 @@ static void upload(const GuestTex *t, const uint32_t *px)
 {
     uint32_t mx, my;
     swizzle_masks(t->w, t->h, &mx, &my);
+    /* (each column's place found once, not for every texel: a page of 1024 x 1024 took most of a frame, and it is
+     * drawn again at each move of the cursor) */
+    static uint32_t ox[4096];
+    if (t->w > 4096)
+        return;
+    /* (and the renderer told of the write at once: it watches the texture's pages for writes, and found out by
+     * a fault on each of the thousand of them) */
+    extern void (*xbox_GuestDmaWriteHook)(void *host, size_t len);   /* xboxrecomp kernel_file.c */
+    if (xbox_GuestDmaWriteHook)
+        xbox_GuestDmaWriteHook((void *)XBOX_PTR(t->data), (size_t)4 * t->w * t->h);
+    for (int x = 0; x < t->w; x++)
+        ox[x] = 4 * deposit(x, mx);
     for (int y = 0; y < t->h; y++) {
-        uint32_t oy = deposit(y, my);
+        uint32_t oy = 4 * deposit(y, my);
+        const uint32_t *row = px + (size_t)y * t->w;
         for (int x = 0; x < t->w; x++)
-            MEM32(t->data + 4 * (deposit(x, mx) | oy)) = px[y * t->w + x];
+            MEM32(t->data + (ox[x] | oy)) = row[x];
     }
 }
 
@@ -685,39 +699,79 @@ static inline float luma(uint32_t c)
     return ((c >> 16 & 255) + (c >> 8 & 255) + (c & 255)) / 3.0f;
 }
 
-/* The Exit plate with its word taken off -- each row of the metal face
- * filled from that row's bare metal -- and "Settings" put on, dark with a
- * light edge below, as the game's are. */
+/* The Exit plate with its word taken off and "Settings" put on, dark with a light edge below, as the game's
+ * are. The face is brushed metal, each row of it one tone drifting a little from left to right: what a row's
+ * bare metal is comes from the two ends of the face, clear of the word, and the word's texels -- the dark
+ * letters and the light edge under them -- take that tone at their place, with the right end's grain. (Before,
+ * the tone was the row's own 80th percentile: in the row under the baseline, a third of it the E's light edge,
+ * that was the edge's, so the metal counted as lettering and the whole row was painted light: a line under
+ * "Settings".) */
 static void make_plate(uint32_t *px, int w, int h)
 {
-    const int fx0 = w * 20 / 128, fx1 = w * 109 / 128;
-    for (int y = 3 * h / 64; y < 50 * h / 64; y++) {
-        float l[256], sorted[256];
-        int n = 0;
-        for (int x = fx0; x < fx1; x++)
-            sorted[n++] = l[x] = luma(px[y * w + x]);
-        for (int i = 1; i < n; i++)            /* insertion sort, n < 256 */
-            for (int j = i; j > 0 && sorted[j - 1] > sorted[j]; j--) {
-                float t = sorted[j]; sorted[j] = sorted[j - 1]; sorted[j - 1] = t;
-            }
-        float bg = sorted[n * 8 / 10];
-        uint8_t txt[256] = { 0 };
-        for (int x = fx0; x < fx1; x++)
-            if (l[x] < bg - 35)
-                txt[x] = txt[x - 1 > fx0 ? x - 1 : x] = txt[x + 1 < fx1 ? x + 1 : x] = 1;
-        int r = 0, g = 0, b = 0, k = 0;
-        for (int x = fx0; x < fx1; x++)
-            if (!txt[x] && l[x] >= bg - 20) {
-                uint32_t c = px[y * w + x];
-                r += c >> 16 & 255; g += c >> 8 & 255; b += c & 255; k++;
-            }
-        if (!k)
-            continue;
-        uint32_t fill = (uint32_t)(r / k) << 16 | (uint32_t)(g / k) << 8 | (uint32_t)(b / k);
-        for (int x = fx0; x < fx1; x++)
-            if (txt[x])
-                px[y * w + x] = (px[y * w + x] & 0xFF000000u) | fill;
+    const int fx0 = w * 28 / 128, fx1 = w * 99 / 128;   /* the word's columns: clear of the rim and its corners */
+    const int a0 = w * 24 / 128, a1 = w * 28 / 128, b0 = w * 99 / 128, b1 = w * 104 / 128;   /* the bare ends */
+    const int y0 = 6 * h / 64, y1 = 42 * h / 64;   /* the word's rows (the rim's dark corners are not letters) */
+    if (w > 256 || h > 128 || a1 <= a0 || b1 <= b0)
+        return;
+    static float bg[128][256];
+    static uint8_t dark[128][256];
+    static uint32_t was[128 * 256];
+    memcpy(was, px, sizeof(uint32_t) * (size_t)w * h);
+    const float ca = (a0 + a1) / 2.0f, cb = (b0 + b1) / 2.0f;
+    float ma[128][3], mb[128][3];
+    memset(dark, 0, sizeof dark);
+    for (int y = y0; y < y1; y++) {
+        float la = 0, lb = 0;
+        for (int c = 0; c < 3; c++)
+            ma[y][c] = mb[y][c] = 0;
+        for (int x = a0; x < a1; x++) {
+            la += luma(was[y * w + x]) / (a1 - a0);
+            for (int c = 0; c < 3; c++)
+                ma[y][c] += (was[y * w + x] >> (16 - 8 * c) & 255) / (float)(a1 - a0);
+        }
+        for (int x = b0; x < b1; x++) {
+            lb += luma(was[y * w + x]) / (b1 - b0);
+            for (int c = 0; c < 3; c++)
+                mb[y][c] += (was[y * w + x] >> (16 - 8 * c) & 255) / (float)(b1 - b0);
+        }
+        for (int x = fx0; x < fx1; x++) {
+            float t = (x - ca) / (cb - ca);
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            bg[y][x] = la + (lb - la) * t;
+            dark[y][x] = luma(was[y * w + x]) < bg[y][x] - 35;
+        }
     }
+    for (int y = y0; y < y1; y++)
+        for (int x = fx0; x < fx1; x++) {
+            int word = 0;                                          /* a letter's texel, or one beside it: their soft rim */
+            for (int v = y - 1 < y0 ? y0 : y - 1; v <= y + 1 && v < y1 && !word; v++)
+                for (int u = x - 1 < fx0 ? fx0 : x - 1; u <= x + 1 && u < fx1; u++)
+                    if (dark[v][u]) {
+                        word = 1;
+                        break;
+                    }
+            if (!word && luma(was[y * w + x]) > bg[y][x] + 18)     /* the light edge: by a letter, below or right */
+                for (int v = y - 2 < y0 ? y0 : y - 2; v <= y && !word; v++)
+                    for (int u = x - 3 < fx0 ? fx0 : x - 3; u <= x + 1 && u < fx1; u++)
+                        if (dark[v][u]) {
+                            word = 1;
+                            break;
+                        }
+            if (!word)
+                continue;
+            float t = (x - ca) / (cb - ca);
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            int n = b1 - b0, k = x % (2 * n);
+            k = k < n ? k : 2 * n - 1 - k;                         /* the right end's grain, mirrored along */
+            uint32_t g = was[y * w + b0 + k], out = px[y * w + x] & 0xFF000000u;
+            for (int c = 0; c < 3; c++) {
+                float grain = (g >> (16 - 8 * c) & 255) - mb[y][c];   /* (grain only: the rim's corner is by that end) */
+                grain = grain < -10 ? -10 : grain > 10 ? 10 : grain;
+                float v = ma[y][c] + (mb[y][c] - ma[y][c]) * t + grain;
+                out |= (uint32_t)(v < 0 ? 0 : v > 255 ? 255 : lroundf(v)) << (16 - 8 * c);
+            }
+            px[y * w + x] = out;
+        }
     static uint8_t m[256 * 128];
     memset(m, 0, sizeof m);
     tab_word(m, w, h, w / 2.0f + 1, h * 25.0f / 64, w * 88.0f / 128, h * 38.0f / 64);
@@ -812,11 +866,23 @@ static void page_text_sx(uint32_t *px, uint8_t *m, const char *s, float x, float
         w = room * k;
     }
     float X = x * k - (align == 1 ? w / 2 : align == 2 ? w : 0);
-    memset(m, 0, PAGE_TW * PAGE_TH);
+    /* Only the box the line is in is cleared and gone over (the mask is clear outside what the lines before
+     * used: draw_page clears it whole once): the whole page for each of a page's thirty lines took 13 ms, a
+     * frame late at every move of the cursor. */
+    int R0 = (int)floorf((base - 1.5f * size) * k) - 2, R1 = (int)ceilf((base + 0.75f * size) * k) + 4;
+    int C0 = (int)floorf(X) - 8, C1 = (int)ceilf(X + w) + 12;
+    R0 = R0 < 1 ? 1 : R0;
+    R1 = R1 > PAGE_TH ? PAGE_TH : R1;
+    C0 = C0 < 1 ? 1 : C0;
+    C1 = C1 > PAGE_TW ? PAGE_TW : C1;
+    if (R0 >= R1 || C0 >= C1)
+        return;
+    for (int Y = R0 - 1; Y < R1; Y++)
+        memset(m + Y * PAGE_TW + C0 - 1, 0, (size_t)(C1 - C0 + 1));
     draw_text(m, PAGE_TW, PAGE_TH, &s_font_body, s, size * k, sx, X, base * k);
     /* A soft dark edge under the letters, as the game's text has. */
-    for (int Y = 1; Y < PAGE_TH; Y++)
-        for (int Xp = 1; Xp < PAGE_TW; Xp++) {
+    for (int Y = R0; Y < R1; Y++)
+        for (int Xp = C0; Xp < C1; Xp++) {
             uint8_t v = m[(Y - 1) * PAGE_TW + Xp - 1];
             if (v) {
                 uint32_t c = px[Y * PAGE_TW + Xp];
@@ -826,13 +892,14 @@ static void page_text_sx(uint32_t *px, uint8_t *m, const char *s, float x, float
                 px[Y * PAGE_TW + Xp] = (uint32_t)lroundf(oa * 255) << 24 | (mm & 0xFFFFFF);
             }
         }
-    for (int i = 0; i < PAGE_TW * PAGE_TH; i++)
-        if (m[i]) {
-            uint32_t c = px[i];
-            float ca = (c >> 24) / 255.0f, a = m[i] / 255.0f, oa = a + ca * (1 - a);
-            uint32_t mm = mix(c, rgb, a / oa);
-            px[i] = (uint32_t)lroundf(oa * 255) << 24 | (mm & 0xFFFFFF);
-        }
+    for (int Y = R0 - 1; Y < R1; Y++)
+        for (int i = Y * PAGE_TW + C0 - 1; i < Y * PAGE_TW + C1; i++)
+            if (m[i]) {
+                uint32_t c = px[i];
+                float ca = (c >> 24) / 255.0f, a = m[i] / 255.0f, oa = a + ca * (1 - a);
+                uint32_t mm = mix(c, rgb, a / oa);
+                px[i] = (uint32_t)lroundf(oa * 255) << 24 | (mm & 0xFFFFFF);
+            }
 }
 
 static void page_text(uint32_t *px, uint8_t *m, const char *s, float x, float base,
@@ -1022,6 +1089,7 @@ static void draw_page(int focused, int cat, int row)
     static uint8_t m[PAGE_TW * PAGE_TH];
     const float k = (float)PAGE_TW / PAGE_W;
     memset(px, 0, sizeof px);
+    memset(m, 0, sizeof m);   /* (page_text clears only each line's box) */
 
     /* The strip, as the game's tabs have theirs: a dark bar fading out to
      * the right, the chosen word light violet, the others grey. */
@@ -2822,6 +2890,7 @@ static void ov_draw(void)
     static uint32_t px[PAGE_TW * PAGE_TH];
     static uint8_t m[PAGE_TW * PAGE_TH];
     memset(px, 0, sizeof px);
+    memset(m, 0, sizeof m);   /* (page_text clears only each line's box) */
     int game = s_game_font;
     s_game_font = game_font_ready();
     for (int y = 0; y < OV_H; y++) {                   /* the panel, as the Are you sure? box */
@@ -3208,6 +3277,7 @@ static void draw_exit_page(int focused, int row, int armed)
     static uint32_t px[PAGE_TW * PAGE_TH];
     static uint8_t m[PAGE_TW * PAGE_TH];
     memset(px, 0, sizeof px);
+    memset(m, 0, sizeof m);   /* (page_text clears only each line's box) */
     for (int i = 0; i < EXIT_ROWS; i++) {
         float y = 12 + i * (ROW_H + 4);
         int sel = focused && i == row;
