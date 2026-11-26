@@ -4866,6 +4866,15 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
         ay = h / 2;
         return;
     }
+    // what is as wide as the screen or wider, as drawn: an item's or a tip's screen fading in or out over play, before
+    // its cover is opaque -- its lines across the screen (-0.5 to 719.5: by the rule along the top, nearer the left
+    // edge, so the left corner's) and its band of scrolling kanji (each piece wider than the screen, the bottom's) were
+    // narrowed toward a side for those frames, #287. No piece of the HUD is that wide.
+    if (x1 - x0 >= w - 1) {
+        ax = w / 2;
+        ay = h / 2;
+        return;
+    }
     // The two rules below (a picture's words, a panel's labels) skip what is in an element of the frame before kept
     // to a top corner from the screen's edge, and no larger than the karma window: the window and the health bar.
     // The Talisman of Rebirth's picture and flash, about the middle and as large as a panel, reach over the window,
