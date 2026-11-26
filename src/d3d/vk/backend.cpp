@@ -4051,7 +4051,21 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             static const bool p_env = std::getenv("NGB_HUD_FIXED") != nullptr;
             const bool p_shaped = (p_env || ngb_pc_setting(42)) && live && p_near;
             const float p_small = ngb_pc_setting(41) && live && p_near ? 0.8f : 1.0f;
+            // The art of an item's or a tip's 2D screen slides in from a side while the game is still
+            // playing: a screen-wide line (the tip's top border) or a band of Kanji low down. Until the
+            // screen is known as one, HudPlace gives it the side it came from and Compact and Corrected
+            // narrowed it for those frames (and the last, as it scrolled out, #287). A HUD element of its
+            // own, like the health bar, starts well inside the screen; a real prompt or a subtitle is
+            // much smaller than a screen-wide band.
+            auto hud_band = [&] {
+                float bw = x1 - x0, bh = y1 - y0;
+                if (bh < h * 0.15f && bw > w * 0.45f && (x0 <= w * 0.05f || x1 >= w * 0.95f))
+                    return true;
+                return y0 > h * 0.5f && bh < h * 0.3f && bw > w * 0.3f;
+            };
             auto prompt_ok = [&] {
+                if (hud_band())
+                    return false;
                 return hud_bottom_ && live && p_near &&
                        (hud_piece() || hud_known_ || (threed_ >= 30 && !last3d_prev_));   // (last: a load's first frame)
             };
@@ -4112,10 +4126,10 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     if (live && !centred) {
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                         placed = true;
-                        if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                        if (keep_box && !hud_band() && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
                     }
-                    bool cornered = live && !centred && ax != w / 2 && hud_piece();
+                    bool cornered = live && !centred && ax != w / 2 && hud_piece() && !hud_band();
                     // (what keeps to the bottom -- the "Interact" prompt -- as Stretched draws it: the game draws over it
                     // where it put it, Muramasa's board as Interact is pressed, over the held picture, #219)
                     const bool shape = cornered && !hud_bottom_;
@@ -4130,7 +4144,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         hud_clipy1 = h / 2 * (1 + ky);
                     }
                 } else if (n && km < 0.999f && !paused && !spans) {
-                    c.ext[0] = km;
+                    c.ext[0] = hud_band() ? 1.0f : km;
                     c.ext[1] = w / 2;
                     // In play the HUD's elements to the screen's sides (HudPlace). NGB_HUD_CENTER=1: all about
                     // the middle.
@@ -4139,7 +4153,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                         placed = true;
                         c.ext[1] = ax;
-                        if ((small < 1 || shaped) && ax != w / 2 && !hud_bottom_ && hud_piece()) {
+                        if ((small < 1 || shaped) && ax != w / 2 && !hud_bottom_ && hud_piece() && !hud_band()) {
                             c.ext[0] = (shaped ? ks : km) * small;
                             if (shaped) c.ext[1] = edge_anchor(ax, km * small, ks * small);
                             c.ext[2] = small;
@@ -4147,7 +4161,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                         } else if ((p_shaped || p_small < 1) && ax != w / 2 && prompt_ok()) {
                             prompt_ext(ax, km, ay, 1.0f);   // the prompt (Stretched: km across)
                         }
-                        if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                        if (keep_box && !hud_band() && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
                     }
                     if (c.ext[1] == w / 2) {   // (a corner's piece is on the screen as narrowed: not clipped)
@@ -4159,9 +4173,9 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     float ax = w / 2, ay = h / 2;
                     HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                     placed = true;
-                    if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                    if (keep_box && !hud_band() && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                         hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
-                    if (ax != w / 2 && !hud_bottom_ && hud_piece()) {
+                    if (ax != w / 2 && !hud_bottom_ && hud_piece() && !hud_band()) {
                         c.ext[0] = (shaped ? ks : 1.0f) * small;
                         c.ext[1] = shaped ? edge_anchor(ax, small, ks * small) : ax;
                         c.ext[2] = small;
@@ -4259,7 +4273,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                          : reach ? (cont || cxm < w / 2 ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
                 // HUD Style Compact (#121): what keeps to a side smaller toward it, and toward the top along the top
-                if (compact && c.ext[1] != w / 2) {
+                if (compact && c.ext[1] != w / 2 && !hud_band()) {
                     c.ext[0] = k * 0.8f;
                     c.ext[2] = 0.8f;
                     c.ext[3] = y1 < h * 0.3f || reach ? 0.0f : h / 2;   // (what reaches lower with its corner: #219)
@@ -4271,9 +4285,9 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 // about the middle (words, subtitles) as drawn
                 float ax = w / 2, ay = h / 2;
                 HudPlace(x0, x1, y0, y1, w, h, ax, ay);
-                if (keep_box && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                if (keep_box && !hud_band() && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                     hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn, hud_edge_, hud_bottom_ ? hud_bottom_y_ : -1});
-                if (ax != w / 2 && !hud_bottom_ && hud_piece()) {
+                if (ax != w / 2 && !hud_bottom_ && hud_piece() && !hud_band()) {
                     c.ext[0] = 0.8f;
                     c.ext[1] = ax;
                     c.ext[2] = 0.8f;
