@@ -81,6 +81,20 @@ kept); later starts are quicker.
 Needs a 64-bit Linux with glibc 2.35 or newer and a GPU with Vulkan 1.3 drivers (or older drivers that
 have its dynamic rendering and synchronization2 as extensions).
 
+**Arch Linux and its derivatives (CachyOS, Manjaro...):** a community package in the AUR,
+[`ngbrecomp-bin`](https://aur.archlinux.org/packages/ngbrecomp-bin) (by sxdot, #295), installs the AppImage
+from the releases here, with a menu entry and the command `ngbrecomp`, and updates it with the rest of the
+system: `paru -S ngbrecomp-bin` or `yay -S ngbrecomp-bin`, or with `makepkg`:
+
+```sh
+sudo pacman -S --needed base-devel git
+git clone https://aur.archlinux.org/ngbrecomp-bin.git
+cd ngbrecomp-bin
+makepkg -si
+```
+
+It is kept by its author, not here, so a new release can take a while to reach it.
+
 ### Windows
 
 1. Download `NinjaGaidenBlack-windows-x64.zip` and extract it anywhere.
