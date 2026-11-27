@@ -427,9 +427,15 @@ static void fps_track(void)
         int64_t gap = __atomic_exchange_n(&s_shown_gap_us, 0, __ATOMIC_RELAXED);
         unsigned count = frames;
         double worst = max_ms;
-        if (__atomic_exchange_n(&s_interp_seen, 0, __ATOMIC_RELAXED)) {   /* interpolating: the pictures shown */
+        /* Interpolating, or the port's Direct3D renderer handing its pictures over: the pictures shown. Its
+         * pictures are presented as the title hands them over, often before their flip lands at the next tick,
+         * and counting flips at presents then took two as one (#288: 55 while the title made 60 and the screen
+         * got 60). */
+        if (__atomic_exchange_n(&s_interp_seen, 0, __ATOMIC_RELAXED) || pics) {
             count = pics;
             worst = gap / 1000.0;
+            frames_logged = pics;
+            jitter_n = 0;   /* (measured between presents, it would count two flips in one as a 33 ms frame) */
         }
         double fps = count / secs;
         pthread_mutex_lock(&s_fps_text_mu);
@@ -448,9 +454,12 @@ static void fps_track(void)
                 if (!out)
                     out = stderr;
             }
-            fprintf(out, "[FPS] %s  (early %lu of %u, jitter %.2f ms)\n",
-                    s_fps_text, nv2a_early_presents - last_early,
-                    frames_logged, jitter_n ? jitter_sum / jitter_n : 0.0);
+            if (jitter_n)
+                fprintf(out, "[FPS] %s  (early %lu of %u, jitter %.2f ms)\n",
+                        s_fps_text, nv2a_early_presents - last_early, frames_logged, jitter_sum / jitter_n);
+            else
+                fprintf(out, "[FPS] %s  (early %lu of %u)\n",
+                        s_fps_text, nv2a_early_presents - last_early, frames_logged);
             fflush(out);
             last_early = nv2a_early_presents;
         }
