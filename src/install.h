@@ -29,7 +29,8 @@ void ngb_install_set_progress(ngb_progress_fn fn, void *ud);
 /* Stop an install in progress (from another thread): it fails, "Cancelled". */
 void ngb_install_cancel(void);
 
-/* 0 when dir/default.xbe is the one this build was recompiled from. */
+/* 0 when dir/default.xbe is the build this code was recompiled from, or that build's code with
+ * the game's data changed (a translation, a data mod); 1 when it is not (-1: no default.xbe). */
 int ngb_check_xbe(const char *dir);
 
 /* Portable mode (src/main.c): where the program is -- beside the AppImage on Linux -- and the file there

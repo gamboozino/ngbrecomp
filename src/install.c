@@ -9,8 +9,10 @@
  * into <save dir>/game once and runs from there.
  *
  * The code was recompiled from one particular default.xbe, so the installed
- * one is checked against it: a different release or a modified disc would
- * run this code against data it was not built for.
+ * one is checked against it: a disc whose code is not that build's would run
+ * this code against addresses it was not built for. A translation or a data
+ * mod is taken -- its code is the retail build's and only its data differs --
+ * and NGB_ANY_XBE=1 runs a disc that fails the check anyway.
  */
 #include <errno.h>
 #include <stdarg.h>
@@ -44,6 +46,7 @@ static void restart_portable(const char *src);
 /* The retail USA default.xbe the code was recompiled from. */
 #define NGB_XBE_SIZE  4571136u
 #define NGB_XBE_FNV   0x3602ba6a6079c8cdull
+#define NGB_XBE_BASE  0x00010000u
 
 #define SECTOR 2048u
 static const char XDVDFS_MAGIC[20] = "MICROSOFT*XBOX*MEDIA";
@@ -178,19 +181,35 @@ static void fail_mkdirs(const char *path)
 #endif
 }
 
-/* 0 when dir's default.xbe is the one this build was made from. */
-/* The retail XBE's sections, in order: their sizes and FNV-1a hashes. A disc image made with a
- * "media patch" (so a modded console runs it from a burned DVD) has a changed header and
- * certificate, but the game itself -- these sections -- is the same, and so is this build. */
-static const struct { const char *name; uint32_t size; uint64_t fnv; } s_xbe_sections[] = {
-    { ".text",     3576960, 0x4f583bc03974eb5dull }, { "D3DX",          552, 0x802e93d06050ddc2ull },
-    { "DSOUND",     116108, 0x1c717f4fb13d38d9ull }, { "XONLINE",    100604, 0xf7f32cba9715d707ull },
-    { "XNET",        73112, 0x5dd132e95dd1b4ecull }, { "PSFD00",      11192, 0xd033e2d3a400c0d7ull },
-    { "XGRPH",        4388, 0xdb9d2b60f04aec39ull }, { "D3D",         68272, 0x54c712be5b41551bull },
-    { "XPP",         32308, 0x10b3b979adbff38eull }, { ".rdata",     216700, 0x722ca73485b1ee65ull },
-    { ".data",      283752, 0x2990cb7806d3c3d8ull }, { "DOLBY",       29036, 0x08826a2af878f54full },
-    { "XON_RD",       5388, 0xa7c8c48ee45f6184ull }, { "$$XTIMAGE",   10240, 0xe4449f60879ad7d0ull },
-    { "$$XSIMAGE",    4096, 0x0eb831e2c2d793a4ull }, { ".XTLID",       1808, 0x04d0097419f217b7ull },
+/* The retail XBE's sections, in the image's order: where each one is loaded (its virtual address,
+ * its size in memory, the flags it is loaded with) and the size and FNV-1a hash of its file data.
+ * A disc image made with a "media patch" (so a modded console runs it from a burned DVD) has a
+ * changed header and certificate, but the game itself -- these sections -- is the same, and so is
+ * this build. The last field marks the sections a translation or a data mod may change: the code
+ * reaches its strings, tables and pictures through addresses baked into .text, so it needs every
+ * section where and as large as retail loads it, but not the retail bytes in them. */
+static const struct {
+    const char *name;
+    uint32_t va, vsize, size, flags;   /* where it is loaded, how much of it, the file's part, how */
+    uint64_t fnv;
+    int data;                          /* may differ: the game's own data, which a translation changes */
+} s_xbe_sections[] = {
+    { ".text",     0x00011000,  3576960, 3576960, 0x16, 0x4f583bc03974eb5dull, 0 },
+    { "D3DX",      0x0037a480,      552,     552, 0x07, 0x802e93d06050ddc2ull, 0 },
+    { "DSOUND",    0x0037a6c0,   116732,  116108, 0x07, 0x1c717f4fb13d38d9ull, 0 },
+    { "XONLINE",   0x00396ec0,   100604,  100604, 0x26, 0xf7f32cba9715d707ull, 0 },
+    { "XNET",      0x003af7c0,    73112,   73112, 0x36, 0x5dd132e95dd1b4ecull, 0 },
+    { "PSFD00",    0x003c1560,    11192,   11192, 0x16, 0xd033e2d3a400c0d7ull, 0 },
+    { "XGRPH",     0x003c4120,     4388,    4388, 0x07, 0xdb9d2b60f04aec39ull, 0 },
+    { "D3D",       0x003c5260,    82816,   68272, 0x07, 0x54c712be5b41551bull, 0 },
+    { "XPP",       0x003d95e0,    32308,   32308, 0x07, 0x10b3b979adbff38eull, 0 },
+    { ".rdata",    0x003e1420,   216716,  216700, 0x06, 0x722ca73485b1ee65ull, 1 },
+    { ".data",     0x004162c0, 10109756,  283752, 0x07, 0x2990cb7806d3c3d8ull, 1 },
+    { "DOLBY",     0x00dba600,    29056,   29036, 0x26, 0x08826a2af878f54full, 0 },
+    { "XON_RD",    0x00dc1780,     5388,    5388, 0x36, 0xa7c8c48ee45f6184ull, 0 },
+    { "$$XTIMAGE", 0x00dc2ca0,    10240,   10240, 0x38, 0xe4449f60879ad7d0ull, 1 },
+    { "$$XSIMAGE", 0x00dc54a0,     4096,    4096, 0x38, 0x0eb831e2c2d793a4ull, 1 },
+    { ".XTLID",    0x00dc64a0,     1808,    1808, 0x38, 0x04d0097419f217b7ull, 1 },
 };
 
 static uint64_t fnv1a(const unsigned char *p, size_t n, uint64_t h)
@@ -202,14 +221,174 @@ static uint64_t fnv1a(const unsigned char *p, size_t n, uint64_t h)
 
 static uint32_t le32(const unsigned char *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
+/* Why the last check said no, for the player: set by xbe_matches, empty after a yes. */
+static char s_xbe_why[256];
+
+/* The name of a section: its address is virtual and the string itself is in the file. "" when the
+ * address points outside the file or nothing there ends in time. */
+static const char *xbe_section_name(const unsigned char *d, long size, uint32_t base, uint32_t va)
+{
+    const char *s;
+    size_t left;
+
+    if (va < base || (uint64_t)(va - base) >= (uint64_t)size)
+        return "";
+    s = (const char *)d + (va - base);
+    left = (size_t)size - (va - base);
+    return memchr(s, 0, left < 64 ? left : 64) ? s : "";
+}
+
+/* The title's ID and name, from the XBE's certificate: the certificate's address in the header is
+ * virtual (its file offset is the address less the image's base), and in it the ID is a DWORD at
+ * +0x08 and the name 40 UTF-16 characters at +0x0C. 0 when the file has no certificate to read. */
+static int xbe_certificate(const unsigned char *d, long size, uint32_t *id, char *name, size_t n)
+{
+    uint32_t base, va;
+    const unsigned char *c;
+    size_t i;
+
+    if (size < 0x124)
+        return 0;
+    base = le32(d + 0x104);
+    va = le32(d + 0x118);
+    if (va < base || (uint64_t)(va - base) + 0x5C > (uint64_t)size)
+        return 0;
+    c = d + (va - base);
+    *id = le32(c + 0x08);
+    if (name && n) {
+        /* as much of it as is plain ASCII: the rest is a character this message cannot show */
+        for (i = 0; i + 1 < n && i < 40 && (c[0x0C + i * 2] || c[0x0D + i * 2]); i++)
+            name[i] = c[0x0D + i * 2] == 0 && c[0x0C + i * 2] >= 0x20 && c[0x0C + i * 2] < 0x7F
+                    ? (char)c[0x0C + i * 2] : '?';
+        name[i] = 0;
+    }
+    return 1;
+}
+
+/* "title 5443000D \"NINJA GAIDEN BLACK\": " in buf, or "" when there is no certificate to read. */
+static const char *xbe_title(const unsigned char *d, long size, char *buf, size_t n)
+{
+    uint32_t id = 0;
+    char name[64];
+
+    name[0] = 0;
+    if (!xbe_certificate(d, size, &id, name, sizeof name) || !id) {
+        buf[0] = 0;
+        return buf;
+    }
+    if (name[0])
+        snprintf(buf, n, "title %08X \"%s\": ", id, name);
+    else
+        snprintf(buf, n, "title %08X: ", id);
+    return buf;
+}
+
+/* 0 when d -- the image's default.xbe, read whole -- carries the code this build was recompiled
+ * from. The retail build's own file is taken as it is. Any other (a media patch, a translation, a
+ * data mod) is read section by section: every section must be the retail one's size -- so that its
+ * addresses, and the pointers .text holds, still line up -- and every section but the game's data
+ * must be the retail one's bytes. A translation changes only strings, tables and pictures, which
+ * the code reaches by address, so it is accepted; another release's code is not, and says so.
+ * 1 otherwise, with the reason in s_xbe_why. */
+static int xbe_matches(const char *path, const unsigned char *d, long size)
+{
+    int nsec = (int)(sizeof s_xbe_sections / sizeof s_xbe_sections[0]);
+    char who[112], differs[128] = "";
+    uint32_t base, n, table, table_off;
+
+    if (size == NGB_XBE_SIZE && fnv1a(d, (size_t)size, 0xcbf29ce484222325ull) == NGB_XBE_FNV)
+        return 0;                                   /* the very file */
+    if (size < 0x180 || memcmp(d, "XBEH", 4) != 0) {
+        snprintf(s_xbe_why, sizeof s_xbe_why, "it is not an Xbox executable");
+        return 1;
+    }
+    base = le32(d + 0x104);
+    n = le32(d + 0x11C);
+    table = le32(d + 0x120);
+    if (base != NGB_XBE_BASE || n != (uint32_t)nsec || table < base ||
+        (uint64_t)(table - base) + (uint64_t)nsec * 56 > (uint64_t)size) {
+        snprintf(s_xbe_why, sizeof s_xbe_why, "its sections are not laid out as the retail build's");
+        return 1;
+    }
+    table_off = table - base;
+    /* Where and how big first, then the bytes: the loader puts every section where its header says,
+     * and the retail code holds absolute addresses into them, so one that moved -- or that is not
+     * loaded at all, its executable or preload flag gone -- would leave that code reading zeros. */
+    for (int i = 0; i < nsec; i++) {
+        const unsigned char *h = d + table_off + (size_t)i * 56;
+        uint32_t flags = le32(h + 0x00), va = le32(h + 0x04), vsize = le32(h + 0x08);
+        uint32_t raw = le32(h + 0x0C), rsz = le32(h + 0x10);
+        const char *got = xbe_section_name(d, size, base, le32(h + 0x14));
+
+        if (strcmp(got, s_xbe_sections[i].name) != 0) {
+            snprintf(s_xbe_why, sizeof s_xbe_why,
+                     "its sections are not the retail build's (section %d is \"%.32s\", not \"%s\")",
+                     i, got[0] ? got : "?", s_xbe_sections[i].name);
+            return 1;
+        }
+        if (va != s_xbe_sections[i].va) {
+            snprintf(s_xbe_why, sizeof s_xbe_why, "its %s section is loaded at %08X, not %08X", got, va,
+                     s_xbe_sections[i].va);
+            return 1;
+        }
+        if (vsize != s_xbe_sections[i].vsize) {
+            snprintf(s_xbe_why, sizeof s_xbe_why, "its %s section is %u bytes in memory, not %u", got,
+                     vsize, s_xbe_sections[i].vsize);
+            return 1;
+        }
+        if (rsz != s_xbe_sections[i].size) {
+            snprintf(s_xbe_why, sizeof s_xbe_why, "its %s section is %u bytes in the file, not %u", got,
+                     rsz, s_xbe_sections[i].size);
+            return 1;
+        }
+        if (flags != s_xbe_sections[i].flags) {
+            snprintf(s_xbe_why, sizeof s_xbe_why, "its %s section has flags %08X, not %08X", got, flags,
+                     s_xbe_sections[i].flags);
+            return 1;
+        }
+        if ((uint64_t)raw + rsz > (uint64_t)size) {
+            snprintf(s_xbe_why, sizeof s_xbe_why, "its %s section is outside the file", got);
+            return 1;
+        }
+    }
+    /* Then the bytes: the code and the import stubs must be the retail build's; the game's data
+     * may be a translation's or a mod's. */
+    for (int i = 0; i < nsec; i++) {
+        const unsigned char *h = d + table_off + (size_t)i * 56;
+        uint32_t raw = le32(h + 0x0C), rsz = le32(h + 0x10);
+        size_t len;
+
+        if (fnv1a(d + raw, rsz, 0xcbf29ce484222325ull) == s_xbe_sections[i].fnv)
+            continue;
+        if (!s_xbe_sections[i].data) {
+            snprintf(s_xbe_why, sizeof s_xbe_why,
+                     "the game's code is not the retail build's (its %s section differs)",
+                     s_xbe_sections[i].name);
+            return 1;
+        }
+        len = strlen(differs);
+        snprintf(differs + len, sizeof differs - len, "%s%s", len ? ", " : "", s_xbe_sections[i].name);
+    }
+    xbe_title(d, size, who, sizeof who);
+    if (!differs[0]) {
+        fprintf(stderr, "%s: %sa modified header (a media patch?), the game's sections as in the "
+                        "retail release: accepted\n", path, who);
+        return 0;
+    }
+    fprintf(stderr, "%s: %sthe retail USA build's code with the game's data changed (%s): a "
+                    "translation or a data mod, accepted\n", path, who, differs);
+    return 0;
+}
+
 int ngb_check_xbe(const char *dir)
 {
     char p[4096];
     unsigned char *d;
     long size;
     FILE *f;
-    int ok = 1, nsec = (int)(sizeof s_xbe_sections / sizeof s_xbe_sections[0]);
+    int rc;
 
+    s_xbe_why[0] = 0;
     snprintf(p, sizeof p, "%s/default.xbe", dir);
     f = fopen(p, "rb");
     if (!f)
@@ -221,50 +400,16 @@ int ngb_check_xbe(const char *dir)
     if (!d || fread(d, 1, (size_t)size, f) != (size_t)size) {
         fclose(f);
         free(d);
+        snprintf(s_xbe_why, sizeof s_xbe_why, "it cannot be read");
         return 1;
     }
     fclose(f);
-    if ((uint64_t)size == NGB_XBE_SIZE && fnv1a(d, (size_t)size, 0xcbf29ce484222325ull) == NGB_XBE_FNV) {
-        free(d);
-        return 0;                                   /* the very file */
-    }
-    /* Otherwise the game's sections, wherever the header puts them. */
-    if (size < 0x180 || memcmp(d, "XBEH", 4) != 0 || le32(d + 0x11C) != (uint32_t)nsec) {
-        fprintf(stderr, "%s: not this game's XBE (%ld bytes)\n", p, size);
-        free(d);
-        return 1;
-    }
-    {
-        uint32_t base = le32(d + 0x104), table = le32(d + 0x120) - base;
-        for (int i = 0; i < nsec; i++) {
-            const unsigned char *h = d + table + (size_t)i * 56;
-            uint32_t raw, rsz;
-            uint64_t got;
-            if (table + (size_t)(i + 1) * 56 > (size_t)size) {
-                ok = 0;
-                break;
-            }
-            raw = le32(h + 12);
-            rsz = le32(h + 16);
-            if (rsz != s_xbe_sections[i].size || (uint64_t)raw + rsz > (uint64_t)size) {
-                fprintf(stderr, "%s: section %s is %u bytes, not %u\n", p, s_xbe_sections[i].name, rsz,
-                        s_xbe_sections[i].size);
-                ok = 0;
-                continue;
-            }
-            got = fnv1a(d + raw, rsz, 0xcbf29ce484222325ull);
-            if (got != s_xbe_sections[i].fnv) {
-                fprintf(stderr, "%s: section %s differs (%016llx)\n", p, s_xbe_sections[i].name,
-                        (unsigned long long)got);
-                ok = 0;
-            }
-        }
-    }
+    rc = xbe_matches(p, d, size);
     free(d);
-    if (ok)
-        fprintf(stderr, "%s: a modified header (a media patch?), the game's sections as in the retail "
-                        "release: accepted\n", p);
-    return ok ? 0 : 1;
+    if (rc)
+        fprintf(stderr, "%s: not the retail USA Ninja Gaiden Black (NTSC) this build was made "
+                        "from: %s\n", p, s_xbe_why);
+    return rc;
 }
 
 /* ---- XDVDFS ------------------------------------------------------------ */
@@ -819,8 +964,8 @@ static int install_from(const char *src, const char *dest)
     s_cancel = 0;
     rc = install_image(src, part);
     if (rc == 0 && ngb_check_xbe(part) == 1 && !getenv("NGB_ANY_XBE")) {
-        fail("This is not the retail USA Ninja Gaiden Black (NTSC) this "
-             "build was made from.");
+        fail("This is not the retail USA Ninja Gaiden Black (NTSC) this build was made from: %s. "
+             "To install it anyway, set NGB_ANY_XBE=1.", s_xbe_why);
         rc = -1;
     }
     if (rc == 0) {
@@ -910,8 +1055,8 @@ int ngb_install(const char *src, const char *installed, char *out, size_t n)
     case 1:
         if (getenv("NGB_ANY_XBE"))
             return 0;
-        fail("%s/default.xbe is not the retail USA Ninja Gaiden Black (NTSC) "
-             "this build was made from.", out);
+        fail("%s/default.xbe is not the retail USA Ninja Gaiden Black (NTSC) this build was made from: "
+             "%s. To install it anyway, set NGB_ANY_XBE=1.", out, s_xbe_why);
         return -1;
     default:
         fail("There is no default.xbe in %s.", out);
@@ -1322,13 +1467,18 @@ check:
     case 0:
         return 0;
     case 1:
-        fprintf(stderr, "%s/default.xbe is not the retail USA Ninja Gaiden Black "
-                        "this build was made from.\n", out);
         if (getenv("NGB_ANY_XBE"))
             return 0;
+        fprintf(stderr, "%s/default.xbe is not the retail USA Ninja Gaiden Black this build was "
+                        "made from: %s. To run it anyway, set NGB_ANY_XBE=1.\n", out, s_xbe_why);
 #if defined(_WIN32)
-        win_tell("The installed game is not the retail USA Ninja Gaiden Black (NTSC) "
-                 "this build was made from.");
+        {   /* (no console behind the window: the reason goes in the dialog too) */
+            char msg[600];
+            snprintf(msg, sizeof msg, "The installed game is not the retail USA Ninja Gaiden Black "
+                     "(NTSC) this build was made from:\n\n%s.\n\nIf it is another release, set the "
+                     "environment variable NGB_ANY_XBE to 1 and start the program again.", s_xbe_why);
+            win_tell(msg);
+        }
 #endif
         return -1;
     default:
