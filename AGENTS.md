@@ -77,8 +77,9 @@ Driving and watching a headless run:
   frames. Keep `render_scale` low in test settings, or the captures fill `/tmp`.
 - `NV2A_FPS_LOG=1`: frame rate, and `[LAT]` presentation timing.
 - `NV2A_FLIP_WAIT_MS=<ms>` (4 by default, up to 40): how long each vblank tick waits for the title's flip
-  before it goes on without it (#244, #288). `NGB_TEST_SWAP_BURN_US=<us>[:<up to us more>]` keeps the game
-  thread busy that long each frame, standing in for a slower CPU.
+  before it goes on without it (#244, #288). `NGB_TEST_SWAP_BURN_US=<us>[:<up to us more>[:<spike us>:<n>]]`
+  keeps the game thread busy that long each frame (and that much longer for one frame in n), standing in for a
+  slower CPU.
 - `NV2A_PACE_LOG=1`: every 2 s, how the frames are paced (`[PACE]`): the vblank's lateness, the flip releases
   and stalls, the guest's naps polling the GPU, the software-method interrupts, why the PFIFO thread was idle
   (no commands, a flip, held at the Multithreaded Renderer's gate...), and with that renderer its hand-overs
