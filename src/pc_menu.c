@@ -390,11 +390,28 @@ static void unl_show(int on, int row);
 static uint32_t s_highlight;                              /* guest: a byte per row */
 static uint32_t s_pages_recomp;                           /* guest: RECOMP SETTINGS' page table */
 
+/* The text as the game's own font can letter it. The engine draws these rows itself, so the port
+ * cannot letter them in its own typeface the way its own pages do (NGB_OWN_FONT, src/pause_tab.c):
+ * a translated disc may have redrawn that font's capital letters for its language, leaving the small
+ * ones alone, so with NGB_OWN_FONT the rows are written in small letters. */
+static const char *small_letters(const char *t, char *buf, size_t n)
+{
+    size_t i;
+    if (!t || !getenv("NGB_OWN_FONT"))
+        return t;
+    for (i = 0; t[i] && i + 1 < n; i++)
+        buf[i] = t[i] >= 'A' && t[i] <= 'Z' ? (char)(t[i] - 'A' + 'a') : t[i];
+    buf[i] = 0;
+    return buf;
+}
+
 static uint32_t guest_string(const char *t)
 {
-    uint32_t n = (uint32_t)strlen(t) + 1, va = xbox_HeapAlloc(n, 4);
+    char small[512];
+    const char *s = small_letters(t, small, sizeof small);
+    uint32_t n = (uint32_t)strlen(s) + 1, va = xbox_HeapAlloc(n, 4);
     if (va)
-        memcpy((void *)XBOX_PTR(va), t, n);
+        memcpy((void *)XBOX_PTR(va), s, n);
     return va;
 }
 

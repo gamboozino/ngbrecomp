@@ -15,6 +15,15 @@ resolutions, widescreen and ultrawide, keyboard and mouse, rebindable controls a
 sound, movies, text): on first start it asks for your disc image and installs the game from it. It is made for the **retail USA
 release** (NTSC-U, title ID `5443000D`) and checks for it.
 
+**Translated discs** are taken too, as long as they are that build's code: the check compares the
+sections' layout (where each is loaded, how large, with which flags) and the bytes of `.text` and the
+import sections, and lets the game's data (`.rdata`, `.data`, the title-screen images) differ — which is
+what a fan translation changes. A disc of another release's code is still refused, with the reason in
+the log; `NGB_ANY_XBE=1` runs one anyway. A translation that also redrew the game's menu font (Cyrillic
+letters in the Latin slots, so its own text reads right) needs `NGB_OWN_FONT=1` as well: the port's own
+pages are then lettered in the typefaces it carries, and the words the engine draws for it (the main
+menu's entries, the settings rows) in small letters, which such fonts leave alone.
+
 ## Screenshots
 
 <table>
@@ -168,7 +177,8 @@ The voices (English or Japanese) are the game's own choice in OPTIONS, with eith
 **Options (`env.txt`):** a text file named `env.txt` beside the saves (the first row above), or next to the
 program, with one option a line (`NAME=value`), for the options that have no menu, like `NV2A_TEX_DUMP` for
 texture packs. Each one can also be set in the environment, which wins (and the one beside the saves wins over the
-one next to the program). The log says which files were read.
+one next to the program). The log says which files were read. `NGB_OWN_FONT=1` is one of them: the port's own
+pages in its own typefaces, for a translated disc whose font would letter them wrongly (above).
 
 **Icon:** the program's icon (the title logo's first letter) is made from your own game files, since it is game
 art and not in the release. It is the window's icon, and on Linux it is also written to

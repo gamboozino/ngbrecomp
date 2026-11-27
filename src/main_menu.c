@@ -64,15 +64,21 @@ void ngb_general_page_init(void)
         s_main_text[i][0] = MEM32(MENU_TEXT(4 + (i == 2 ? 3 : i)));
         s_main_text[i][1] = MEM32(MENU_TEXT(4 + (i == 2 ? 3 : i)) + 4);
     }
-    {   /* COMING ATTRACTIONS' text (place 6) ours, OPTIONS' (place 7) ours */
-        static const char t6[] = "RECOMP SETTINGS", t7[] = "EXIT GAME";
-        uint32_t va6 = xbox_HeapAlloc(sizeof t6, 4), va7 = xbox_HeapAlloc(sizeof t7, 4);
+    {   /* COMING ATTRACTIONS' text (place 6) ours, OPTIONS' (place 7) ours. The game draws them in its own
+         * menu font, which cannot be swapped the way our own pages' lettering is (src/pause_tab.c,
+         * NGB_OWN_FONT): a translated disc may have redrawn that font's capital letters for its language,
+         * so with NGB_OWN_FONT these two are written in small letters, which such a font leaves alone. */
+        static const char t6[] = "RECOMP SETTINGS", t6_small[] = "recomp settings";
+        static const char t7[] = "EXIT GAME", t7_small[] = "exit game";
+        const int ours = getenv("NGB_OWN_FONT") != NULL;
+        const char *s6 = ours ? t6_small : t6, *s7 = ours ? t7_small : t7;
+        uint32_t va6 = xbox_HeapAlloc(strlen(s6) + 1, 4), va7 = xbox_HeapAlloc(strlen(s7) + 1, 4);
         if (va6) {
-            memcpy((void *)XBOX_PTR(va6), t6, sizeof t6);
+            memcpy((void *)XBOX_PTR(va6), s6, strlen(s6) + 1);
             MEM32(MENU_TEXT(6)) = MEM32(MENU_TEXT(6) + 4) = va6;
         }
         if (va7) {
-            memcpy((void *)XBOX_PTR(va7), t7, sizeof t7);
+            memcpy((void *)XBOX_PTR(va7), s7, strlen(s7) + 1);
             MEM32(MENU_TEXT(7)) = MEM32(MENU_TEXT(7) + 4) = va7;
         }
     }

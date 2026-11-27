@@ -508,11 +508,28 @@ static int glyph(int c, float cell[4])
     return t;
 }
 
+/* NGB_OWN_FONT=1: our own pages in the typefaces built in (Liberation Serif, and EB Garamond for the
+ * plates), never in the game's menu font. A disc whose text was translated may redraw that font's
+ * glyphs for its own language -- Cyrillic letters in the Latin slots, so the translation's text reads
+ * right -- and then every word of ours comes out in the wrong letters ("Ыpecial Attack"). The game
+ * still has its font; ours keeps to what the port carries, which is English. */
+static int s_own_font = -1;
+static int own_font(void)
+{
+    if (s_own_font < 0)
+        s_own_font = getenv("NGB_OWN_FONT") != NULL;
+    return s_own_font;
+}
+
 /* Once the font is there: the capital's place in its cell. */
 static int game_font_ready(void)
 {
     float c[4];
-    int t = glyph('H', c);
+    int t;
+
+    if (own_font())
+        return 0;   /* (our lettering: the game's font is not used at all) */
+    t = glyph('H', c);
     if (t < 0)
         return 0;
     int x0 = (int)c[0], x1 = (int)c[2], y0 = (int)c[1], y1 = (int)c[3], top = -1, bot = -1;
@@ -1799,18 +1816,23 @@ static int picture_into(uint32_t *px, int pw, int ph, float x0, float y0, float 
 static void key_icon(uint32_t *px, int pw, int ph, float x0, float y0, float x1, float y1, int in)
 {
     float at[4];
-    if (picture_icon(px, pw, ph, x0, y0, x1, y1, key_picture(in), at))
+    /* The game's own key pictures (W_Key_Dark and its like) are lettered with its font, which a translated
+     * disc may have redrawn for its language: NGB_OWN_FONT types the names on a blank key instead. */
+    if (!own_font() && picture_icon(px, pw, ph, x0, y0, x1, y1, key_picture(in), at))
         return;
     char label[64];
     ngb_bind_input_name(in, label, sizeof label);
-    if (ngb_gp_ready()) {                              /* the key's name in the game's own letters */
+    if (!own_font() && ngb_gp_ready()) {                /* the key's name in the game's own letters (a
+                                                        * translated disc's font would spell it in its
+                                                        * own alphabet: NGB_OWN_FONT types it instead) */
         const NgbPic *g = ngb_gp_key_label(label);
         if (g && picture_into(px, pw, ph, x0, y0, x1, y1, g->px, g->w, g->h, 1, at))
             return;
-        if (picture_icon(px, pw, ph, x0, y0, x1, y1, "Blank_Black_Normal", at)) {   /* the game's blank key */
-            typed_label(px, pw, ph, at[0], at[1], at[2], at[3], label);
-            return;
-        }
+    }
+    if (ngb_gp_ready() &&
+        picture_icon(px, pw, ph, x0, y0, x1, y1, "Blank_Black_Normal", at)) {   /* the game's blank key */
+        typed_label(px, pw, ph, at[0], at[1], at[2], at[3], label);
+        return;
     }
     typed_icon(px, pw, ph, x0, y0, x1, y1, label, at);
 }
@@ -2315,7 +2337,7 @@ static int pt_ready(void)
     uint32_t def = sprite_def(EXIT_PLATE);
     if (!def)
         return 0;                                   /* not loaded yet: later */
-    s_game_font = 1;
+    s_game_font = !own_font();   /* (NGB_OWN_FONT=1: ours in the port's typefaces, see own_font) */
     if (s_game_font && !game_font_ready())
         return 0;                                   /* the letters: later */
     s_ready = 0;
