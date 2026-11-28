@@ -4034,9 +4034,126 @@ def _is_rep_compare(insn):
 # Black spent most of every frame in `mov ecx,[edx]; ...; jb` until the GPU
 # caught up. Its back edge gets RECOMP_SPIN, which yields now and then and,
 # when the same loop keeps going, sleeps briefly (recomp_spin_pause).
+#
+# A loop that reads a different place each time round is not waiting, it is
+# searching: `inc al; movzx ebp,al; cmp word [esi+ebp*2],imm; jb` walks a
+# table, `mov eax,[eax]; test eax,eax; jne` a list. Those had the same shape
+# and got RECOMP_SPIN too; a long search then slept its way through (Ninja
+# Gaiden Black's sub_002FB900 runs a million rounds a frame as a mission
+# ends: 10 pictures a second for seconds). So the places read must be the
+# same every round: no address may use a register the loop steps
+# (_spin_walks_memory).
 _SPIN_OK = frozenset({"mov", "movzx", "movsx", "cmp", "test", "and", "or",
                       "xor", "add", "sub", "lea", "inc", "dec", "shl", "shr",
                       "sar", "pause", "nop", "neg", "not"})
+
+
+_SPIN_REG = {part: full
+             for full, parts in (("eax", "eax ax al ah"), ("ebx", "ebx bx bl bh"),
+                                 ("ecx", "ecx cx cl ch"), ("edx", "edx dx dl dh"),
+                                 ("esi", "esi si"), ("edi", "edi di"),
+                                 ("ebp", "ebp bp"), ("esp", "esp sp"))
+             for part in parts.split()}
+
+
+def _spin_reg(name):
+    return _SPIN_REG.get((name or "").lower())
+
+
+def _spin_addr_regs(op):
+    return {r for r in (_spin_reg(op.mem_base), _spin_reg(op.mem_index)) if r}
+
+
+_SPIN_FULL = frozenset(_SPIN_REG.values())
+
+
+def _spin_walks_memory(insns):
+    """True when some address the loop reads differs from one round to the
+    next. The body is followed in order, each register's value kept as the
+    set of registers it is made from as they stood when the round began: a
+    register loaded anew from a fixed place is made from nothing
+    (`mov eax,[g]; mov eax,[eax+0x10]` waits on g->field), one that
+    arithmetic steps is made from itself (`inc al`), one loaded through
+    itself too (`mov eax,[eax]`; `mov ebx,eax; mov eax,[ebx+4]`). A register
+    varies when the loop writes it and what it is made from leads back to
+    such a register; an address must use none that does. A write to part of
+    a register (`mov al,[edx]`) leaves the rest as it was, which is not a
+    step: that is kept apart as "eax~"."""
+    made_from = {}                      # register -> registers at the round's start
+    written = set()
+    addresses = []                      # what each address read is made from
+
+    def value(reg):
+        return made_from.get(reg, {reg})
+
+    def of_address(op):
+        deps = set()
+        for r in _spin_addr_regs(op):
+            deps |= value(r)
+        return deps
+
+    def of_source(op):
+        if op.type == "reg":
+            r = _spin_reg(op.reg)
+            return set(value(r)) if r else set()
+        if op.type == "mem":
+            return of_address(op)
+        return set()
+
+    for ins in insns:
+        ops = list(ins.operands)
+        m = ins.mnemonic
+        if m != "lea":
+            for o in ops:
+                if o.type == "mem":
+                    addresses.append(of_address(o))
+        if m in ("cmp", "test", "nop", "pause") or not ops or ops[0].type != "reg":
+            continue
+        name = (ops[0].reg or "").lower()
+        dst = _spin_reg(name)
+        if not dst:
+            continue
+        whole = name in _SPIN_FULL      # al, ax: the rest of the register stays
+        srcs = ops[1:]
+        if m in ("mov", "movzx", "movsx", "lea"):
+            new = set()
+            for o in srcs:
+                new |= of_source(o)
+        elif m in ("xor", "sub") and srcs and srcs[0].type == "reg" \
+                and (srcs[0].reg or "").lower() == name:
+            new = set()                 # xor r,r: the same zero every round
+        else:
+            new = {x.rstrip("~") for x in value(dst)}   # inc, add...: steps itself
+            whole = True
+            for o in srcs:
+                new |= of_source(o)
+        if not whole:                   # (the rest kept: "eax~", unless a step this round made it)
+            new |= {dst + "~" if x == dst and dst not in written else x for x in value(dst)}
+        made_from[dst] = new
+        written.add(dst)
+
+    def plain(deps, but=None):          # the registers, a kept rest being its register
+        return {x.rstrip("~") for x in deps if x != but}
+
+    def leads_to_itself(r):
+        seen, todo = set(), [x for x in plain(value(r), r + "~") if x in written]
+        while todo:
+            x = todo.pop()
+            if x == r:
+                return True
+            if x not in seen:
+                seen.add(x)
+                todo.extend(y for y in plain(value(x), x + "~") if y in written)
+        return False
+
+    stepping = {r for r in written if leads_to_itself(r)}
+    varying = set(stepping)             # and every register made, through others, from one that steps
+    while True:
+        more = {r for r in written - varying if plain(value(r), r + "~") & varying}
+        if not more:
+            break
+        varying |= more
+    return any(plain(deps) & varying for deps in addresses)
 
 
 def _is_spin_block(insns):
@@ -4046,7 +4163,8 @@ def _is_spin_block(insns):
     if not last.is_cond_jump or last.jump_target != insns[0].address:
         return False
     reads_mem = False
-    for ins in insns[:-1]:
+    body = insns[:-1]
+    for ins in body:
         m = ins.mnemonic
         if (ins.is_branch or ins.is_call or ins.is_ret or m not in _SPIN_OK):
             return False
@@ -4055,7 +4173,9 @@ def _is_spin_block(insns):
             return False            # a store: real work, not a wait
         if m != "lea" and any(o.type == "mem" for o in ops):
             reads_mem = True
-    return reads_mem
+    if not reads_mem:
+        return False
+    return not _spin_walks_memory(body)   # another place each round: a search
 
 
 def lift_basic_block(lifter, bb, flag_state=None):
