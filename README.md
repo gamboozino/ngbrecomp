@@ -1,4 +1,4 @@
-![Ninja Gaiden Black Recompiled](docs/images/banner.jpg)
+![Ninja Gaiden Black Recompiled](docs/images/banner.png)
 
 # Ninja Gaiden Black Recompiled
 
@@ -383,7 +383,7 @@ If you'd like to support the project: [GitHub Sponsors](https://github.com/spons
   [Mobile Controls](https://kenney.nl/assets/mobile-controls) (CC0)
 - [Pillow](https://python-pillow.github.io): its resampling and shape drawing, ported to C for the button
   prompts and touch pieces made from the game's art (MIT-CMU)
-- Banner lettering: Chakra Petch by Cadson Demak (SIL Open Font License)
+- Banner lettering: GAIDEN and RECOMPILED in Russo One by Jovanny Lemonad (SIL Open Font License)
 
 ### Contributors
 
