@@ -310,11 +310,11 @@ Bugs the original game has too, fixed here:
 
 - Volcano areas: a faint, streaky band at the right edge of the screen, where the heat haze read past
   the side of the screen and repeated its last column. The haze now fades out near the edges
-  (`NGB_D3D_HAZE_CLAMP=1` brings the original look back) (#55).
+  (`NGB_D3D_HAZE_CLAMP=1` brings the original look back) ([#55](https://github.com/gamboozino/ngbrecomp/issues/55)).
 - The Kitetsu's sheathe click played only at its middle level: the game's motion scripts check for
-  that one item. It now plays at levels 1 and 3 too (#229).
+  that one item. It now plays at levels 1 and 3 too ([#229](https://github.com/gamboozino/ngbrecomp/issues/229)).
 - Original HUD: the box behind the Ninpo orb showed as black pixels at the orb frame's edge on bright
-  backgrounds. With HUD Aspect Corrected, the Ninpo icon also sits in the middle of its frame (#272).
+  backgrounds. With HUD Aspect Corrected, the Ninpo icon also sits in the middle of its frame ([#272](https://github.com/gamboozino/ngbrecomp/issues/272)).
 
 ## Known issues
 
