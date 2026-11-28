@@ -8,6 +8,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <dirent.h>
+#include <strings.h>
+#include <unistd.h>
+#endif
 
 int xbox_mod_file(const char *rel, char *out, size_t n);   /* xboxrecomp kernel_path.c: a mod in a game file's place */
 
@@ -44,6 +49,30 @@ static uint64_t s_message_until;
 static unsigned s_revision;
 
 void ngb_quick_set_game_dir(const char *path) { snprintf(s_game_dir, sizeof s_game_dir, "%s", path); }
+/* A game file's path, a mod's in its place first (src/game_prompts.c reads the HUD's sprites through it). The
+ * name is matched without regard to case, as the game opens its files: a folder copied with DEMO.AFS plays */
+int ngb_game_file_path(const char *archive, char *out, size_t n)
+{
+    if (xbox_mod_file(archive, out, n))
+        return 1;
+    if (!s_game_dir[0])
+        return 0;
+    snprintf(out, n, "%s/%s", s_game_dir, archive);
+#ifndef _WIN32
+    if (access(out, F_OK) != 0) {
+        DIR *d = opendir(s_game_dir);
+        struct dirent *e;
+        while (d && (e = readdir(d)))
+            if (!strcasecmp(e->d_name, archive)) {
+                snprintf(out, n, "%s/%s", s_game_dir, e->d_name);
+                break;
+            }
+        if (d)
+            closedir(d);
+    }
+#endif
+    return 1;
+}
 
 /* Hidden regression runs use an SDL virtual controller and window events.
  * This exercises the real backend, without sending input to the desktop. */
@@ -419,10 +448,8 @@ static Icon *icon(const char *name)
     char path[4200];
     FILE *f = xbox_mod_file(archive, path, sizeof path) ? fopen(path, "rb") : NULL;   /* (a mod's, as the game
                                                                                          * reads it: #179) */
-    if (!f) {
-        snprintf(path, sizeof path, "%s/%s", s_game_dir, archive);
+    if (!f && ngb_game_file_path(archive, path, sizeof path))
         f = fopen(path, "rb");
-    }
     if (!f)
         return it;
     unsigned char header[8];

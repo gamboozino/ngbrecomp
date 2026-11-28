@@ -52,7 +52,8 @@ extern const int ngb_touch_png_count;   /* (CMakeLists.txt: the stand-in pieces 
 __attribute__((weak)) const NgbPic *ngb_gp_touch(const char *piece);
 
 enum Kind { BUTTON, STICK, DPAD };
-enum Id { LSTICK, RSTICK, DPAD_ID, BA, BB, BX, BY, LB, RB, LT, RT, BACK, START, LS, RS, SWAP, OPACITY, NCTRL };
+enum Id { LSTICK, RSTICK, DPAD_ID, BA, BB, BX, BY, LB, RB, LT, RT, BACK, START, LS, RS, SWAP, OPACITY, NINPO, WINDJUMP,
+           NCTRL };
 
 typedef struct {
     enum Kind kind;
@@ -89,7 +90,18 @@ static const Ctrl s_ctrl[NCTRL] = {
     [SWAP]    = { BUTTON, 0, 0.05f,  0.36f,  0.035f, "layout", "<>", 0xE6E6E6, "swap" },   /* the layout switch */
     [OPACITY] = { BUTTON, 0, 0.05f,  0.46f,  0.035f, "opacity", "%", 0xE6E6E6, "opacity" },   /* how solid the
                                                        controls are drawn, a step each tap (#285), under the switch */
+    /* two buttons in one touch (#285): Y+B above B and Y; X+A below X and A (above them is LT, guard) */
+    [NINPO]    = { BUTTON, 1, 0.21f,  0.44f,  0.055f, "Y+B", "Y+B", 0xE6E6E6, "ninpo" },
+    [WINDJUMP] = { BUTTON, 1, 0.30f,  0.86f,  0.055f, "X+A", "X+A", 0xE6E6E6, "windjump" },
 };
+
+/* NINPO and WINDJUMP press two buttons (Ninpo, Y+B; X+A, the jump off a wall or an enemy) in the same frame,
+ * which two thumbs on glass rarely manage; their pieces are the HUD's own art drawn again (src/game_prompts.c).
+ * The arcade (no game_prompts.c there) has no use for them: not shown, not touched. */
+static bool shown(int ctrl)
+{
+    return (ctrl != NINPO && ctrl != WINDJUMP) || ngb_gp_touch;
+}
 
 /* Classic: the places of 0.9.x's controls, in the same pictures (#285: Block held by a left finger at the top
  * left, the camera's RT at the top right with the camera toggle (RS) under it, the left stick low and large where
@@ -98,18 +110,20 @@ static const Ctrl s_ctrl[NCTRL] = {
  * (#285 again): the left stick further in from the left edge (a roll left while blocking; the d-pad stays as near
  * Back as it can), the face buttons lower within the thumb's reach, Block larger and further in (the health bar
  * shows through it: the opacity button), the Black button beside it moved out of its way. Classic is the default
- * from then on. */
+ * from then on. After 1.0.4 (#285, from the player's own drawing): the left stick further in again, Block a little
+ * further in, the face buttons lower and further in, Black moved over beside White above them, and two buttons
+ * that press two at once (Ninpo, Y+B; X+A) above the face buttons. */
 static const struct { int edge; float x, y, r; } s_classic[NCTRL] = {
-    [LSTICK]  = { 0, 0.34f, 0.70f, 0.17f },
+    [LSTICK]  = { 0, 0.43f, 0.72f, 0.17f },
     [RSTICK]  = { 1, 0.72f, 0.66f, 0.12f },
     [DPAD_ID] = { 0, 0.74f, 0.84f, 0.12f },
-    [BA]      = { 1, 0.28f, 0.78f, 0.075f },
-    [BB]      = { 1, 0.16f, 0.66f, 0.07f },
-    [BX]      = { 1, 0.40f, 0.66f, 0.075f },
-    [BY]      = { 1, 0.28f, 0.54f, 0.075f },
-    [LB]      = { 0, 0.33f, 0.30f, 0.05f },
-    [RB]      = { 1, 0.30f, 0.28f, 0.05f },
-    [LT]      = { 0, 0.19f, 0.15f, 0.10f },
+    [BA]      = { 1, 0.33f, 0.83f, 0.075f },
+    [BB]      = { 1, 0.21f, 0.71f, 0.07f },
+    [BX]      = { 1, 0.45f, 0.71f, 0.075f },
+    [BY]      = { 1, 0.33f, 0.59f, 0.075f },
+    [LB]      = { 1, 0.45f, 0.27f, 0.05f },
+    [RB]      = { 1, 0.30f, 0.25f, 0.05f },
+    [LT]      = { 0, 0.24f, 0.15f, 0.10f },
     [RT]      = { 1, 0.13f, 0.14f, 0.085f },
     [BACK]    = { 2, -0.085f, 0.89f, 0.055f },
     [START]   = { 2, 0.085f, 0.89f, 0.055f },
@@ -118,6 +132,8 @@ static const struct { int edge; float x, y, r; } s_classic[NCTRL] = {
     [SWAP]    = { 0, 0.05f, 0.41f, 0.035f },
     [OPACITY] = { 0, 0.05f, 0.52f, 0.035f },   /* (under the switch, clear of Block; a near miss of it not the
                                                  * switch, which lets go of all) */
+    [NINPO]    = { 1, 0.19f, 0.46f, 0.06f },    /* (above B and Y) */
+    [WINDJUMP] = { 1, 0.47f, 0.46f, 0.06f },    /* (above X and Y) */
 };
 int ngb_pc_setting(int which);                    /* src/ingame_menu.c (48: the touch layout) */
 void ngb_pc_set_setting(int which, int value);
@@ -167,7 +183,8 @@ static int s_standin_places;   /* the stand-ins shown (under s_lock; d_standin t
 
 static Place place_at(const Ctrl *c, float aspect, int standin, int layout)
 {
-    if (standin && (c == &s_ctrl[LB] || c == &s_ctrl[RB]))
+    if (standin && layout != 1 && (c == &s_ctrl[LB] || c == &s_ctrl[RB]))   /* (Classic has Black on the left
+                                                                              * of the pair already) */
         c = &s_ctrl[c == &s_ctrl[LB] ? RB : LB];
     Place p = { c->x, c->y, c->r };
     int edge = c->edge;
@@ -190,6 +207,10 @@ static Place place_at(const Ctrl *c, float aspect, int standin, int layout)
         } else if (c == &s_ctrl[RS]) {
             p.x = 0.06f;
             p.y = 0.79f;
+        } else if (c == &s_ctrl[NINPO]) {
+            p.x = 0.22f;   /* (the face buttons higher: between Black and White, over B) */
+            p.y = 0.36f;
+            p.r = 0.05f;   /* (a little smaller there: clear of Black and White) */
         } else if (c >= &s_ctrl[BA] && c <= &s_ctrl[BY]) {
             p.y -= 0.08f;   /* (the face buttons where they were before #285: lower, X met the right stick here) */
         }
@@ -215,6 +236,11 @@ static Place place_at(const Ctrl *c, float aspect, int standin, int layout)
         p.x = p.x > clear ? p.x : clear;
         p.x = p.x < most ? p.x : most;
     }
+    if (c == &s_ctrl[LSTICK] && layout == 1) {   /* clear of the d-pad, which comes in from the middle on a less
+                                                  * wide screen (16:9: below, the stick would take its upper left) */
+        float dpad = aspect / 2 - 0.28f, most = (dpad < s_classic[DPAD_ID].x ? dpad : s_classic[DPAD_ID].x) - 0.30f;
+        p.x = p.x < most ? p.x : most;
+    }
     if (c == &s_ctrl[RSTICK] && aspect >= NARROW && layout != 1) {   /* (in from the middle on a less wide screen) */
         float most = aspect / 2 - 0.12f;   /* (at 3:2 the right stick clear of X) */
         p.x = p.x < most ? p.x : most;
@@ -237,6 +263,8 @@ static int hit(float x, float y, bool buttons_only)
     int best = -1;
     float best_d = 1e9f;
     for (int i = 0; i < NCTRL; i++) {
+        if (!shown(i))
+            continue;
         const Ctrl *c = &s_ctrl[i];
         if (buttons_only && c->kind != BUTTON)
             continue;
@@ -449,7 +477,8 @@ void ngb_touch_map(XBOX_INPUT_STATE *st)
         { LT, XBOX_BUTTON_LTRIGGER }, { RT, XBOX_BUTTON_RTRIGGER },
     };
     for (size_t i = 0; i < sizeof analog / sizeof analog[0]; i++)
-        if (s_down[analog[i].ctrl])
+        if (s_down[analog[i].ctrl] || (s_down[NINPO] && (analog[i].ctrl == BY || analog[i].ctrl == BB)) ||
+            (s_down[WINDJUMP] && (analog[i].ctrl == BX || analog[i].ctrl == BA)))
             st->Gamepad.bAnalogButtons[analog[i].button] = 255;
     if (s_down[LSTICK]) {
         st->Gamepad.sThumbLX = (SHORT)(s_stick[0][0] * 32767);
@@ -803,6 +832,8 @@ static void draw_idle(void)
     float u = (float)s_h;
     memset(s_px, 0, sizeof(uint32_t) * (size_t)s_w * s_h);
     for (int i = 0; i < NCTRL; i++) {
+        if (!shown(i))
+            continue;
         const Ctrl *c = &s_ctrl[i];
         Place at = place_at(c, d_aspect, s_art == ART_STANDIN, d_layout);
         float cx = at.x * u, cy = at.y * u, r = at.r * u;
@@ -811,8 +842,8 @@ static void draw_idle(void)
         else if (c->kind == DPAD)
             draw_piece("dpad", cx, cy, 2.2f * r, 2.2f * r, IDLE);
         else   /* (the pieces fill about four fifths of their picture: drawn a little over the button's size) */
-            draw_button(c, false, cx, cy, r, IDLE + (i >= BA && i <= BY ? 0.2f : 0.1f));   /* (the face buttons
-                                                       a little less see-through: X and A were faint) */
+            /* (the face buttons, and the two that press two, a little less see-through: X and A were faint) */
+            draw_button(c, false, cx, cy, r, IDLE + ((i >= BA && i <= BY) || i == NINPO || i == WINDJUMP ? 0.2f : 0.1f));
     }
 }
 
@@ -873,6 +904,8 @@ static void draw_all(void)
     s_cvrec.n = 0;
     s_rec = &s_cvrec;
     for (int i = 0; i < NCTRL; i++) {
+        if (!shown(i))
+            continue;
         const Ctrl *c = &s_ctrl[i];
         Place at = place_at(c, d_aspect, s_art == ART_STANDIN, d_layout);
         float cx = at.x * u, cy = at.y * u, r = at.r * u;

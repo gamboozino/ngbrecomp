@@ -2047,7 +2047,8 @@ static double spot(double x, double y, double cx, double cy, double rx, double r
 
 /* The Black button (Start and Back's ball too) on TN x TN at scale s: a black glossy ball in the game's white
  * glow, its rim light, its glint and the dimmer reflections where the icon has them */
-static Im ball_black_n(int s, int marked, int n)   /* marked: Start's and Back's, the glint above the triangle; n
+static Im ball_black_n(int s, int marked, int n)   /* marked: Start's and Back's, the glint above the triangle (2:
+                                                    * Start's ball without its glint); n
                                                     * across, the ball in its middle */
 {
     const double gx = marked ? 0.4 : 1.0, gy = marked ? -4.3 : -2.75, gk = marked ? 0.7 : 1;
@@ -2065,9 +2066,11 @@ static Im ball_black_n(int s, int marked, int n)   /* marked: Start's and Back's
             v += 0.26 * exp(-1.3 * (pow((x + 2.6) / 2.3, 2) + pow((y - 3.9) / 1.2, 2)));
             if (!marked)
                 v += 0.4 * exp(-(pow(x + 1.9, 2) + pow(y + 0.9, 2)) / 0.3);
-            double e = hypot((x - gx) / (1.4 * gk), (y - gy) / (1.05 * gk));
-            v += 0.22 * exp(-e * e / 1.6);
-            v += (K.spec - v) * spot(x, y, gx, gy, 1.4 * gk, 1.05 * gk, 2, s);
+            if (marked != 2) {   /* (2: no glint, the HUD's crescent in it, #285) */
+                double e = hypot((x - gx) / (1.4 * gk), (y - gy) / (1.05 * gk));
+                v += 0.22 * exp(-e * e / 1.6);
+                v += (K.spec - v) * spot(x, y, gx, gy, 1.4 * gk, 1.05 * gk, 2, s);
+            }
             double edge = clip01((n / 2.0 / s - r) / 2.0);
             float *p = PX(o, X, Y);
             for (int c = 0; c < 3; c++)
@@ -2184,6 +2187,468 @@ static Im opacity_piece(void)
     ink(a, sh, black, 0, 0, 0.6f);
     ink(a, mk, k_ink, 0, 0, 1);
     return a;
+}
+
+/* ---- Two pieces made from the HUD's own art (#285): the buttons that press two at once. The HUD's icons
+ * (demo.afs: game.spr, read from the player's game files) are 32 pixels; as with the others, nothing here is an
+ * enlarged icon: their shapes are drawn again as coverage at the piece's size, and the colours and the light are
+ * measured from them.
+ *   X+A (the jump off a wall or an enemy): the Black button's ball without its glint, the HUD's wind-slash
+ *       crescent (sprite 58) in it: the white core an outline fitted to the icon's (four Beziers), the cyan glow
+ *       round it the icon's own, measured by distance from that outline.
+ *   Y+B (Ninpo): the HUD's Inferno orb (sprite 69) as a ball of the Black button's size in its glow: the orb's
+ *       light a quadratic fitted to it, the flame and its hollow outlines traced over the icon, drawn in the
+ *       icon's bands (orange, yellow, white round the hollow) with its colours by heat (green + blue), the Black
+ *       ball's glass laid over. ---- */
+
+int ngb_game_file_path(const char *archive, char *out, size_t n);   /* src/quick_ui.c (a mod's file first) */
+#pragma weak ngb_game_file_path
+
+static int s_hud_missing;   /* a HUD sprite not read: its piece a plain ball, so this start's pieces are not saved
+                             * (a later start, the file readable again, makes them properly); a sprite read but
+                             * not the HUD's 32-pixel icon (a mod's) gives the plain ball, saved */
+
+static uint32_t le32(const unsigned char *b) { return b[0] | b[1] << 8 | b[2] << 16 | (uint32_t)b[3] << 24; }
+
+static unsigned spread_bits(unsigned v, unsigned mask)
+{
+    unsigned r = 0;
+    for (unsigned bit = 1; mask; bit <<= 1) {
+        unsigned low = mask & -mask;
+        if (v & bit)
+            r |= low;
+        mask &= mask - 1;
+    }
+    return r;
+}
+
+/* game.spr's sprite i (an 8-bit palette texture, swizzled), cut to its rectangle; w 0 when it cannot be read */
+static Im hud_sprite(int i)
+{
+    Im none = { 0, 0, NULL };
+    char path[4200];
+    if (!ngb_game_file_path || !ngb_game_file_path("demo.afs", path, sizeof path))
+        return none;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return none;
+    unsigned char h[8], *table = NULL, *names = NULL, *b = NULL;
+    Im out = none;
+    unsigned n;
+    if (fread(h, 1, 8, f) != 8 || memcmp(h, "AFS\0", 4) || !(n = le32(h + 4)) || n > 4096)
+        goto done;
+    table = tmp((n + 1u) * 8u);
+    names = tmp(n * 48u);
+    if (fread(table, 8, n + 1u, f) != n + 1u || fseek(f, le32(table + n * 8u), SEEK_SET) || fread(names, 48, n, f) != n)
+        goto done;
+    for (unsigned k = 0; k < n; k++) {
+        if (strncmp((char *)names + k * 48u, "game.spr", 32))
+            continue;
+        unsigned off = le32(table + k * 8u), size = le32(table + k * 8u + 4);
+        if (size < 0x80 || size > 0x400000 || !(b = tmp(size)) || fseek(f, off, SEEK_SET) ||
+            fread(b, 1, size, f) != size || memcmp(b, "XPR0", 4))
+            break;
+        unsigned data = le32(b + 8), defs = le32(b + 0x10), res = 0x14u + defs;
+        if (defs % 24 || (unsigned)i >= defs / 24 || (uint64_t)defs + 0x14 > data || data > size)
+            break;
+        for (unsigned t = 0, tex = le32(b + 0x14 + i * 24 + 16); t < tex && res + 20 <= data; t++) {
+            res += 20;
+            if (res + 12 <= data && (le32(b + res) >> 16 & 7) == 3)
+                res += 12;
+        }
+        if (res + 32 > data || (le32(b + res) >> 16 & 7) != 4 || (le32(b + res + 20) >> 16 & 7) != 3)
+            break;
+        unsigned fmt = le32(b + res + 12), lw = fmt >> 20 & 15, lh = fmt >> 24 & 15;
+        unsigned toff = data + le32(b + res + 4), poff = data + le32(b + res + 24);
+        if ((fmt >> 8 & 255) != 0x0B || lw > 10 || lh > 10 || (uint64_t)toff + (1u << (lw + lh)) > size ||
+            (uint64_t)poff + 1024 > size)
+            break;
+        int w = 1 << lw, hh = 1 << lh;
+        unsigned mx = 0, my = 0, mask = 1;
+        for (unsigned bit = 1; bit < (unsigned)w || bit < (unsigned)hh; bit <<= 1) {
+            if (bit < (unsigned)w) { mx |= mask; mask <<= 1; }
+            if (bit < (unsigned)hh) { my |= mask; mask <<= 1; }
+        }
+        float uv[4];
+        memcpy(uv, b + 0x14 + i * 24, sizeof uv);
+        int c0[4], dim[4] = { w, hh, w, hh };
+        for (int q = 0; q < 4; q++)
+            c0[q] = (int)lround(uv[q] <= 1.01f ? uv[q] * dim[q] : uv[q]);
+        if (c0[0] < 0 || c0[1] < 0 || c0[2] > w || c0[3] > hh || c0[2] <= c0[0] || c0[3] <= c0[1])
+            break;
+        out = im_new(c0[2] - c0[0], c0[3] - c0[1]);
+        for (int y = 0; y < out.h; y++)
+            for (int x = 0; x < out.w; x++) {
+                unsigned at = spread_bits((unsigned)(x + c0[0]), mx) | spread_bits((unsigned)(y + c0[1]), my);
+                uint32_t c = le32(b + poff + b[toff + at] * 4u);
+                float *p = PX(out, x, y);
+                p[0] = (c >> 16 & 255) / 255.0f;
+                p[1] = (c >> 8 & 255) / 255.0f;
+                p[2] = (c & 255) / 255.0f;
+                p[3] = (c >> 24) / 255.0f;
+            }
+        break;
+    }
+done:
+    fclose(f);
+    return out;
+}
+
+/* Outlines, in icon pixels: a closed polygon, and the signed distance to it (positive inside) */
+typedef struct { double x[640], y[640]; int n; } Outline;
+
+static void ol_add(Outline *o, double x, double y)
+{
+    if (o->n < 640) {
+        o->x[o->n] = x;
+        o->y[o->n] = y;
+        o->n++;
+    }
+}
+
+static double ol_dist(const Outline *o, double px, double py)
+{
+    double d2 = 1e18;
+    int in = 0;
+    for (int i = 0; i < o->n; i++) {
+        int j = (i + 1) % o->n;
+        double x0 = o->x[i], y0 = o->y[i], ex = o->x[j] - x0, ey = o->y[j] - y0, l = ex * ex + ey * ey;
+        if (y0 != o->y[j] && ((y0 <= py) != (o->y[j] <= py)) && px < x0 + (py - y0) * ex / ey)
+            in ^= 1;
+        if (l < 1e-12)
+            continue;
+        double t = ((px - x0) * ex + (py - y0) * ey) / l;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        double dx = px - x0 - t * ex, dy = py - y0 - t * ey;
+        if (dx * dx + dy * dy < d2)
+            d2 = dx * dx + dy * dy;
+    }
+    return sqrt(d2) * (in ? 1 : -1);
+}
+
+/* A closed spline through nodes (x, y, sharp): Hermite, a smooth node's tangent half its neighbours' chord, a
+ * sharp one's half its own segment's (so the curve leaves a corner straight, without a hook) */
+static void ol_spline(Outline *o, const double (*nd)[3], int n, int per)
+{
+    for (int i = 0; i < n; i++) {
+        const double *p0 = nd[(i + n - 1) % n], *p1 = nd[i], *p2 = nd[(i + 1) % n], *p3 = nd[(i + 2) % n];
+        const double *a1 = p1[2] ? p1 : p0, *b1 = p2;   /* (each end's tangent: its own chord at a sharp node) */
+        const double *a2 = p1, *b2 = p2[2] ? p2 : p3;
+        double m1x = (b1[0] - a1[0]) * 0.5, m1y = (b1[1] - a1[1]) * 0.5;
+        double m2x = (b2[0] - a2[0]) * 0.5, m2y = (b2[1] - a2[1]) * 0.5;
+        for (int k = 0; k < per; k++) {
+            double t = (double)k / per, t2 = t * t, t3 = t2 * t;
+            double h0 = 2 * t3 - 3 * t2 + 1, h1 = t3 - 2 * t2 + t, h2 = -2 * t3 + 3 * t2, h3 = t3 - t2;
+            ol_add(o, h0 * p1[0] + h1 * m1x + h2 * p2[0] + h3 * m2x, h0 * p1[1] + h1 * m1y + h2 * p2[1] + h3 * m2y);
+        }
+    }
+}
+
+/* Piecewise linear through (xs, ys), clamped at its ends */
+static double lin(const double *xs, const double *ys, int n, double v)
+{
+    if (v <= xs[0])
+        return ys[0];
+    for (int i = 1; i < n; i++)
+        if (v <= xs[i])
+            return ys[i - 1] + (ys[i] - ys[i - 1]) * (v - xs[i - 1]) / (xs[i] - xs[i - 1]);
+    return ys[n - 1];
+}
+
+/* The crescent's white core, fitted to the icon's red channel (the glow has none): two sharp tips, the upper one a
+ * clean taper (the inner edge meets the outer at some 25 degrees) */
+static const double k_crescent[4][4][2] = {
+    { { 14.100, 6.825 }, { 10.920, 8.344 }, { 2.218, 13.967 }, { 2.846, 18.989 } },
+    { { 2.846, 18.989 }, { 3.711, 25.901 }, { 15.244, 25.211 }, { 22.396, 20.739 } },
+    { { 22.396, 20.739 }, { 15.773, 20.145 }, { 8.660, 15.345 }, { 9.858, 12.296 } },
+    { { 9.858, 12.296 }, { 10.730, 10.078 }, { 13.007, 8.127 }, { 14.100, 6.825 } },
+};
+
+/* The Inferno orb's flame and its hollow, traced over the icon: (x, y, 1 = a sharp node) */
+static const double k_flame[][3] = {
+    { 14.6, 26.5, 0 }, { 10.9, 25.5, 0 }, { 8.4, 22.8, 0 }, { 7.7, 19.6, 0 }, { 8.2, 16.4, 0 }, { 9.2, 12.6, 1 },
+    { 10.0, 15.2, 0 }, { 10.6, 17.4, 1 }, { 10.1, 13.6, 0 }, { 10.6, 10.8, 0 }, { 12.2, 8.2, 0 }, { 13.1, 5.0, 0 },
+    { 13.9, 1.0, 1 }, { 14.8, 4.2, 0 }, { 15.7, 6.5, 1 }, { 17.3, 5.3, 0 }, { 18.5, 3.0, 1 }, { 18.7, 6.2, 0 },
+    { 19.1, 9.0, 0 }, { 20.6, 11.2, 0 }, { 20.9, 14.0, 0 }, { 20.4, 18.4, 1 }, { 21.4, 15.5, 0 }, { 22.8, 12.3, 1 },
+    { 23.7, 16.0, 0 }, { 23.9, 19.5, 0 }, { 23.0, 22.8, 0 }, { 20.6, 25.2, 0 }, { 17.8, 26.3, 0 },
+};
+static const double k_hollow[][3] = {
+    { 13.9, 14.3, 1 }, { 15.5, 16.3, 0 }, { 16.6, 18.8, 0 }, { 16.8, 21.2, 0 }, { 16.1, 23.1, 0 }, { 14.7, 23.8, 0 },
+    { 13.5, 22.8, 0 }, { 13.1, 20.6, 0 }, { 13.3, 18.0, 0 }, { 13.7, 16.0, 0 },
+};
+
+#define WIND_S 8.2          /* the crescent: piece pixels an icon pixel */
+#define WIND_CX 13.0        /* (the icon point at the ball's middle) */
+#define WIND_CY 15.6
+#define WIND_DY 0.6         /* (and down, in ball units) */
+
+static Im windjump_piece(void)
+{
+    Im ic = hud_sprite(58), base = ball_black_n(BALL_S, 2, TN);
+    if (!ic.w)
+        s_hud_missing = 1;
+    if (!ic.w || ic.w > 64 || ic.h > 64)   /* (the outline fits the 25 x 32 icon) */
+        return base;
+    Outline *o = tmp(sizeof *o);
+    for (int s = 0; s < 4; s++)
+        for (int k = 0; k < 48; k++) {
+            const double(*q)[2] = k_crescent[s];
+            double t = k / 48.0, u = 1 - t;
+            ol_add(o, u * u * u * q[0][0] + 3 * u * u * t * q[1][0] + 3 * u * t * t * q[2][0] + t * t * t * q[3][0],
+                   u * u * u * q[0][1] + 3 * u * u * t * q[1][1] + 3 * u * t * t * q[2][1] + t * t * t * q[3][1]);
+        }
+    /* the glow: its alpha by distance out from the white's edge (0 to 6 icon pixels, in halves), its colour the
+     * median of the icon's glow */
+    double xs[13], prof[13], sw[13] = { 0 }, sa[13] = { 0 }, col[3];
+    float *ch[3];
+    int ng = 0;
+    for (int c = 0; c < 3; c++)
+        ch[c] = tmp(sizeof(float) * (size_t)ic.w * ic.h);
+    for (int y = 0; y < ic.h; y++)
+        for (int x = 0; x < ic.w; x++) {
+            const float *p = PX(ic, x, y);
+            double d = ol_dist(o, x + 0.5, y + 0.5);
+            for (int i = 0; i < 13; i++) {
+                double w = 1 - fabs(-d - 0.5 * i) / 0.5;
+                if (w > 0 && d < 0.3) {
+                    sw[i] += w;
+                    sa[i] += p[3] * w;
+                }
+            }
+            if (p[3] > 0.5 && d < -1.2) {
+                for (int c = 0; c < 3; c++)
+                    ch[c][ng] = p[c];
+                ng++;
+            }
+        }
+    for (int i = 0; i < 13; i++) {
+        xs[i] = 0.5 * i;
+        prof[i] = i == 12 || sw[i] <= 0 ? 0 : sa[i] / sw[i];
+    }
+    for (int c = 0; c < 3; c++) {
+        if (ng) {
+            qsort(ch[c], ng, sizeof(float), fcmp);
+            col[c] = ng % 2 ? ch[c][ng / 2] : (ch[c][ng / 2 - 1] + ch[c][ng / 2]) / 2;
+        } else {
+            col[c] = c ? 0.66 + 0.34 * (c == 2) : 0;   /* (the icon's cyan) */
+        }
+    }
+    Im out = im_copy(base);
+    for (int Y = 0; Y < TN; Y++)
+        for (int X = 0; X < TN; X++) {
+            double x = (X + 0.5 - TN / 2.0) / BALL_S, y = (Y + 0.5 - TN / 2.0) / BALL_S;
+            double circ = clip01((BALL_R - hypot(x, y)) * BALL_S + 0.5);
+            if (circ <= 0)
+                continue;
+            double ix = (X + 0.5 - TN / 2.0) / WIND_S + WIND_CX;
+            double iy = (Y + 0.5 - TN / 2.0 - WIND_DY * BALL_S) / WIND_S + WIND_CY;
+            double d = ol_dist(o, ix, iy), core = clip01(d * WIND_S + 0.5);
+            double glow = d > 0 ? 1 : lin(xs, prof, 13, -d) * circ;
+            float *p = PX(out, X, Y);
+            const float *bp = PX(base, X, Y);
+            for (int c = 0; c < 3; c++) {
+                double v = bp[c] * (1 - glow) + col[c] * glow;
+                v = v * (1 - core) + core;
+                p[c] = (float)(v * circ + bp[c] * (1 - circ));
+            }
+        }
+    return out;
+}
+
+/* Solves the 6 x 6 system a x = b in place (Gaussian elimination, partial pivoting); 0 when singular */
+static int solve6(double a[6][6], double b[6])
+{
+    for (int c = 0; c < 6; c++) {
+        int pv = c;
+        for (int r = c + 1; r < 6; r++)
+            if (fabs(a[r][c]) > fabs(a[pv][c]))
+                pv = r;
+        if (fabs(a[pv][c]) < 1e-12)
+            return 0;
+        for (int k = 0; k < 6; k++) {
+            double t = a[c][k];
+            a[c][k] = a[pv][k];
+            a[pv][k] = t;
+        }
+        double t = b[c];
+        b[c] = b[pv];
+        b[pv] = t;
+        for (int r = 0; r < 6; r++) {
+            if (r == c)
+                continue;
+            double f = a[r][c] / a[c][c];
+            for (int k = c; k < 6; k++)
+                a[r][k] -= f * a[c][k];
+            b[r] -= f * b[c];
+        }
+    }
+    for (int c = 0; c < 6; c++)
+        b[c] /= a[c][c];
+    return 1;
+}
+
+static Im ninpo_piece(void)
+{
+    Im ic = hud_sprite(69);
+    if (!ic.w)
+        s_hud_missing = 1;
+    if (!ic.w || ic.h > 64 || ic.w > 64)
+        return ball_black_n(BALL_S, 2, TN);
+    balls_init();
+    Outline *sil = tmp(sizeof *sil), *hole = tmp(sizeof *hole);
+    ol_spline(sil, k_flame, (int)(sizeof k_flame / sizeof k_flame[0]), 16);
+    ol_spline(hole, k_hollow, (int)(sizeof k_hollow / sizeof k_hollow[0]), 16);
+    /* the orb: its middle and radius from the icon's coverage */
+    double sa = 0, sx = 0, sy = 0;
+    for (int y = 0; y < ic.h; y++)
+        for (int x = 0; x < ic.w; x++) {
+            double a = PX(ic, x, y)[3];
+            sa += a;
+            sx += a * (x + 0.5);
+            sy += a * (y + 0.5);
+        }
+    if (sa <= 0)
+        return ball_black_n(BALL_S, 2, TN);
+    double cx = sx / sa, cy = sy / sa, R = sqrt(sa / M_PI), S = BALL_R * BALL_S / R;
+    /* its light: each channel a quadratic in u, v (disc radii) over the orb away from the flame and the rim; the
+     * fire's colours by heat (green + blue) in 12 steps; the heat each row reaches (its 85th percentile) */
+    double ata[6][6] = { { 0 } }, atb[3][6] = { { 0 } }, coef[3][6];
+    double hs[12], ramp[12][3] = { { 0 } }, rw[12] = { 0 }, rows[64], top[64];
+    int have[64] = { 0 };
+    for (int j = 0; j < 12; j++)
+        hs[j] = 0.3 + 0.15 * j;
+    for (int y = 0; y < ic.h; y++) {
+        float heats[64];
+        int nh = 0;
+        for (int x = 0; x < ic.w; x++) {
+            const float *p = PX(ic, x, y);
+            double X = x + 0.5, Yy = y + 0.5, dS = ol_dist(sil, X, Yy), heat = p[1] + p[2];
+            if (p[3] > 0.98 && dS < -1.2 && hypot(X - cx, Yy - cy) < R - 1.0) {
+                double u = (X - cx) / R, v = (Yy - cy) / R, t[6] = { 1, u, v, u * u, u * v, v * v };
+                for (int r = 0; r < 6; r++) {
+                    for (int k = 0; k < 6; k++)
+                        ata[r][k] += t[r] * t[k];
+                    for (int c = 0; c < 3; c++)
+                        atb[c][r] += t[r] * p[c];
+                }
+            }
+            if (dS > 0.3 && p[1] > 0.3) {
+                for (int j = 0; j < 12; j++) {
+                    double w = 1 - fabs(heat - hs[j]) / 0.15;
+                    if (w > 0) {
+                        rw[j] += w;
+                        for (int c = 0; c < 3; c++)
+                            ramp[j][c] += p[c] * w;
+                    }
+                }
+                heats[nh++] = (float)heat;
+            }
+        }
+        rows[y] = y + 0.5;
+        if (nh > 1) {
+            qsort(heats, nh, sizeof(float), fcmp);
+            double at = 0.85 * (nh - 1);
+            int i0 = (int)at;
+            top[y] = heats[i0] + (i0 + 1 < nh ? (heats[i0 + 1] - heats[i0]) * (at - i0) : 0);
+            have[y] = 1;
+        }
+    }
+    for (int c = 0; c < 3; c++) {
+        double a[6][6];
+        memcpy(a, ata, sizeof a);
+        memcpy(coef[c], atb[c], sizeof coef[c]);
+        if (!solve6(a, coef[c]))
+            return ball_black_n(BALL_S, 2, TN);
+    }
+    for (int j = 0; j < 12; j++)
+        for (int c = 0; c < 3; c++)
+            ramp[j][c] /= rw[j] > 1e-6 ? rw[j] : 1e-6;
+    {   /* the rows without flame: the nearest rows' heat between them, held beyond; then smoothed
+         * (0.1 0.2 0.4 0.2 0.1) */
+        int first = -1, last = -1;
+        for (int y = 0; y < ic.h; y++)
+            if (have[y]) {
+                if (first < 0)
+                    first = y;
+                last = y;
+            }
+        if (first < 0)
+            return ball_black_n(BALL_S, 2, TN);
+        for (int y = 0; y < ic.h; y++) {
+            if (have[y])
+                continue;
+            if (y < first)
+                top[y] = top[first];
+            else if (y > last)
+                top[y] = top[last];
+            else {
+                int a = y - 1, b = y + 1;
+                while (!have[a])
+                    a--;
+                while (!have[b])
+                    b++;
+                top[y] = top[a] + (top[b] - top[a]) * (y - a) / (double)(b - a);
+            }
+        }
+        double sm[64];
+        static const double k5[5] = { 0.1, 0.2, 0.4, 0.2, 0.1 };
+        for (int y = 0; y < ic.h; y++) {
+            sm[y] = 0;
+            for (int k = -2; k <= 2; k++)
+                sm[y] += k5[k + 2] * top[y + k < 0 ? 0 : y + k >= ic.h ? ic.h - 1 : y + k];
+        }
+        memcpy(top, sm, sizeof(double) * ic.h);
+    }
+    static const double myx[4] = { 2, 5, 8, 12 }, myv[4] = { 2.0, 1.3, 0.8, 0.55 };
+    static const double mwx[3] = { 11, 14, 19 }, mwv[3] = { 3.6, 2.0, 1.0 };
+    Im o = im_new(TN, TN);
+    for (int Y = 0; Y < TN; Y++)
+        for (int X = 0; X < TN; X++) {
+            double x = (X + 0.5 - TN / 2.0) / BALL_S, y = (Y + 0.5 - TN / 2.0) / BALL_S, r = hypot(x, y);
+            double circ = clip01((BALL_R - r) * BALL_S + 0.5), rgb[3] = { 1, 1, 1 };
+            if (circ > 0) {
+                double u = x / BALL_R, v = y / BALL_R, t6[6] = { 1, u, v, u * u, u * v, v * v }, disc[3];
+                double fall = 1 - 0.22 * pow(clip01((r - 4.6) / 1.8), 2);   /* (a ball's edge falling off) */
+                for (int c = 0; c < 3; c++) {
+                    double s = 0;
+                    for (int k = 0; k < 6; k++)
+                        s += coef[c][k] * t6[k];
+                    disc[c] = clip01(s) * fall;
+                }
+                double ix = u * R + cx, iy = v * R + cy, dS = ol_dist(sil, ix, iy), dH = ol_dist(hole, ix, iy);
+                double cov = clip01(fmin(dS, -dH) * S + 0.5), din = fmin(dS, -dH * 2.5);
+                double tp = lin(rows, top, ic.h, iy);
+                /* the bands, each a flame inside the last, how far in each starts growing up the flame */
+                double my = lin(myx, myv, 4, iy), mw = lin(mwx, mwv, 3, iy) + (iy < 11 ? (11 - iy) * 2 : 0);
+                double by = clip01((din - my) * S / 1.6 + 0.5), bw = clip01((din - mw) * S / 1.6 + 0.5);
+                double t = clip01((iy - 2) / 22);
+                double heat = (0.42 + 0.2 * t) * (1 - by) + (0.82 + 0.25 * t) * by;
+                heat = heat * (1 - bw) + (1.55 + 0.4 * clip01((din - mw) / 1.2)) * bw;
+                heat = fmin(heat, fmax(tp * 1.05, 0.42));                  /* (no hotter than the icon's row) */
+                double glow = 0.30 * exp(fmin(dS, 0) / 1.0) * (1 - cov);  /* (the fire's light on the orb) */
+                double ang = pymod360(atan2(y, x) * 180 / M_PI), ft = ang / 5, fl = floor(ft), ff = ft - fl;
+                int i0 = ((int)fl) % 72;
+                double rim = K.rim[i0] * (1 - ff) + K.rim[(i0 + 1) % 72] * ff;
+                double gl = rim * 1.25 * pow(clip01((r - 4.9) / 1.5), 2.2);
+                gl += 0.3 * exp(-pow((r - 4.7) / 0.42, 2)) * pow(clip01(1 - angle_off(ang, 212) / 34), 1.3);
+                gl += 0.26 * exp(-1.3 * (pow((x + 2.6) / 2.3, 2) + pow((y - 3.9) / 1.2, 2)));
+                for (int c = 0; c < 3; c++) {
+                    double ry[12];
+                    for (int j = 0; j < 12; j++)
+                        ry[j] = ramp[j][c];
+                    double vv = disc[c] + (ramp[2][c] - disc[c]) * glow;
+                    vv = vv * (1 - cov) + lin(hs, ry, 12, heat) * cov;
+                    vv += (1 - vv) * clip01(gl * 0.8);                     /* (the Black ball's glass) */
+                    rgb[c] = clip01(vv) * circ + 1.0 * (1 - circ);
+                }
+            }
+            double edge = clip01((TN / 2.0 / BALL_S - r) / 2.0);
+            float *p = PX(o, X, Y);
+            for (int c = 0; c < 3; c++)
+                p[c] = (float)rgb[c];
+            p[3] = (float)fmax(circ, ball_glow(r) * (1 - circ) * edge);
+        }
+    return o;
 }
 
 /* The L / R plate without its letter, w x h at scale s: the game's face and its two-step bevels (their greys
@@ -2635,7 +3100,7 @@ static const char *const k_touch[] = {
     "button_a_lit", "button_b_lit", "button_x_lit", "button_y_lit", "button_black_lit", "button_white_lit",
     "trigger_l_lit", "trigger_r_lit", "back_lit", "start_lit", "click_l_lit", "click_r_lit", "nub_lit",
     "pad", "pad_lit", "dpad", "dpad_north_lit", "dpad_south_lit", "dpad_west_lit", "dpad_east_lit",
-    "swap", "swap_lit", "opacity", "opacity_lit",
+    "swap", "swap_lit", "opacity", "opacity_lit", "windjump", "windjump_lit", "ninpo", "ninpo_lit",
 };
 #define TOUCH_N ((int)(sizeof k_touch / sizeof k_touch[0]))
 static NgbPic s_touch[TOUCH_N];
@@ -2693,11 +3158,11 @@ static void build_touch(void)
         s_touch[28 + l] = to_pic(dpad_arm(l));
         tmp_release();
     }
-    for (int k = 0; k < 2; k++) {   /* the layout switch and the opacity button, held as Back is */
-        Im base = k ? opacity_piece() : swap_piece(), lit;
+    for (int k = 0; k < 4; k++) {   /* the layout switch, the opacity button, X+A and Ninpo: held as Back is */
+        Im base = k == 0 ? swap_piece() : k == 1 ? opacity_piece() : k == 2 ? windjump_piece() : ninpo_piece(), lit;
         s_touch[33 + 2 * k] = to_pic(base);
         lit = im_copy(base);
-        double lim = BALL_R * SMALL_S;
+        double lim = BALL_R * (k < 2 ? SMALL_S : BALL_S);
         for (int y = 0; y < TN; y++)
             for (int x = 0; x < TN; x++) {
                 float *p = PX(lit, x, y);
@@ -2815,7 +3280,7 @@ static void dump_touch(const char *dir)
  * them from its first frame, before the game's textures are read, and does not make them again. version.txt,
  * written last, says which drawing of them they are; another (or none) and they are made and saved again. */
 
-#define TOUCH_ART_VERSION 7   /* raised whenever the pieces are drawn differently (and each release redraws them) */
+#define TOUCH_ART_VERSION 8   /* raised whenever the pieces are drawn differently (and each release redraws them) */
 
 unsigned char *stbi_load_from_memory(const unsigned char *buf, int len, int *x, int *y, int *comp, int req);
 void stbi_image_free(void *p);
@@ -2955,7 +3420,7 @@ static void *touch_thread(void *arg)
     (void)arg;
     build_touch();
     __atomic_store_n(&s_touch_ready, 1, __ATOMIC_RELEASE);
-    if (s_touch_dir[0] && !__atomic_load_n(&s_touch_saved_ok, __ATOMIC_ACQUIRE))
+    if (s_touch_dir[0] && !__atomic_load_n(&s_touch_saved_ok, __ATOMIC_ACQUIRE) && !s_hud_missing)
         save_touch();
     const char *dir = getenv("NGB_PROMPT_DUMP");
     if (dir && *dir)
